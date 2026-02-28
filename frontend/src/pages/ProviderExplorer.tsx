@@ -1,0 +1,596 @@
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { useNavigate } from 'react-router-dom'
+import { api } from '../lib/api'
+import RiskScoreBadge from '../components/RiskScoreBadge'
+
+function fmt(v: number) {
+  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
+  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
+  return `$${v}`
+}
+
+type SortDir = 'asc' | 'desc'
+
+// ── Column filter state types ────────────────────────────────────────────────
+
+interface RangeFilter { min: string; max: string }
+
+interface ColFilters {
+  states:    string[]   // multi-select
+  cities:    string[]   // multi-select
+  flag_counts: string[] // multi-select ("0","1","2","3+")
+  risk:      RangeFilter
+  total_paid: RangeFilter
+  total_claims: RangeFilter
+  active_months: RangeFilter
+}
+
+const EMPTY_FILTERS: ColFilters = {
+  states: [], cities: [], flag_counts: [],
+  risk: { min: '', max: '' },
+  total_paid: { min: '', max: '' },
+  total_claims: { min: '', max: '' },
+  active_months: { min: '', max: '' },
+}
+
+function hasFilter(f: ColFilters): boolean {
+  return (
+    f.states.length > 0 || f.cities.length > 0 || f.flag_counts.length > 0 ||
+    !!f.risk.min || !!f.risk.max ||
+    !!f.total_paid.min || !!f.total_paid.max ||
+    !!f.total_claims.min || !!f.total_claims.max ||
+    !!f.active_months.min || !!f.active_months.max
+  )
+}
+
+function colHasFilter(col: string, f: ColFilters): boolean {
+  switch (col) {
+    case 'state':         return f.states.length > 0
+    case 'city':          return f.cities.length > 0
+    case 'flag_count':    return f.flag_counts.length > 0
+    case 'risk_score':    return !!f.risk.min || !!f.risk.max
+    case 'total_paid':    return !!f.total_paid.min || !!f.total_paid.max
+    case 'total_claims':  return !!f.total_claims.min || !!f.total_claims.max
+    case 'active_months': return !!f.active_months.min || !!f.active_months.max
+    default:              return false
+  }
+}
+
+// ── Filter dropdown component ─────────────────────────────────────────────────
+
+function CheckboxList({
+  options,
+  selected,
+  onChange,
+}: {
+  options: string[]
+  selected: string[]
+  onChange: (v: string[]) => void
+}) {
+  const [search, setSearch] = useState('')
+  const visible = options.filter(o => o.toLowerCase().includes(search.toLowerCase()))
+  const toggle = (v: string) =>
+    onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v])
+
+  return (
+    <div className="space-y-1">
+      {options.length > 8 && (
+        <input
+          className="w-full bg-gray-700 text-white text-xs px-2 py-1 rounded border border-gray-600 mb-1"
+          placeholder="Search…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          onClick={e => e.stopPropagation()}
+        />
+      )}
+      <div className="max-h-48 overflow-y-auto space-y-0.5">
+        {visible.map(opt => (
+          <label key={opt} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-gray-700 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={selected.includes(opt)}
+              onChange={() => toggle(opt)}
+              className="accent-blue-500"
+            />
+            <span className="text-xs text-gray-200">{opt}</span>
+          </label>
+        ))}
+        {visible.length === 0 && (
+          <p className="text-xs text-gray-500 px-1">No matches</p>
+        )}
+      </div>
+      {selected.length > 0 && (
+        <button
+          onClick={() => onChange([])}
+          className="text-xs text-red-400 hover:text-red-300 mt-1"
+        >
+          Clear ({selected.length})
+        </button>
+      )}
+    </div>
+  )
+}
+
+function RangeInputs({
+  value,
+  onChange,
+  prefix = '',
+}: {
+  value: RangeFilter
+  onChange: (v: RangeFilter) => void
+  prefix?: string
+}) {
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-gray-500 w-7">Min</span>
+        <input
+          type="number"
+          className="flex-1 bg-gray-700 text-white text-xs px-2 py-1 rounded border border-gray-600"
+          placeholder={prefix ? `${prefix}0` : '0'}
+          value={value.min}
+          onChange={e => onChange({ ...value, min: e.target.value })}
+          onClick={e => e.stopPropagation()}
+        />
+      </div>
+      <div className="flex items-center gap-1.5">
+        <span className="text-xs text-gray-500 w-7">Max</span>
+        <input
+          type="number"
+          className="flex-1 bg-gray-700 text-white text-xs px-2 py-1 rounded border border-gray-600"
+          placeholder="∞"
+          value={value.max}
+          onChange={e => onChange({ ...value, max: e.target.value })}
+          onClick={e => e.stopPropagation()}
+        />
+      </div>
+      {(value.min || value.max) && (
+        <button
+          onClick={() => onChange({ min: '', max: '' })}
+          className="text-xs text-red-400 hover:text-red-300"
+        >
+          Clear
+        </button>
+      )}
+    </div>
+  )
+}
+
+interface DropdownProps {
+  colKey: string
+  isOpen: boolean
+  onClose: () => void
+  filters: ColFilters
+  onFiltersChange: (f: ColFilters) => void
+  facets: { states: string[]; cities: string[]; flag_counts: number[]; active_months: number[] } | undefined
+  anchorRef: React.RefObject<HTMLButtonElement>
+}
+
+function FilterDropdown({ colKey, isOpen, onClose, filters, onFiltersChange, facets, anchorRef }: DropdownProps) {
+  const panelRef = useRef<HTMLDivElement>(null)
+  const [pos, setPos] = useState({ top: 0, left: 0 })
+
+  useEffect(() => {
+    if (isOpen && anchorRef.current) {
+      const rect = anchorRef.current.getBoundingClientRect()
+      setPos({ top: rect.bottom + 4, left: rect.left })
+    }
+  }, [isOpen, anchorRef])
+
+  useEffect(() => {
+    if (!isOpen) return
+    const handler = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node) &&
+          anchorRef.current && !anchorRef.current.contains(e.target as Node)) {
+        onClose()
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [isOpen, onClose, anchorRef])
+
+  if (!isOpen) return null
+
+  const FLAG_OPTIONS = ['0', '1', '2', '3+']
+
+  const content = (() => {
+    switch (colKey) {
+      case 'state':
+        return (
+          <CheckboxList
+            options={facets?.states ?? []}
+            selected={filters.states}
+            onChange={v => onFiltersChange({ ...filters, states: v })}
+          />
+        )
+      case 'city':
+        return (
+          <CheckboxList
+            options={facets?.cities ?? []}
+            selected={filters.cities}
+            onChange={v => onFiltersChange({ ...filters, cities: v })}
+          />
+        )
+      case 'flag_count':
+        return (
+          <CheckboxList
+            options={FLAG_OPTIONS}
+            selected={filters.flag_counts}
+            onChange={v => onFiltersChange({ ...filters, flag_counts: v })}
+          />
+        )
+      case 'risk_score':
+        return <RangeInputs value={filters.risk} onChange={v => onFiltersChange({ ...filters, risk: v })} />
+      case 'total_paid':
+        return <RangeInputs value={filters.total_paid} onChange={v => onFiltersChange({ ...filters, total_paid: v })} prefix="$" />
+      case 'total_claims':
+        return <RangeInputs value={filters.total_claims} onChange={v => onFiltersChange({ ...filters, total_claims: v })} />
+      case 'active_months':
+        return <RangeInputs value={filters.active_months} onChange={v => onFiltersChange({ ...filters, active_months: v })} />
+      default:
+        return <p className="text-xs text-gray-500">No filter for this column</p>
+    }
+  })()
+
+  return (
+    <div
+      ref={panelRef}
+      className="fixed z-50 bg-gray-800 border border-gray-600 rounded-lg shadow-xl p-3 min-w-[180px]"
+      style={{ top: pos.top, left: pos.left }}
+      onClick={e => e.stopPropagation()}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <span className="text-xs font-semibold text-gray-300 uppercase tracking-wider">Filter</span>
+        <button onClick={onClose} className="text-gray-500 hover:text-gray-300 text-xs">✕</button>
+      </div>
+      {content}
+    </div>
+  )
+}
+
+// ── Column header cell ────────────────────────────────────────────────────────
+
+interface ColDef {
+  key: string
+  label: string
+  filterable?: boolean
+}
+
+const STATUS_COLORS: Record<string, string> = {
+  pending:        'text-yellow-400 bg-yellow-400/10',
+  reviewed:       'text-blue-400 bg-blue-400/10',
+  confirmed_fraud:'text-red-400 bg-red-400/10',
+  dismissed:      'text-gray-500 bg-gray-500/10',
+}
+const STATUS_LABELS: Record<string, string> = {
+  pending: 'Pending', reviewed: 'Reviewed', confirmed_fraud: 'Fraud', dismissed: 'Dismissed',
+}
+
+const COLUMNS: ColDef[] = [
+  { key: 'npi',                 label: 'NPI' },
+  { key: 'provider_name',       label: 'Name' },
+  { key: 'state',               label: 'State',        filterable: true },
+  { key: 'city',                label: 'City',         filterable: true },
+  { key: 'total_paid',          label: 'Total Paid',   filterable: true },
+  { key: 'total_claims',        label: 'Claims',       filterable: true },
+  { key: 'total_beneficiaries', label: 'Beneficiaries' },
+  { key: 'active_months',       label: 'Mo. Active',   filterable: true },
+  { key: 'risk_score',          label: 'Risk Score',   filterable: true },
+  { key: 'flag_count',          label: 'Flags',        filterable: true },
+  { key: 'review_status',       label: 'Review' },
+]
+
+function ColHeader({
+  col,
+  sortBy,
+  sortDir,
+  onSort,
+  openFilter,
+  activeFilter,
+  filters,
+  onFiltersChange,
+  facets,
+}: {
+  col: ColDef
+  sortBy: string
+  sortDir: SortDir
+  onSort: (key: string) => void
+  openFilter: string | null
+  activeFilter: boolean
+  filters: ColFilters
+  onFiltersChange: (f: ColFilters) => void
+  facets: any
+}) {
+  const btnRef = useRef<HTMLButtonElement>(null!)
+  const [open, setOpen] = useState(false)
+
+  // sync with parent open state
+  useEffect(() => {
+    setOpen(openFilter === col.key)
+  }, [openFilter, col.key])
+
+  const isSorted = sortBy === col.key
+
+  return (
+    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider select-none">
+      <div className="flex items-center gap-1">
+        <button
+          className="flex items-center gap-0.5 hover:text-gray-300 transition-colors"
+          onClick={() => onSort(col.key)}
+        >
+          {col.label}
+          {isSorted
+            ? <span className="text-blue-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>
+            : <span className="text-gray-700 ml-0.5">⇅</span>
+          }
+        </button>
+        {col.filterable && (
+          <>
+            <button
+              ref={btnRef}
+              onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+              title="Filter"
+              className={`ml-0.5 text-xs transition-colors ${activeFilter ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
+            >
+              {activeFilter ? '⬛' : '▽'}
+            </button>
+            <FilterDropdown
+              colKey={col.key}
+              isOpen={open}
+              onClose={() => setOpen(false)}
+              filters={filters}
+              onFiltersChange={onFiltersChange}
+              facets={facets}
+              anchorRef={btnRef}
+            />
+          </>
+        )}
+      </div>
+    </th>
+  )
+}
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+const LIMIT = 50
+
+export default function ProviderExplorer() {
+  const navigate = useNavigate()
+  const [search, setSearch]       = useState('')
+  const [page, setPage]           = useState(1)
+  const [sortBy, setSortBy]       = useState('risk_score')
+  const [sortDir, setSortDir]     = useState<SortDir>('desc')
+  const [filters, setFilters]     = useState<ColFilters>(EMPTY_FILTERS)
+  const [openFilter, setOpenFilter] = useState<string | null>(null)
+  const [focusedRow, setFocusedRow] = useState<number>(-1)
+
+  const { data: facets } = useQuery({
+    queryKey: ['provider-facets'],
+    queryFn: api.providerFacets,
+    staleTime: 30_000,
+  })
+
+  // Build query params from filter state
+  const queryParams = useCallback(() => {
+    const p: Record<string, string | number> = {
+      sort_by:  sortBy,
+      sort_dir: sortDir,
+      page,
+      limit:    LIMIT,
+    }
+    if (search)                    p.search = search
+    if (filters.states.length)     p.states = filters.states.join(',')
+    if (filters.cities.length)     p.cities = filters.cities.join(',')
+    if (filters.flag_counts.length) p.flag_counts = filters.flag_counts.join(',')
+    if (filters.risk.min)          p.min_risk = Number(filters.risk.min)
+    if (filters.risk.max)          p.max_risk = Number(filters.risk.max)
+    if (filters.total_paid.min)    p.min_paid = Number(filters.total_paid.min)
+    if (filters.total_paid.max)    p.max_paid = Number(filters.total_paid.max)
+    if (filters.total_claims.min)  p.min_claims = Number(filters.total_claims.min)
+    if (filters.total_claims.max)  p.max_claims = Number(filters.total_claims.max)
+    if (filters.active_months.min) p.min_months = Number(filters.active_months.min)
+    if (filters.active_months.max) p.max_months = Number(filters.active_months.max)
+    return p
+  }, [search, sortBy, sortDir, page, filters])
+
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['providers', queryParams()],
+    queryFn: () => api.providers(queryParams() as any),
+    refetchInterval: 30000,
+  })
+
+  function handleSort(key: string) {
+    if (sortBy === key) {
+      setSortDir(d => d === 'desc' ? 'asc' : 'desc')
+    } else {
+      setSortBy(key)
+      setSortDir('desc')
+    }
+    setPage(1)
+  }
+
+  function handleFiltersChange(f: ColFilters) {
+    setFilters(f)
+    setPage(1)
+  }
+
+  function handleClearAll() {
+    setSearch('')
+    setFilters(EMPTY_FILTERS)
+    setPage(1)
+  }
+
+  const providers  = data?.providers ?? []
+  const total      = data?.total ?? 0
+  const totalPages = total > 0 ? Math.ceil(total / LIMIT) : 1
+  const anyFilter  = !!search || hasFilter(filters)
+
+  // Keyboard navigation: j/k to move, Enter to open
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
+      if (e.key === 'j' || e.key === 'ArrowDown') {
+        e.preventDefault()
+        setFocusedRow(r => Math.min(providers.length - 1, r + 1))
+      } else if (e.key === 'k' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        setFocusedRow(r => Math.max(0, r - 1))
+      } else if (e.key === 'Enter' && focusedRow >= 0 && focusedRow < providers.length) {
+        navigate(`/providers/${providers[focusedRow].npi}`)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [providers, focusedRow, navigate])
+
+  return (
+    <div className="space-y-4" onClick={() => setOpenFilter(null)}>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold text-white">Provider Explorer</h1>
+        {anyFilter && (
+          <button onClick={handleClearAll} className="text-sm text-red-400 hover:text-red-300">
+            Clear all filters
+          </button>
+        )}
+      </div>
+
+      {/* Search bar */}
+      <div className="card flex gap-3 items-center py-3">
+        <input
+          className="input flex-1 max-w-sm"
+          placeholder="Search by NPI or provider name…"
+          value={search}
+          onChange={e => { setSearch(e.target.value); setPage(1) }}
+        />
+        {anyFilter && (
+          <span className="text-xs text-blue-400 font-medium">
+            {total.toLocaleString()} results after filters
+          </span>
+        )}
+        <span className="ml-auto text-xs text-gray-600 hidden sm:block">
+          j/k or ↑/↓ to navigate · Enter to open
+        </span>
+      </div>
+
+      {/* Table */}
+      <div className="card p-0 overflow-x-auto">
+        <table className="w-full text-sm whitespace-nowrap">
+          <thead>
+            <tr className="border-b border-gray-800 bg-gray-900/80">
+              {COLUMNS.map(col => (
+                <ColHeader
+                  key={col.key}
+                  col={col}
+                  sortBy={sortBy}
+                  sortDir={sortDir}
+                  onSort={handleSort}
+                  openFilter={openFilter}
+                  activeFilter={colHasFilter(col.key, filters)}
+                  filters={filters}
+                  onFiltersChange={handleFiltersChange}
+                  facets={facets}
+                />
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-800">
+            {isLoading && (
+              <tr>
+                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-gray-500">
+                  Loading providers…
+                </td>
+              </tr>
+            )}
+            {error && (
+              <tr>
+                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-red-400">
+                  {String(error)}
+                </td>
+              </tr>
+            )}
+            {providers.map((p, idx) => {
+              const name     = p.provider_name || (p as any).nppes?.name || ''
+              const cityVal  = p.city || (p as any).nppes?.address?.city || ''
+              const stateVal = p.state || (p as any).nppes?.address?.state || ''
+              const isFocused = focusedRow === idx
+              const reviewStatus = (p as any).review_status as string | undefined
+              return (
+                <tr
+                  key={p.npi}
+                  className={`cursor-pointer transition-colors ${
+                    isFocused ? 'bg-blue-900/30 outline outline-1 outline-blue-600' : 'hover:bg-gray-800/50'
+                  }`}
+                  onClick={() => navigate(`/providers/${p.npi}`)}
+                  onMouseEnter={() => setFocusedRow(idx)}
+                >
+                  <td className="px-3 py-2.5 font-mono text-blue-400 text-xs">{p.npi}</td>
+                  <td className="px-3 py-2.5 text-gray-300 max-w-[200px] truncate" title={name}>
+                    {name || <span className="text-gray-600 italic">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-gray-400">{stateVal || <span className="text-gray-600">—</span>}</td>
+                  <td className="px-3 py-2.5 text-gray-400 max-w-[140px] truncate" title={cityVal}>
+                    {cityVal || <span className="text-gray-600">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 font-semibold">{fmt(p.total_paid)}</td>
+                  <td className="px-3 py-2.5 text-gray-400">{p.total_claims.toLocaleString()}</td>
+                  <td className="px-3 py-2.5 text-gray-400">{p.total_beneficiaries.toLocaleString()}</td>
+                  <td className="px-3 py-2.5 text-gray-400">{p.active_months}</td>
+                  <td className="px-3 py-2.5"><RiskScoreBadge score={p.risk_score} size="sm" /></td>
+                  <td className="px-3 py-2.5">
+                    {p.flags.length > 0
+                      ? <span className="text-red-400 text-xs">{p.flags.length} flag{p.flags.length !== 1 ? 's' : ''}</span>
+                      : <span className="text-gray-600 text-xs">—</span>
+                    }
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {reviewStatus
+                      ? <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_COLORS[reviewStatus] ?? 'text-gray-400'}`}>
+                          {STATUS_LABELS[reviewStatus] ?? reviewStatus}
+                        </span>
+                      : <span className="text-gray-700 text-xs">—</span>
+                    }
+                  </td>
+                </tr>
+              )
+            })}
+            {!isLoading && providers.length === 0 && !error && (
+              <tr>
+                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-gray-500">
+                  No results. Try adjusting your filters.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Pagination */}
+      <div className="flex items-center justify-between">
+        <span className="text-gray-500 text-sm">
+          {total > 0 ? `${total.toLocaleString()} providers` : ''}
+        </span>
+        <div className="flex items-center gap-3">
+          <button
+            className="btn-ghost"
+            disabled={page <= 1}
+            onClick={() => setPage(p => p - 1)}
+          >
+            ← Prev
+          </button>
+          <span className="text-gray-300 text-sm font-mono bg-gray-800 px-3 py-1 rounded">
+            {page} / {totalPages}
+          </span>
+          <button
+            className="btn-ghost"
+            disabled={page >= totalPages}
+            onClick={() => setPage(p => p + 1)}
+          >
+            Next →
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
