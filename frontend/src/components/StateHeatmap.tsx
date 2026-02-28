@@ -14,6 +14,7 @@ interface StateData {
 
 interface Props {
   data: StateData[]
+  onStateClick?: (state: string) => void
 }
 
 function fmtM(v: number) {
@@ -35,7 +36,7 @@ const FIPS_STATE: Record<string, string> = {
   '55':'WI','56':'WY',
 }
 
-export default function StateHeatmap({ data }: Props) {
+export default function StateHeatmap({ data, onStateClick }: Props) {
   const [tooltip, setTooltip] = useState<{ x: number; y: number; d: StateData; abbr: string } | null>(null)
 
   const stateMap = Object.fromEntries(data.map(d => [d.state, d]))
@@ -86,6 +87,9 @@ export default function StateHeatmap({ data }: Props) {
                     setTooltip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)
                   }}
                   onMouseLeave={() => setTooltip(null)}
+                  onClick={() => {
+                    if (d && onStateClick) onStateClick(abbr)
+                  }}
                 />
               )
             })

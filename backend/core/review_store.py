@@ -12,7 +12,7 @@ _QUEUE_FILE = pathlib.Path(__file__).parent.parent / "review_queue.json"
 # In-memory store: NPI -> item dict
 _review_items: dict[str, dict] = {}
 
-VALID_STATUSES = {"pending", "reviewed", "confirmed_fraud", "dismissed"}
+VALID_STATUSES = {"pending", "assigned", "investigating", "confirmed_fraud", "referred", "dismissed"}
 
 
 # ── disk persistence ──────────────────────────────────────────────────────────
@@ -61,8 +61,10 @@ def add_to_review_queue(providers: list[dict]) -> int:
             "total_claims": p.get("total_claims", 0),
             "status": "pending",
             "notes": "",
+            "assigned_to": None,
             "added_at": now,
             "updated_at": now,
+            "audit_trail": [],
         }
         added += 1
     if added:
@@ -79,26 +81,73 @@ def bulk_update_review_items(npis: list[str], status: str) -> int:
     for npi in npis:
         item = _review_items.get(npi)
         if item:
+            previous_status = item["status"]
             item["status"] = status
             item["updated_at"] = now
+            # Ensure audit_trail exists (for items created before this feature)
+            if "audit_trail" not in item:
+                item["audit_trail"] = []
+            item["audit_trail"].append({
+                "action": "status_change",
+                "previous_status": previous_status,
+                "new_status": status,
+                "timestamp": now,
+                "note": "Bulk update",
+            })
             updated += 1
     if updated:
         save_review_to_disk()
     return updated
 
 
-def update_review_item(npi: str, status: Optional[str] = None, notes: Optional[str] = None) -> Optional[dict]:
-    """Update status and/or notes for an existing item. Returns updated item or None if not found."""
+def update_review_item(
+    npi: str,
+    status: Optional[str] = None,
+    notes: Optional[str] = None,
+    assigned_to: Optional[str] = ...,  # sentinel: ... means "not provided"
+) -> Optional[dict]:
+    """Update status, notes, and/or assigned_to for an existing item. Returns updated item or None if not found."""
     item = _review_items.get(npi)
     if item is None:
         return None
+
+    now = time.time()
+
+    # Ensure audit_trail and assigned_to exist (for items created before this feature)
+    if "audit_trail" not in item:
+        item["audit_trail"] = []
+    if "assigned_to" not in item:
+        item["assigned_to"] = None
+
     if status is not None:
         if status not in VALID_STATUSES:
             raise ValueError(f"Invalid status: {status!r}. Must be one of {VALID_STATUSES}")
+        previous_status = item["status"]
         item["status"] = status
+        item["audit_trail"].append({
+            "action": "status_change",
+            "previous_status": previous_status,
+            "new_status": status,
+            "timestamp": now,
+            "note": notes if notes is not None else "",
+        })
+
     if notes is not None:
         item["notes"] = notes
-    item["updated_at"] = time.time()
+
+    # assigned_to uses sentinel ... to distinguish "not provided" from explicit None (unassign)
+    if assigned_to is not ...:
+        old_assigned = item.get("assigned_to") or ""
+        item["assigned_to"] = assigned_to
+        item["audit_trail"].append({
+            "action": "assignment_change",
+            "previous_status": item["status"],
+            "new_status": item["status"],
+            "timestamp": now,
+            "note": f"Assigned to {assigned_to}" if assigned_to else f"Unassigned (was {old_assigned})",
+        })
+
+    item["updated_at"] = now
     save_review_to_disk()
     return item
 
@@ -116,10 +165,18 @@ def get_review_queue(status_filter: Optional[str] = None) -> list[dict]:
 
 def get_review_counts() -> dict:
     items = list(_review_items.values())
-    counts = {"pending": 0, "reviewed": 0, "confirmed_fraud": 0, "dismissed": 0}
+    counts = {s: 0 for s in VALID_STATUSES}
     for item in items:
         s = item.get("status", "pending")
         if s in counts:
             counts[s] += 1
     counts["total"] = len(items)
     return counts
+
+
+def get_review_history(npi: str) -> Optional[list]:
+    """Return the audit trail for a specific NPI, or None if not found."""
+    item = _review_items.get(npi)
+    if item is None:
+        return None
+    return item.get("audit_trail", [])

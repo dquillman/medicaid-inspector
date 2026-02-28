@@ -11,6 +11,17 @@ VALID_SIGNALS = {
     "billing_ramp_rate",
     "bust_out_pattern",
     "ghost_billing",
+    "total_spend_outlier",
+    "billing_consistency",
+    "bene_concentration",
+    "upcoding_pattern",
+    "address_cluster_risk",
+    "oig_excluded",
+    "specialty_mismatch",
+    "corporate_shell_risk",
+    "dead_npi_billing",
+    "new_provider_explosion",
+    "geographic_impossibility",
 }
 
 
@@ -27,7 +38,7 @@ async def list_anomalies(
     """
     prescanned: list[dict] = get_prescanned()
 
-    filtered = [p for p in prescanned if p["risk_score"] >= settings.RISK_THRESHOLD]
+    filtered = [p for p in prescanned if p["risk_score"] > settings.RISK_THRESHOLD]
 
     if signal and signal in VALID_SIGNALS:
         filtered = [
@@ -54,7 +65,7 @@ async def list_anomalies(
 async def signal_summary():
     """Count of flagged providers per signal type (for bar chart)."""
     prescanned: list[dict] = get_prescanned()
-    flagged = [p for p in prescanned if p["risk_score"] >= settings.RISK_THRESHOLD]
+    flagged = [p for p in prescanned if p["risk_score"] > settings.RISK_THRESHOLD]
 
     counts: dict[str, int] = {s: 0 for s in VALID_SIGNALS}
     for provider in flagged:

@@ -1,17 +1,28 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 
 const SIGNALS = [
-  { key: '', label: 'All' },
-  { key: 'billing_ramp_rate',        label: 'Ramp Rate' },
-  { key: 'billing_concentration',    label: 'Concentration' },
-  { key: 'revenue_per_bene_outlier', label: 'Revenue Outlier' },
-  { key: 'bust_out_pattern',         label: 'Bust-Out' },
-  { key: 'ghost_billing',            label: 'Ghost Billing' },
-  { key: 'claims_per_bene_anomaly',  label: 'Claims Anomaly' },
+  { key: '',                          label: 'All' },
+  { key: 'billing_concentration',     label: 'Billing Concentration' },
+  { key: 'revenue_per_bene_outlier',  label: 'Revenue Outlier' },
+  { key: 'claims_per_bene_anomaly',   label: 'Claims Anomaly' },
+  { key: 'billing_ramp_rate',         label: 'Ramp Rate' },
+  { key: 'bust_out_pattern',          label: 'Bust-Out' },
+  { key: 'ghost_billing',             label: 'Ghost Billing' },
+  { key: 'total_spend_outlier',       label: 'Total Spend Outlier' },
+  { key: 'billing_consistency',       label: 'Billing Consistency' },
+  { key: 'bene_concentration',        label: 'Bene Concentration' },
+  { key: 'upcoding_pattern',          label: 'Upcoding Pattern' },
+  { key: 'address_cluster_risk',      label: 'Address Cluster' },
+  { key: 'oig_excluded',              label: 'OIG Exclusion' },
+  { key: 'specialty_mismatch',        label: 'Specialty Mismatch' },
+  { key: 'corporate_shell_risk',      label: 'Corporate Shell' },
+  { key: 'dead_npi_billing',          label: 'Dead NPI Billing' },
+  { key: 'new_provider_explosion',    label: 'New Provider Explosion' },
+  { key: 'geographic_impossibility',  label: 'Geographic Impossibility' },
 ]
 
 function fmt(v: number) {
@@ -42,7 +53,9 @@ function exportCsv(rows: any[]) {
 
 export default function AnomalyDashboard() {
   const navigate = useNavigate()
-  const [activeSignal, setActiveSignal] = useState('')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const signalParam = searchParams.get('signal') ?? ''
+  const [activeSignal, setActiveSignal] = useState(signalParam)
   const [page, setPage] = useState(1)
 
   const { data, isLoading } = useQuery({
@@ -70,21 +83,37 @@ export default function AnomalyDashboard() {
         </button>
       </div>
 
-      {/* Signal tabs */}
-      <div className="flex gap-1 border-b border-gray-800 pb-0">
-        {SIGNALS.map(s => (
-          <button
-            key={s.key}
-            onClick={() => { setActiveSignal(s.key); setPage(1) }}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeSignal === s.key
-                ? 'border-blue-500 text-blue-400'
-                : 'border-transparent text-gray-500 hover:text-gray-300'
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
+      {/* Summary stats */}
+      {data && !isLoading && (
+        <div className="card py-3 px-5 flex items-center gap-6">
+          <span className="text-sm text-gray-300">
+            <span className="text-white font-bold">{data.total?.toLocaleString() ?? 0}</span> providers flagged
+          </span>
+          <span className="text-gray-700">|</span>
+          <span className="text-sm text-gray-300">
+            across <span className="text-white font-bold">{SIGNALS.length - 1}</span> unique signals
+          </span>
+        </div>
+      )}
+
+      {/* Signal filters */}
+      <div className="card p-3">
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-2 font-medium">Filter by Signal</p>
+        <div className="flex flex-wrap gap-1.5">
+          {SIGNALS.map(s => (
+            <button
+              key={s.key}
+              onClick={() => { setActiveSignal(s.key); setPage(1) }}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                activeSignal === s.key
+                  ? 'bg-blue-600 text-white shadow-sm shadow-blue-900/40'
+                  : 'bg-gray-800 text-gray-400 hover:bg-gray-700 hover:text-gray-200'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Table */}

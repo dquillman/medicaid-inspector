@@ -6,7 +6,7 @@ import SpendingTimeline from '../components/SpendingTimeline'
 import HcpcsBreakdown from '../components/HcpcsBreakdown'
 import FraudFlagsTable from '../components/FraudFlagsTable'
 import RiskScoreModal from '../components/RiskScoreModal'
-import type { ClusterProvider } from '../lib/types'
+import type { ClusterProvider, OpenPaymentsData, SamExclusion } from '../lib/types'
 
 function fmt(v: number) {
   if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
@@ -83,6 +83,20 @@ export default function ProviderDetail() {
     staleTime: 60_000,
   })
 
+  const { data: openPaymentsData } = useQuery<OpenPaymentsData>({
+    queryKey: ['open-payments', npi],
+    queryFn: () => api.openPayments(npi!),
+    enabled: !!npi,
+    staleTime: 60_000,
+  })
+
+  const { data: samData } = useQuery<SamExclusion>({
+    queryKey: ['sam-exclusion', npi],
+    queryFn: () => api.samExclusion(npi!),
+    enabled: !!npi,
+    staleTime: 60_000,
+  })
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-500">
@@ -114,7 +128,7 @@ export default function ProviderDetail() {
         <div className="flex items-center gap-2 text-sm text-gray-500">
           <Link to="/providers" className="hover:text-gray-300">Providers</Link>
           <span>/</span>
-          <span className="font-mono">{npi}</span>
+          <span className="font-mono-data">{npi}</span>
         </div>
         <button
           onClick={() => window.print()}
@@ -125,23 +139,38 @@ export default function ProviderDetail() {
         </button>
       </div>
 
-      {/* OIG Exclusion Banner */}
+      {/* OIG Exclusion Banner — full-width, impossible to miss */}
       {oigExcluded && oigData?.record && (
-        <div className="bg-red-950 border border-red-700 rounded-xl px-5 py-4 flex items-start gap-4">
-          <span className="text-red-400 text-2xl mt-0.5">⚠</span>
-          <div>
-            <p className="text-red-300 font-bold text-sm">OIG Exclusion List — This provider is EXCLUDED from federal healthcare programs</p>
-            <p className="text-red-400 text-xs mt-1">
-              {oigData.record.excl_type && <span className="mr-3">Type: {oigData.record.excl_type}</span>}
-              {oigData.record.excl_date && <span className="mr-3">Date: {oigData.record.excl_date}</span>}
-              {oigData.record.specialty && <span>Specialty: {oigData.record.specialty}</span>}
+        <div className="bg-red-950 border-2 border-red-600 rounded-xl px-6 py-5 flex items-start gap-4 shadow-lg shadow-red-950/50" style={{ animation: 'threat-pulse-bg 2.5s ease-in-out infinite' }}>
+          <span className="text-red-500 text-3xl mt-0.5 font-black">{'\u26D4'}</span>
+          <div className="flex-1">
+            <p className="text-red-300 font-black text-base uppercase tracking-wider">OIG EXCLUSION LIST -- PROVIDER EXCLUDED FROM FEDERAL HEALTHCARE PROGRAMS</p>
+            <p className="text-red-400 text-sm mt-2 font-mono">
+              {oigData.record.excl_type && <span className="mr-4 inline-block">TYPE: {oigData.record.excl_type}</span>}
+              {oigData.record.excl_date && <span className="mr-4 inline-block">DATE: {oigData.record.excl_date}</span>}
+              {oigData.record.specialty && <span className="inline-block">SPECIALTY: {oigData.record.specialty}</span>}
             </p>
           </div>
         </div>
       )}
 
-      {/* Header */}
-      <div className="card flex items-start justify-between gap-4">
+      {/* SAM.gov Exclusion Banner — full-width, similar to OIG */}
+      {samData?.excluded && (
+        <div className="bg-red-950 border-2 border-red-600 rounded-xl px-6 py-5 flex items-start gap-4 shadow-lg shadow-red-950/50" style={{ animation: 'threat-pulse-bg 2.5s ease-in-out infinite' }}>
+          <span className="text-red-500 text-3xl mt-0.5 font-black">{'\u26D4'}</span>
+          <div className="flex-1">
+            <p className="text-red-300 font-black text-base uppercase tracking-wider">SAM.GOV FEDERAL EXCLUSION -- PROVIDER EXCLUDED FROM GOVERNMENT CONTRACTS</p>
+            <p className="text-red-400 text-sm mt-2">
+              Found {samData.records.length} exclusion record{samData.records.length !== 1 ? 's' : ''} on the System for Award Management federal exclusion list.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* Header — tinted red for high-risk providers */}
+      <div className={`card flex items-start justify-between gap-4 ${
+        detail.risk_score >= 50 ? 'border-red-800 bg-red-950/20' : ''
+      }`}>
         <div>
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-white">{nppes.name || `NPI ${npi}`}</h1>
@@ -153,9 +182,14 @@ export default function ProviderDetail() {
                 Not on OIG List
               </span>
             )}
+            {samData && !samData.excluded && !samData.error && (
+              <span className="text-xs px-2 py-0.5 bg-green-900/40 border border-green-800 rounded-full text-green-400">
+                SAM.gov CLEAR
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-4 mt-2 text-sm text-gray-400 flex-wrap">
-            <span className="font-mono text-blue-400">{npi}</span>
+            <span className="font-mono-data text-blue-400">{npi}</span>
             {addr.city && <span>{addr.city}, {addr.state} {addr.zip}</span>}
             {tax.description && <span className="text-purple-400">{tax.description}</span>}
           </div>
@@ -166,6 +200,13 @@ export default function ProviderDetail() {
           )}
         </div>
         <div className="flex flex-col items-end gap-3 no-print">
+          <div className="text-center">
+            <p className="text-xs text-gray-500 uppercase tracking-widest font-bold mb-1">RISK SCORE</p>
+            <RiskScoreBadge score={detail.risk_score} size="lg" />
+            <div className="flex items-center justify-center gap-1 mt-1">
+              <RiskScoreModal />
+            </div>
+          </div>
           <button
             onClick={() => api.exportProvider(npi!)}
             className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2"
@@ -173,27 +214,22 @@ export default function ProviderDetail() {
           >
             <span>&#8659;</span> Export Fraud Package
           </button>
-          <div className="text-center">
-            <RiskScoreBadge score={detail.risk_score} size="lg" />
-            <div className="flex items-center justify-center gap-1 mt-1">
-              <p className="text-xs text-gray-600">Risk Score</p>
-              <RiskScoreModal />
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Spending summary */}
-      <div className="grid grid-cols-4 gap-4">
+      {/* Quick Stats bar */}
+      <div className="card p-0 flex divide-x divide-gray-800">
         {[
           { label: 'Total Paid',    value: fmt(detail.spending?.total_paid ?? 0),                            color: 'text-blue-400' },
           { label: 'Total Claims',  value: (detail.spending?.total_claims ?? 0).toLocaleString(),             color: 'text-purple-400' },
           { label: 'Beneficiaries', value: (detail.spending?.total_beneficiaries ?? 0).toLocaleString(),      color: 'text-green-400' },
           { label: 'Active Months', value: detail.spending?.active_months ?? 0,                               color: 'text-yellow-400' },
+          { label: 'Fraud Signals', value: `${(detail.signal_results ?? []).filter(s => s.flagged).length} / ${(detail.signal_results ?? []).length}`, color: (detail.signal_results ?? []).some(s => s.flagged) ? 'text-red-400' : 'text-green-400' },
+          { label: 'Avg $/Claim',   value: detail.spending?.total_claims ? fmt(Math.round((detail.spending?.total_paid ?? 0) / detail.spending.total_claims)) : '--', color: 'text-cyan-400' },
         ].map(kpi => (
-          <div key={kpi.label} className="card">
-            <p className="text-xs text-gray-500 uppercase tracking-wider">{kpi.label}</p>
-            <p className={`text-2xl font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
+          <div key={kpi.label} className="flex-1 px-5 py-4 text-center">
+            <p className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">{kpi.label}</p>
+            <p className={`text-xl font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
           </div>
         ))}
       </div>
@@ -201,7 +237,9 @@ export default function ProviderDetail() {
       <div className="grid grid-cols-2 gap-5">
         {/* Fraud flags */}
         <div className="card">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">Fraud Signal Analysis</h2>
+          <h2 className="text-sm font-semibold text-gray-300 mb-3">
+            {(detail.signal_results ?? []).length} Fraud Signals Analyzed
+          </h2>
           <FraudFlagsTable signals={detail.signal_results ?? []} />
         </div>
 
@@ -218,7 +256,7 @@ export default function ProviderDetail() {
 
       {/* Peer Comparison */}
       {peers && peers.top_hcpcs && peers.peer_count > 0 && (
-        <div className="card">
+        <div className="card bg-blue-950/20 border-blue-900/40">
           <h2 className="text-sm font-semibold text-gray-300 mb-1">Peer Comparison</h2>
           <p className="text-xs text-gray-500 mb-3">
             Compared to <span className="text-gray-300 font-medium">{peers.peer_count.toLocaleString()}</span> providers
@@ -318,6 +356,127 @@ export default function ProviderDetail() {
           </table>
         </div>
       )}
+
+      {/* Open Payments + SAM.gov Exclusion Cards */}
+      <div className="grid grid-cols-2 gap-5">
+        {/* CMS Open Payments Card */}
+        <div className={`card ${
+          openPaymentsData?.total_amount && openPaymentsData.total_amount >= 100_000
+            ? 'border-red-800 bg-red-950/20'
+            : openPaymentsData?.total_amount && openPaymentsData.total_amount >= 10_000
+              ? 'border-yellow-800 bg-yellow-950/20'
+              : ''
+        }`}>
+          <h2 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+            CMS Open Payments
+            {openPaymentsData?.total_amount && openPaymentsData.total_amount >= 100_000 && (
+              <span className="text-xs px-2 py-0.5 bg-red-900 border border-red-700 rounded-full text-red-300 font-bold">
+                HIGH INDUSTRY PAYMENTS
+              </span>
+            )}
+            {openPaymentsData?.total_amount && openPaymentsData.total_amount >= 10_000 && openPaymentsData.total_amount < 100_000 && (
+              <span className="text-xs px-2 py-0.5 bg-yellow-900 border border-yellow-700 rounded-full text-yellow-300 font-bold">
+                NOTABLE PAYMENTS
+              </span>
+            )}
+          </h2>
+          {openPaymentsData ? (
+            openPaymentsData.error ? (
+              <p className="text-xs text-gray-500">Could not reach Open Payments API: {openPaymentsData.error}</p>
+            ) : openPaymentsData.has_payments ? (
+              <div className="space-y-3">
+                <div className="flex items-baseline gap-6">
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total Received</p>
+                    <p className={`text-xl font-bold mt-0.5 ${
+                      openPaymentsData.total_amount >= 100_000 ? 'text-red-400' :
+                      openPaymentsData.total_amount >= 10_000 ? 'text-yellow-400' : 'text-blue-400'
+                    }`}>
+                      {fmt(openPaymentsData.total_amount)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Payments</p>
+                    <p className="text-xl font-bold mt-0.5 text-gray-300">{openPaymentsData.payment_count}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Companies</p>
+                    <p className="text-xl font-bold mt-0.5 text-gray-300">{openPaymentsData.unique_companies.length}</p>
+                  </div>
+                </div>
+                {openPaymentsData.unique_companies.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Paying Companies</p>
+                    <div className="flex flex-wrap gap-1">
+                      {openPaymentsData.unique_companies.map(c => (
+                        <span key={c} className="text-xs px-2 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-400">
+                          {c}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">No industry payments found in CMS Open Payments database.</p>
+            )
+          ) : (
+            <div className="h-16 flex items-center justify-center text-gray-600 text-sm">Loading...</div>
+          )}
+        </div>
+
+        {/* SAM.gov Exclusion Detail Card */}
+        <div className={`card ${
+          samData?.excluded ? 'border-red-800 bg-red-950/20' : ''
+        }`}>
+          <h2 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+            SAM.gov Federal Exclusion
+            {samData && !samData.excluded && !samData.error && (
+              <span className="text-xs px-2 py-0.5 bg-green-900/40 border border-green-800 rounded-full text-green-400 font-bold">
+                CLEAR
+              </span>
+            )}
+            {samData?.excluded && (
+              <span className="text-xs px-2 py-0.5 bg-red-900 border border-red-700 rounded-full text-red-300 font-bold">
+                EXCLUDED
+              </span>
+            )}
+          </h2>
+          {samData ? (
+            samData.error ? (
+              <p className="text-xs text-gray-500">Could not reach SAM.gov API: {samData.error}</p>
+            ) : samData.excluded ? (
+              <div className="space-y-2">
+                <p className="text-sm text-red-400">
+                  This provider was found on the SAM.gov federal exclusion list. Excluded entities are barred from receiving federal contracts and certain types of federal financial assistance.
+                </p>
+                {samData.records.length > 0 && (
+                  <div>
+                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Exclusion Records ({samData.records.length})</p>
+                    <div className="space-y-1">
+                      {samData.records.map((r, i) => (
+                        <div key={i} className="text-xs bg-red-950/40 border border-red-900 rounded px-3 py-2 text-red-300 font-mono">
+                          {Object.entries(r).slice(0, 4).map(([k, v]) => (
+                            <span key={k} className="mr-3 inline-block">
+                              {String(k).toUpperCase()}: {String(v)}
+                            </span>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <p className="text-sm text-gray-500">
+                Not found on the SAM.gov federal exclusion list. This provider is not currently barred from federal contracts.
+              </p>
+            )
+          ) : (
+            <div className="h-16 flex items-center justify-center text-gray-600 text-sm">Loading...</div>
+          )}
+        </div>
+      </div>
 
       {/* Timeline */}
       <div className="card">

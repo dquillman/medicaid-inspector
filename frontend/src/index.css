@@ -21,15 +21,22 @@
 @layer base {
   body {
     @apply bg-gray-950 text-gray-100 font-sans;
+    background: linear-gradient(180deg, #030712 0%, #0a0f1a 50%, #060b14 100%);
+    background-attachment: fixed;
   }
   ::-webkit-scrollbar {
-    @apply w-1.5;
+    width: 6px;
+    height: 6px;
   }
   ::-webkit-scrollbar-track {
-    @apply bg-gray-900;
+    background: #0a0a0f;
   }
   ::-webkit-scrollbar-thumb {
-    @apply bg-gray-700 rounded-full;
+    background: #1e293b;
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: #334155;
   }
 }
 
@@ -48,12 +55,91 @@
            placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent;
   }
   .badge-high {
-    @apply bg-red-900/50 text-red-400 border border-red-800 text-xs px-2 py-0.5 rounded-full;
+    @apply bg-red-900/60 text-red-300 border border-red-700 text-xs px-2 py-0.5 rounded-full;
   }
   .badge-medium {
     @apply bg-yellow-900/50 text-yellow-400 border border-yellow-800 text-xs px-2 py-0.5 rounded-full;
   }
   .badge-low {
     @apply bg-green-900/50 text-green-400 border border-green-800 text-xs px-2 py-0.5 rounded-full;
+  }
+
+  /* Threat-level badges */
+  .badge-critical {
+    @apply bg-red-950 text-red-400 border border-red-700 text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider;
+    animation: threat-pulse 2s ease-in-out infinite;
+  }
+  .badge-warning {
+    @apply bg-amber-950 text-amber-400 border border-amber-700 text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider;
+  }
+  .badge-info {
+    @apply bg-blue-950 text-blue-400 border border-blue-700 text-xs px-2.5 py-0.5 rounded-full font-medium uppercase tracking-wider;
+  }
+
+  /* Monospace data class for NPIs, codes, IDs */
+  .font-mono-data {
+    font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, monospace;
+    letter-spacing: 0.05em;
+  }
+
+  /* Confirmed fraud row — red left border */
+  .row-fraud {
+    border-left: 4px solid #dc2626;
+  }
+
+  /* Metric sizing utilities */
+  .metric-critical {
+    @apply text-5xl font-black text-red-400;
+  }
+  .metric-warning {
+    @apply text-4xl font-extrabold text-yellow-400;
+  }
+  .metric-normal {
+    @apply text-3xl font-bold text-gray-300;
+  }
+
+  /* Card glow on hover */
+  .card-glow {
+    @apply transition-all duration-200;
+  }
+  .card-glow:hover {
+    border-color: rgba(148, 163, 184, 0.25);
+    box-shadow: 0 0 15px 2px rgba(148, 163, 184, 0.07), 0 0 4px 1px rgba(59, 130, 246, 0.1);
+  }
+
+  /* Striped table rows */
+  .table-striped tr:nth-child(even) {
+    background: rgba(17, 24, 39, 0.3);
+  }
+
+  /* Gradient divider */
+  .divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, rgba(75, 85, 99, 0.5) 30%, rgba(75, 85, 99, 0.5) 70%, transparent 100%);
+    border: none;
+  }
+}
+
+/* Smooth transitions for interactive elements */
+button, a, input, select, textarea, .card, tr {
+  transition: all 0.2s ease;
+}
+
+/* Threat pulse animation */
+@keyframes threat-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+  }
+  50% {
+    box-shadow: 0 0 8px 2px rgba(239, 68, 68, 0.3);
+  }
+}
+
+@keyframes threat-pulse-bg {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.85;
   }
 }

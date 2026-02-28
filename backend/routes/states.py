@@ -36,7 +36,7 @@ async def state_heatmap():
             state_map[state] = {"state": state, "provider_count": 0, "total_paid": 0, "flagged_count": 0}
         state_map[state]["provider_count"] += 1
         state_map[state]["total_paid"] += p.get("total_paid", 0)
-        if p.get("risk_score", 0) >= settings.RISK_THRESHOLD:
+        if p.get("risk_score", 0) > settings.RISK_THRESHOLD:
             state_map[state]["flagged_count"] += 1
 
     return {

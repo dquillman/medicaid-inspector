@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from core.review_store import (
     get_review_queue,
     get_review_counts,
+    get_review_history,
     update_review_item,
     bulk_update_review_items,
     add_to_review_queue,
@@ -18,9 +19,17 @@ from core.config import settings
 router = APIRouter(prefix="/api/review", tags=["review"])
 
 
+_UNSET = object()  # sentinel for "field not provided"
+
+
 class UpdateReviewBody(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
+    assigned_to: Optional[str] = None
+
+    class Config:
+        # Allow us to detect which fields were actually sent in the request
+        pass
 
 
 class BulkUpdateBody(BaseModel):
@@ -63,7 +72,7 @@ async def review_counts():
 async def backfill_review_queue():
     """Populate review queue from existing prescan cache. Safe to call multiple times — no duplicates added."""
     prescanned = get_prescanned()
-    flagged = [p for p in prescanned if p.get("risk_score", 0) >= settings.RISK_THRESHOLD]
+    flagged = [p for p in prescanned if p.get("risk_score", 0) > settings.RISK_THRESHOLD]
     added = add_to_review_queue(flagged)
     return {"scanned": len(prescanned), "flagged": len(flagged), "added": added, "threshold": settings.RISK_THRESHOLD}
 
@@ -78,10 +87,27 @@ async def bulk_update_review(body: BulkUpdateBody):
     return {"updated": count}
 
 
+@router.get("/{npi}/history")
+async def review_history(npi: str):
+    """Return the audit trail for a specific NPI."""
+    trail = get_review_history(npi)
+    if trail is None:
+        raise HTTPException(404, f"Review item not found: {npi}")
+    return {"npi": npi, "audit_trail": trail}
+
+
 @router.patch("/{npi}")
 async def update_review(npi: str, body: UpdateReviewBody):
+    # Determine if assigned_to was actually sent in the request body
+    raw = body.model_dump(exclude_unset=True)
+    assigned_to_arg = raw["assigned_to"] if "assigned_to" in raw else ...
     try:
-        updated = update_review_item(npi, status=body.status, notes=body.notes)
+        updated = update_review_item(
+            npi,
+            status=body.status,
+            notes=body.notes,
+            assigned_to=assigned_to_arg,
+        )
     except ValueError as e:
         raise HTTPException(400, str(e))
     if updated is None:

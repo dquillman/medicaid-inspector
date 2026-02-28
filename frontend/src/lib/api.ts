@@ -9,9 +9,12 @@ import type {
   PrescanStatus,
   ReviewItem,
   ReviewCounts,
+  AuditEntry,
   OigStatus,
   AddressCluster,
   ProviderPeers,
+  OpenPaymentsData,
+  SamExclusion,
 } from './types'
 
 const BASE = '/api'
@@ -145,12 +148,15 @@ export const api = {
   reviewBackfill: () =>
     fetch('/api/review/backfill', { method: 'POST' }).then(r => r.json()),
 
-  updateReview: (npi: string, data: { status?: string; notes?: string }) =>
+  updateReview: (npi: string, data: { status?: string; notes?: string; assigned_to?: string | null }) =>
     fetch(`/api/review/${npi}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     }).then(r => r.json()),
+
+  getReviewHistory: (npi: string) =>
+    get<{ npi: string; audit_trail: AuditEntry[] }>(`/review/${npi}/history`),
 
   bulkUpdateReview: (data: { npis: string[]; status: string }) =>
     fetch('/api/review/bulk-update', {
@@ -164,4 +170,8 @@ export const api = {
   addressCluster: (npi: string) => get<AddressCluster>(`/providers/${npi}/cluster`),
 
   providerPeers: (npi: string) => get<ProviderPeers>(`/providers/${npi}/peers`),
+
+  openPayments: (npi: string) => get<OpenPaymentsData>(`/providers/${npi}/open-payments`),
+
+  samExclusion: (npi: string) => get<SamExclusion>(`/providers/${npi}/sam-exclusion`),
 }

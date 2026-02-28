@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 
@@ -270,14 +270,14 @@ const STATUS_LABELS: Record<string, string> = {
 const COLUMNS: ColDef[] = [
   { key: 'npi',                 label: 'NPI' },
   { key: 'provider_name',       label: 'Name' },
+  { key: 'risk_score',          label: 'Risk Score',   filterable: true },
+  { key: 'flag_count',          label: 'Flags',        filterable: true },
   { key: 'state',               label: 'State',        filterable: true },
   { key: 'city',                label: 'City',         filterable: true },
   { key: 'total_paid',          label: 'Total Paid',   filterable: true },
   { key: 'total_claims',        label: 'Claims',       filterable: true },
   { key: 'total_beneficiaries', label: 'Beneficiaries' },
   { key: 'active_months',       label: 'Mo. Active',   filterable: true },
-  { key: 'risk_score',          label: 'Risk Score',   filterable: true },
-  { key: 'flag_count',          label: 'Flags',        filterable: true },
   { key: 'review_status',       label: 'Review' },
 ]
 
@@ -357,13 +357,31 @@ const LIMIT = 50
 
 export default function ProviderExplorer() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const stateParam = searchParams.get('state')
+  const riskMinParam = searchParams.get('risk_min')
   const [search, setSearch]       = useState('')
   const [page, setPage]           = useState(1)
   const [sortBy, setSortBy]       = useState('risk_score')
   const [sortDir, setSortDir]     = useState<SortDir>('desc')
-  const [filters, setFilters]     = useState<ColFilters>(EMPTY_FILTERS)
+  const [filters, setFilters]     = useState<ColFilters>(() => {
+    const f = { ...EMPTY_FILTERS }
+    if (stateParam) f.states = [stateParam]
+    if (riskMinParam) f.risk = { ...f.risk, min: riskMinParam }
+    return f
+  })
   const [openFilter, setOpenFilter] = useState<string | null>(null)
   const [focusedRow, setFocusedRow] = useState<number>(-1)
+
+  // Clear URL params after consuming them so they don't stick on navigation
+  useEffect(() => {
+    if (stateParam || riskMinParam) {
+      searchParams.delete('state')
+      searchParams.delete('risk_min')
+      setSearchParams(searchParams, { replace: true })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const { data: facets } = useQuery({
     queryKey: ['provider-facets'],
@@ -394,11 +412,16 @@ export default function ProviderExplorer() {
     return p
   }, [search, sortBy, sortDir, page, filters])
 
-  const { data, isLoading, error } = useQuery({
+  const { data, isLoading, error, dataUpdatedAt } = useQuery({
     queryKey: ['providers', queryParams()],
     queryFn: () => api.providers(queryParams() as any),
     refetchInterval: 30000,
   })
+
+  const lastUpdated = useMemo(() => {
+    if (!dataUpdatedAt) return null
+    return new Date(dataUpdatedAt).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+  }, [dataUpdatedAt])
 
   function handleSort(key: string) {
     if (sortBy === key) {
@@ -474,6 +497,18 @@ export default function ProviderExplorer() {
         </span>
       </div>
 
+      {/* Summary row */}
+      <div className="flex items-center justify-between px-1">
+        <span className="text-xs text-gray-500">
+          {!isLoading && total > 0 && `Showing ${Math.min(providers.length, LIMIT)} of ${total.toLocaleString()} providers`}
+        </span>
+        {lastUpdated && (
+          <span className="text-xs text-gray-600">
+            Last updated {lastUpdated}
+          </span>
+        )}
+      </div>
+
       {/* Table */}
       <div className="card p-0 overflow-x-auto">
         <table className="w-full text-sm whitespace-nowrap">
@@ -516,18 +551,32 @@ export default function ProviderExplorer() {
               const stateVal = p.state || (p as any).nppes?.address?.state || ''
               const isFocused = focusedRow === idx
               const reviewStatus = (p as any).review_status as string | undefined
+              const isHighRisk = p.risk_score >= 50
               return (
                 <tr
                   key={p.npi}
                   className={`cursor-pointer transition-colors ${
-                    isFocused ? 'bg-blue-900/30 outline outline-1 outline-blue-600' : 'hover:bg-gray-800/50'
+                    isFocused
+                      ? 'bg-blue-900/30 outline outline-1 outline-blue-600'
+                      : isHighRisk
+                        ? 'bg-red-950/30 hover:bg-red-950/50'
+                        : idx % 2 === 1
+                          ? 'bg-gray-900/30 hover:bg-gray-800/50'
+                          : 'hover:bg-gray-800/50'
                   }`}
                   onClick={() => navigate(`/providers/${p.npi}`)}
                   onMouseEnter={() => setFocusedRow(idx)}
                 >
-                  <td className="px-3 py-2.5 font-mono text-blue-400 text-xs">{p.npi}</td>
+                  <td className="px-3 py-2.5 font-mono-data text-blue-400 text-xs">{p.npi}</td>
                   <td className="px-3 py-2.5 text-gray-300 max-w-[200px] truncate" title={name}>
                     {name || <span className="text-gray-600 italic">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5"><RiskScoreBadge score={p.risk_score} size="sm" /></td>
+                  <td className="px-3 py-2.5">
+                    {p.flags.length > 0
+                      ? <span className="text-red-400 text-xs font-medium">{'\u26A0'} {p.flags.length} flag{p.flags.length !== 1 ? 's' : ''}</span>
+                      : <span className="text-gray-600 text-xs">—</span>
+                    }
                   </td>
                   <td className="px-3 py-2.5 text-gray-400">{stateVal || <span className="text-gray-600">—</span>}</td>
                   <td className="px-3 py-2.5 text-gray-400 max-w-[140px] truncate" title={cityVal}>
@@ -537,13 +586,6 @@ export default function ProviderExplorer() {
                   <td className="px-3 py-2.5 text-gray-400">{p.total_claims.toLocaleString()}</td>
                   <td className="px-3 py-2.5 text-gray-400">{p.total_beneficiaries.toLocaleString()}</td>
                   <td className="px-3 py-2.5 text-gray-400">{p.active_months}</td>
-                  <td className="px-3 py-2.5"><RiskScoreBadge score={p.risk_score} size="sm" /></td>
-                  <td className="px-3 py-2.5">
-                    {p.flags.length > 0
-                      ? <span className="text-red-400 text-xs">{p.flags.length} flag{p.flags.length !== 1 ? 's' : ''}</span>
-                      : <span className="text-gray-600 text-xs">—</span>
-                    }
-                  </td>
                   <td className="px-3 py-2.5">
                     {reviewStatus
                       ? <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_COLORS[reviewStatus] ?? 'text-gray-400'}`}>

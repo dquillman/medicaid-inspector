@@ -21,8 +21,13 @@ export default function FraudFlagsTable({ signals }: Props) {
 
   return (
     <div className="space-y-2">
+      <p className="text-xs text-gray-500 mb-3">
+        <span className={active.length > 0 ? 'text-red-400 font-semibold' : 'text-green-400 font-semibold'}>
+          {active.length}
+        </span> of {signals.length} signals triggered
+      </p>
       {active.map(s => (
-        <div key={s.signal} className="flex items-start gap-3 bg-red-950/30 border border-red-900/50 rounded-lg p-3">
+        <div key={s.signal} className="flex items-start gap-3 bg-red-950/30 border border-red-900/50 rounded-lg p-3 border-l-2 border-l-red-500">
           <span className="text-red-400 text-lg mt-0.5">⚑</span>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">

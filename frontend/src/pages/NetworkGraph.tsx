@@ -26,7 +26,10 @@ export default function NetworkGraph() {
       <div>
         <h1 className="text-2xl font-bold text-white">Provider Network</h1>
         <p className="text-gray-400 text-sm mt-1">
-          Billing ↔ servicing relationships for a given NPI. Node size = total paid; color = risk level.
+          Billing &#8596; servicing relationships for a given NPI. Node size = total paid; color = risk level.
+        </p>
+        <p className="text-gray-500 text-xs mt-1">
+          Visualizing billing relationships between providers. Lines indicate shared servicing arrangements.
         </p>
       </div>
 

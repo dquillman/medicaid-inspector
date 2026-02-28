@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { api } from '../lib/api'
-import type { PrescanStatus } from '../lib/types'
+import type { PrescanStatus, ReviewCounts } from '../lib/types'
 import StateHeatmap from '../components/StateHeatmap'
 
 const US_STATES = [
@@ -330,10 +331,20 @@ const SIGNAL_LABELS: Record<string, string> = {
   ghost_billing:            'Ghost Billing',
   total_spend_outlier:      'Total Spend Outlier',
   billing_consistency:      'Billing Consistency',
+  bene_concentration:       'Bene Concentration',
+  upcoding_pattern:         'Upcoding',
+  address_cluster_risk:     'Address Cluster',
+  oig_excluded:             'OIG Exclusion',
+  specialty_mismatch:       'Specialty Mismatch',
+  corporate_shell_risk:     'Corporate Shell',
+  dead_npi_billing:         'Dead NPI Billing',
+  new_provider_explosion:   'New Provider Explosion',
+  geographic_impossibility: 'Geographic Impossibility',
 }
 
 export default function Overview() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const { data: summary, isLoading: sumLoading } = useQuery({
     queryKey: ['summary'],
@@ -360,6 +371,12 @@ export default function Overview() {
     queryKey: ['state-heatmap'],
     queryFn: api.stateHeatmap,
     refetchInterval: 15000,
+  })
+
+  const { data: reviewCounts } = useQuery({
+    queryKey: ['review-counts'],
+    queryFn: api.reviewCounts,
+    refetchInterval: 10000,
   })
 
   const { data: ds } = useQuery({
@@ -412,56 +429,102 @@ export default function Overview() {
     queryClient.invalidateQueries({ queryKey: ['summary'] })
   }, [queryClient])
 
-  const kpis = [
-    { label: 'Total Spend', value: summary ? fmt(summary.total_paid) : '—', color: 'text-blue-400', sub: null },
-    { label: 'Providers Scanned', value: summary ? summary.total_providers.toLocaleString() : '—', color: 'text-purple-400', sub: null },
-    { label: 'Flagged for Review', value: summary ? summary.flagged_providers.toLocaleString() : '—', color: 'text-yellow-400', sub: 'score ≥ 10' },
-    { label: 'High Risk', value: summary ? (summary.high_risk_providers ?? 0).toLocaleString() : '—', color: 'text-red-400', sub: 'score ≥ 50' },
-  ]
+  const confirmedFraud = reviewCounts?.confirmed_fraud ?? 0
 
   const barData = (signals ?? []).map(s => ({
+    signal: s.signal,
     name: SIGNAL_LABELS[s.signal] ?? s.signal,
     count: s.count,
   }))
+  const barHeight = Math.max(400, barData.length * 32)
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Dashboard Overview</h1>
-        <p className="text-gray-400 text-sm mt-1">
-          Medicaid provider-level claims · 2018–2024 · 220M+ rows streamed via DuckDB
+        <h1 className="text-2xl font-bold text-white uppercase tracking-wide flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" className="w-6 h-6 shrink-0">
+            <path d="M32 4 L56 14 L56 34 C56 48 44 58 32 62 C20 58 8 48 8 34 L8 14 Z" fill="#1e3a5f"/>
+            <path d="M32 7 L53 16 L53 34 C53 46.5 42.5 56 32 59.5 C21.5 56 11 46.5 11 34 L11 16 Z" fill="none" stroke="#3b82f6" strokeWidth="1.5"/>
+            <circle cx="28" cy="28" r="11" fill="none" stroke="#60a5fa" strokeWidth="4"/>
+            <circle cx="28" cy="28" r="7" fill="#1e3a5f"/>
+            <text x="28" y="33" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="11" fill="#f59e0b">$</text>
+            <line x1="36" y1="36" x2="45" y2="45" stroke="#60a5fa" strokeWidth="4.5" strokeLinecap="round"/>
+            <circle cx="46" cy="18" r="6" fill="#ef4444"/>
+            <text x="46" y="22" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="9" fill="white">!</text>
+          </svg>
+          Threat Dashboard
+        </h1>
+        <p className="text-gray-500 text-xs mt-1 uppercase tracking-wider">
+          Medicaid Provider-Level Claims Analysis · 2018--2024 · 220M+ Records
         </p>
       </div>
 
-      <DataSourceCard />
+      {/* Threat-level KPI cards */}
+      <div className="grid grid-cols-3 gap-4">
+        {/* Confirmed Fraud — dominant dark red panel */}
+        <div
+          className="bg-red-950 border-2 border-red-700 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
+          style={{ animation: confirmedFraud > 0 ? 'threat-pulse-bg 3s ease-in-out infinite' : undefined }}
+          onClick={() => navigate('/review?status=confirmed_fraud')}
+        >
+          <p className="text-red-500 text-xs font-bold uppercase tracking-widest mb-2">CONFIRMED FRAUD CASES</p>
+          <p className={`text-5xl font-black text-red-400 ${sumLoading ? 'animate-pulse' : ''}`}>
+            {sumLoading ? '...' : confirmedFraud.toLocaleString()}
+          </p>
+          <p className="text-red-700 text-xs mt-2 uppercase tracking-wider">Requires Immediate Action</p>
+        </div>
 
-      <ScanControl
-        status={prescanStatus}
-        cachedCount={summary?.total_providers ?? 0}
-        isLocal={ds?.is_local ?? false}
-        onScanBatch={handleScanBatch}
-        onReset={handleReset}
-        onAutoStart={handleAutoStart}
-        onAutoStop={handleAutoStop}
-        onRescore={handleRescore}
-        onSmartScan={handleSmartScan}
-      />
+        {/* High Risk — alarming */}
+        <div
+          className="bg-red-950/40 border-2 border-red-800/60 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
+          onClick={() => navigate('/providers?risk_min=50')}
+        >
+          <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2">HIGH RISK PROVIDERS</p>
+          <p className={`text-5xl font-black text-red-400 ${sumLoading ? 'animate-pulse' : ''}`}>
+            {sumLoading ? '...' : (summary?.high_risk_providers ?? 0).toLocaleString()}
+          </p>
+          <p className="text-red-800 text-xs mt-2 uppercase tracking-wider">Score &ge; 50</p>
+        </div>
 
-      {/* KPI cards */}
+        {/* Flagged for Review — warning */}
+        <div
+          className="bg-yellow-950/30 border-2 border-yellow-800/50 rounded-xl p-5 text-center cursor-pointer hover:border-yellow-500 transition-colors"
+          onClick={() => navigate('/providers?risk_min=10.1')}
+        >
+          <p className="text-yellow-500 text-xs font-bold uppercase tracking-widest mb-2">FLAGGED FOR REVIEW</p>
+          <p className={`text-4xl font-extrabold text-yellow-400 ${sumLoading ? 'animate-pulse' : ''}`}>
+            {sumLoading ? '...' : (summary?.flagged_providers ?? 0).toLocaleString()}
+          </p>
+          <p className="text-yellow-800 text-xs mt-2 uppercase tracking-wider">Score &gt; 10</p>
+        </div>
+      </div>
+
+      {/* Secondary KPI row — de-emphasized */}
       <div className="grid grid-cols-4 gap-4">
-        {kpis.map(kpi => (
-          <div key={kpi.label} className="card">
-            <div className="flex items-center gap-2">
-              <p className="text-gray-500 text-xs uppercase tracking-wider">{kpi.label}</p>
-              {kpi.sub && (
-                <span className="text-gray-600 text-xs">{kpi.sub}</span>
-              )}
-            </div>
-            <p className={`text-3xl font-bold mt-2 ${kpi.color} ${sumLoading ? 'animate-pulse' : ''}`}>
-              {sumLoading ? '…' : kpi.value}
-            </p>
-          </div>
-        ))}
+        <div className="card py-3">
+          <p className="text-gray-600 text-xs uppercase tracking-wider">Total Spend</p>
+          <p className={`text-2xl font-bold mt-1 text-blue-400 ${sumLoading ? 'animate-pulse' : ''}`}>
+            {sumLoading ? '...' : summary ? fmt(summary.total_paid) : '---'}
+          </p>
+        </div>
+        <div className="card py-3">
+          <p className="text-gray-600 text-xs uppercase tracking-wider">Providers Scanned</p>
+          <p className={`text-2xl font-bold mt-1 text-purple-400 ${sumLoading ? 'animate-pulse' : ''}`}>
+            {sumLoading ? '...' : summary ? summary.total_providers.toLocaleString() : '---'}
+          </p>
+        </div>
+        <div className="card py-3">
+          <p className="text-gray-600 text-xs uppercase tracking-wider">Total Claims</p>
+          <p className={`text-2xl font-bold mt-1 text-gray-400 ${sumLoading ? 'animate-pulse' : ''}`}>
+            {sumLoading ? '...' : summary ? summary.total_claims.toLocaleString() : '---'}
+          </p>
+        </div>
+        <div className="card py-3">
+          <p className="text-gray-600 text-xs uppercase tracking-wider">Avg Risk Score</p>
+          <p className={`text-2xl font-bold mt-1 text-gray-400 ${sumLoading ? 'animate-pulse' : ''}`}>
+            {sumLoading ? '...' : summary ? summary.avg_risk_score.toFixed(1) : '---'}
+          </p>
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-6">
@@ -470,7 +533,7 @@ export default function Overview() {
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Flagged Providers by State</h2>
           <div className="h-64">
             {heatmap ? (
-              <StateHeatmap data={heatmap.by_state} />
+              <StateHeatmap data={heatmap.by_state} onStateClick={(st) => navigate(`/providers?state=${st}`)} />
             ) : (
               <div className="h-full flex items-center justify-center text-gray-600 text-sm">
                 Loading map…
@@ -484,19 +547,28 @@ export default function Overview() {
         <div className="card">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Top Fraud Signals (provider count)</h2>
           {barData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer width="100%" height={barHeight}>
               <BarChart data={barData} layout="vertical" margin={{ left: 8 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" horizontal={false} />
                 <XAxis type="number" tick={{ fill: '#9ca3af', fontSize: 11 }} tickLine={false} />
                 <YAxis
-                  type="category" dataKey="name" width={140}
+                  type="category" dataKey="name" width={180}
                   tick={{ fill: '#9ca3af', fontSize: 11 }} tickLine={false} axisLine={false}
                 />
                 <Tooltip
                   contentStyle={{ background: '#111827', border: '1px solid #374151', borderRadius: 8 }}
                   formatter={(v: number) => [v.toLocaleString(), 'Providers']}
                 />
-                <Bar dataKey="count" fill="#ef4444" radius={[0, 4, 4, 0]} />
+                <Bar
+                  dataKey="count"
+                  fill="#ef4444"
+                  radius={[0, 4, 4, 0]}
+                  cursor="pointer"
+                  onClick={(_data: any, index: number) => {
+                    const sig = barData[index]?.signal
+                    if (sig) navigate(`/anomalies?signal=${sig}`)
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
           ) : (
@@ -506,6 +578,21 @@ export default function Overview() {
           )}
         </div>
       </div>
+
+      {/* Scan controls — de-emphasized at bottom */}
+      <DataSourceCard />
+
+      <ScanControl
+        status={prescanStatus}
+        cachedCount={summary?.total_providers ?? 0}
+        isLocal={ds?.is_local ?? false}
+        onScanBatch={handleScanBatch}
+        onReset={handleReset}
+        onAutoStart={handleAutoStart}
+        onAutoStop={handleAutoStop}
+        onRescore={handleRescore}
+        onSmartScan={handleSmartScan}
+      />
     </div>
   )
 }

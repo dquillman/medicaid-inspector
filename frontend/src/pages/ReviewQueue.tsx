@@ -1,23 +1,27 @@
 import { useState, useRef, useEffect } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { ReviewItem, ReviewCounts } from '../lib/types'
+import type { ReviewItem, ReviewCounts, AuditEntry } from '../lib/types'
 
-type StatusFilter = 'all' | 'pending' | 'reviewed' | 'confirmed_fraud' | 'dismissed'
+type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
 
 const STATUS_LABELS: Record<string, string> = {
-  pending:        'Pending',
-  reviewed:       'Reviewed',
-  confirmed_fraud:'Confirmed Fraud',
-  dismissed:      'Dismissed',
+  pending:         'Pending',
+  assigned:        'Assigned',
+  investigating:   'Investigating',
+  confirmed_fraud: 'Confirmed Fraud',
+  referred:        'Referred',
+  dismissed:       'Dismissed',
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  pending:        'text-yellow-400 bg-yellow-400/10',
-  reviewed:       'text-blue-400 bg-blue-400/10',
-  confirmed_fraud:'text-red-400 bg-red-400/10',
-  dismissed:      'text-gray-500 bg-gray-500/10',
+  pending:         'text-yellow-400 bg-yellow-400/10',
+  assigned:        'text-cyan-400 bg-cyan-400/10',
+  investigating:   'text-purple-400 bg-purple-400/10',
+  confirmed_fraud: 'text-red-400 bg-red-400/10',
+  referred:        'text-orange-400 bg-orange-400/10',
+  dismissed:       'text-gray-500 bg-gray-500/10',
 }
 
 function fmt(v: number) {
@@ -80,89 +84,213 @@ function NotesCell({ item, onSave }: { item: ReviewItem; onSave: (notes: string)
   )
 }
 
+function AssignedToCell({ item, onSave }: { item: ReviewItem; onSave: (assignedTo: string) => void }) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(item.assigned_to ?? '')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => { setValue(item.assigned_to ?? '') }, [item.assigned_to])
+
+  const handleClick = () => {
+    setEditing(true)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const handleBlur = () => {
+    setEditing(false)
+    if (value !== (item.assigned_to ?? '')) onSave(value)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') { e.preventDefault(); inputRef.current?.blur() }
+    if (e.key === 'Escape') { setValue(item.assigned_to ?? ''); setEditing(false) }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onBlur={handleBlur}
+        onKeyDown={handleKeyDown}
+        placeholder="Name..."
+        className="w-full bg-gray-800 text-gray-200 text-xs rounded px-2 py-1 border border-cyan-600 focus:outline-none"
+      />
+    )
+  }
+
+  return (
+    <button
+      onClick={handleClick}
+      className="text-left text-xs text-gray-500 hover:text-gray-300 transition-colors truncate max-w-[120px] block"
+      title={item.assigned_to || 'Click to assign'}
+    >
+      {item.assigned_to || <span className="italic">Assign...</span>}
+    </button>
+  )
+}
+
+function formatTimestamp(ts: number) {
+  if (!ts) return '--'
+  const d = new Date(ts * 1000)
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+    d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+}
+
+function AuditTrailPanel({ npi }: { npi: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ['review-history', npi],
+    queryFn: () => api.getReviewHistory(npi),
+  })
+
+  if (isLoading) return <div className="text-xs text-gray-500 py-2 px-4">Loading history...</div>
+
+  const trail: AuditEntry[] = data?.audit_trail ?? []
+  if (trail.length === 0) return <div className="text-xs text-gray-600 py-2 px-4 italic">No history yet</div>
+
+  return (
+    <div className="px-4 py-2 max-h-48 overflow-y-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-gray-600 border-b border-gray-800">
+            <th className="text-left py-1 pr-3">Time</th>
+            <th className="text-left py-1 pr-3">Action</th>
+            <th className="text-left py-1 pr-3">From</th>
+            <th className="text-left py-1 pr-3">To</th>
+            <th className="text-left py-1">Note</th>
+          </tr>
+        </thead>
+        <tbody>
+          {trail.slice().reverse().map((entry, i) => (
+            <tr key={i} className="border-b border-gray-800/50">
+              <td className="py-1 pr-3 text-gray-500 whitespace-nowrap">{formatTimestamp(entry.timestamp)}</td>
+              <td className="py-1 pr-3 text-gray-400">{entry.action === 'status_change' ? 'Status' : 'Assignment'}</td>
+              <td className="py-1 pr-3">
+                <span className={`px-1.5 py-0.5 rounded ${STATUS_COLORS[entry.previous_status] ?? 'text-gray-500'}`}>
+                  {STATUS_LABELS[entry.previous_status] ?? entry.previous_status}
+                </span>
+              </td>
+              <td className="py-1 pr-3">
+                <span className={`px-1.5 py-0.5 rounded ${STATUS_COLORS[entry.new_status] ?? 'text-gray-500'}`}>
+                  {STATUS_LABELS[entry.new_status] ?? entry.new_status}
+                </span>
+              </td>
+              <td className="py-1 text-gray-500 max-w-[200px] truncate" title={entry.note}>{entry.note || '--'}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function StatusDropdown({ item, onChange }: { item: ReviewItem; onChange: (status: string) => void }) {
+  return (
+    <select
+      value={item.status}
+      onChange={e => onChange(e.target.value)}
+      className="bg-gray-800 text-xs rounded px-1.5 py-1 border border-gray-700 text-gray-300 focus:outline-none focus:border-blue-500 cursor-pointer"
+    >
+      {Object.entries(STATUS_LABELS).map(([key, label]) => (
+        <option key={key} value={key}>{label}</option>
+      ))}
+    </select>
+  )
+}
+
 function ReviewRow({
   item,
   selected,
+  expanded,
+  rowIndex,
   onToggleSelect,
+  onToggleExpand,
   onStatusChange,
   onNotesSave,
+  onAssignedToSave,
 }: {
   item: ReviewItem
   selected: boolean
+  expanded: boolean
+  rowIndex: number
   onToggleSelect: (npi: string) => void
+  onToggleExpand: (npi: string) => void
   onStatusChange: (npi: string, status: string) => void
   onNotesSave: (npi: string, notes: string) => void
+  onAssignedToSave: (npi: string, assignedTo: string) => void
 }) {
+  const isFraud = item.status === 'confirmed_fraud'
   return (
-    <tr className={`border-b border-gray-800 hover:bg-gray-800/40 transition-colors ${selected ? 'bg-blue-900/20' : ''}`}>
-      <td className="px-3 py-3">
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={() => onToggleSelect(item.npi)}
-          className="accent-blue-500 cursor-pointer"
-        />
-      </td>
-      <td className="px-4 py-3">
-        <Link
-          to={`/providers/${item.npi}`}
-          className="text-blue-400 hover:text-blue-300 font-mono text-sm underline underline-offset-2"
-        >
-          {item.npi}
-        </Link>
-      </td>
-      <td className="px-4 py-3 text-sm text-gray-300 max-w-[160px] truncate" title={item.provider_name}>
-        {item.provider_name || <span className="text-gray-600 italic">—</span>}
-      </td>
-      <td className="px-4 py-3 text-xs text-gray-500">{item.state || '—'}</td>
-      <td className="px-4 py-3">
-        <RiskBadge score={item.risk_score} />
-      </td>
-      <td className="px-4 py-3 text-sm text-gray-300">
-        {item.flags.length > 0 ? (
-          <span className="text-red-400 font-medium">{item.flags.length} flag{item.flags.length !== 1 ? 's' : ''}</span>
-        ) : (
-          <span className="text-gray-600">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3 text-sm text-gray-400">{fmt(item.total_paid)}</td>
-      <td className="px-4 py-3">
-        <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[item.status] ?? 'text-gray-400'}`}>
-          {STATUS_LABELS[item.status] ?? item.status}
-        </span>
-      </td>
-      <td className="px-4 py-3">
-        <NotesCell item={item} onSave={notes => onNotesSave(item.npi, notes)} />
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => onStatusChange(item.npi, 'confirmed_fraud')}
-            disabled={item.status === 'confirmed_fraud'}
-            title="Confirm Fraud"
-            className="px-2 py-1 text-xs rounded bg-red-900 hover:bg-red-700 text-red-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+    <>
+      <tr className={`border-b border-gray-800 hover:bg-gray-800/40 transition-colors ${
+        selected ? 'bg-blue-900/20' : isFraud ? 'bg-red-950/20' : rowIndex % 2 === 1 ? 'bg-gray-900/30' : ''
+      } ${isFraud ? 'row-fraud' : ''}`}>
+        <td className="px-3 py-3">
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => onToggleSelect(item.npi)}
+            className="accent-blue-500 cursor-pointer"
+          />
+        </td>
+        <td className="px-4 py-3">
+          <Link
+            to={`/providers/${item.npi}`}
+            className="text-blue-400 hover:text-blue-300 font-mono-data text-sm underline underline-offset-2"
           >
-            Confirm
-          </button>
+            {item.npi}
+          </Link>
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-300 max-w-[160px] truncate" title={item.provider_name}>
+          {item.provider_name || <span className="text-gray-600 italic">--</span>}
+        </td>
+        <td className="px-4 py-3 text-xs text-gray-500">{item.state || '--'}</td>
+        <td className="px-4 py-3">
+          <RiskBadge score={item.risk_score} />
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-300">
+          {item.flags.length > 0 ? (
+            <span className="text-red-400 font-medium">{item.flags.length} flag{item.flags.length !== 1 ? 's' : ''}</span>
+          ) : (
+            <span className="text-gray-600">--</span>
+          )}
+        </td>
+        <td className="px-4 py-3 text-sm text-gray-400">{fmt(item.total_paid)}</td>
+        <td className="px-4 py-3">
+          <StatusDropdown item={item} onChange={status => onStatusChange(item.npi, status)} />
+        </td>
+        <td className="px-4 py-3">
+          <AssignedToCell item={item} onSave={assignedTo => onAssignedToSave(item.npi, assignedTo)} />
+        </td>
+        <td className="px-4 py-3">
+          <NotesCell item={item} onSave={notes => onNotesSave(item.npi, notes)} />
+        </td>
+        <td className="px-4 py-3 text-xs text-gray-500 whitespace-nowrap">
+          {formatTimestamp(item.updated_at)}
+        </td>
+        <td className="px-4 py-3">
           <button
-            onClick={() => onStatusChange(item.npi, 'dismissed')}
-            disabled={item.status === 'dismissed'}
-            title="Dismiss"
-            className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            onClick={() => onToggleExpand(item.npi)}
+            title="View audit history"
+            className={`px-2 py-1 text-xs rounded transition-colors ${
+              expanded
+                ? 'bg-blue-600 text-white'
+                : 'bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+            }`}
           >
-            Dismiss
+            {expanded ? 'Hide' : 'History'}
           </button>
-          <button
-            onClick={() => onStatusChange(item.npi, 'reviewed')}
-            disabled={item.status === 'reviewed'}
-            title="Mark Reviewed"
-            className="px-2 py-1 text-xs rounded bg-blue-900 hover:bg-blue-700 text-blue-300 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-          >
-            Review
-          </button>
-        </div>
-      </td>
-    </tr>
+        </td>
+      </tr>
+      {expanded && (
+        <tr className="bg-gray-900/50">
+          <td colSpan={12} className="p-0">
+            <AuditTrailPanel npi={item.npi} />
+          </td>
+        </tr>
+      )}
+    </>
   )
 }
 
@@ -171,23 +299,34 @@ function StatusTab({
   count,
   active,
   onClick,
+  variant = 'default',
 }: {
   label: string
   count: number
   active: boolean
   onClick: () => void
+  variant?: 'default' | 'danger'
 }) {
+  const isDanger = variant === 'danger'
   return (
     <button
       onClick={onClick}
       className={`px-4 py-2 text-sm font-medium rounded transition-colors flex items-center gap-2 ${
         active
-          ? 'bg-blue-600 text-white'
-          : 'bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700'
+          ? isDanger
+            ? 'bg-red-700 text-white border border-red-500'
+            : 'bg-blue-600 text-white'
+          : isDanger
+            ? 'bg-red-950 text-red-400 border border-red-800 hover:bg-red-900 hover:text-red-300'
+            : 'bg-gray-800 text-gray-400 hover:text-gray-200 hover:bg-gray-700'
       }`}
     >
-      {label}
-      <span className={`text-xs px-1.5 py-0.5 rounded-full ${active ? 'bg-blue-500' : 'bg-gray-700'}`}>
+      {isDanger && '\u26A0 '}{label}
+      <span className={`text-xs px-1.5 py-0.5 rounded-full font-bold ${
+        active
+          ? isDanger ? 'bg-red-500' : 'bg-blue-500'
+          : isDanger ? 'bg-red-800' : 'bg-gray-700'
+      }`}>
         {count}
       </span>
     </button>
@@ -196,7 +335,9 @@ function StatusTab({
 
 export default function ReviewQueue() {
   const queryClient = useQueryClient()
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [searchParams] = useSearchParams()
+  const statusParam = searchParams.get('status') as StatusFilter | null
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>(statusParam ?? 'all')
   const [page, setPage] = useState(1)
   const [selectedNpis, setSelectedNpis] = useState<Set<string>>(new Set())
   const LIMIT = 50
@@ -220,7 +361,7 @@ export default function ReviewQueue() {
   }, [countsData, queryClient])
 
   const counts: ReviewCounts = countsData ?? {
-    pending: 0, reviewed: 0, confirmed_fraud: 0, dismissed: 0, total: 0,
+    pending: 0, assigned: 0, investigating: 0, confirmed_fraud: 0, referred: 0, dismissed: 0, total: 0,
   }
 
   const { data, isLoading } = useQuery({
@@ -236,12 +377,15 @@ export default function ReviewQueue() {
   // Clear selection when page/filter changes
   useEffect(() => { setSelectedNpis(new Set()) }, [statusFilter, page])
 
+  const [expandedNpis, setExpandedNpis] = useState<Set<string>>(new Set())
+
   const updateMutation = useMutation({
-    mutationFn: ({ npi, update }: { npi: string; update: { status?: string; notes?: string } }) =>
+    mutationFn: ({ npi, update }: { npi: string; update: { status?: string; notes?: string; assigned_to?: string | null } }) =>
       api.updateReview(npi, update),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review-queue'] })
       queryClient.invalidateQueries({ queryKey: ['review-counts'] })
+      queryClient.invalidateQueries({ queryKey: ['review-history'] })
     },
   })
 
@@ -251,6 +395,7 @@ export default function ReviewQueue() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review-queue'] })
       queryClient.invalidateQueries({ queryKey: ['review-counts'] })
+      queryClient.invalidateQueries({ queryKey: ['review-history'] })
       setSelectedNpis(new Set())
     },
   })
@@ -260,6 +405,17 @@ export default function ReviewQueue() {
 
   const handleNotesSave = (npi: string, notes: string) =>
     updateMutation.mutate({ npi, update: { notes } })
+
+  const handleAssignedToSave = (npi: string, assignedTo: string) =>
+    updateMutation.mutate({ npi, update: { assigned_to: assignedTo || null } })
+
+  const handleToggleExpand = (npi: string) => {
+    setExpandedNpis(prev => {
+      const next = new Set(prev)
+      next.has(npi) ? next.delete(npi) : next.add(npi)
+      return next
+    })
+  }
 
   const handleToggleSelect = (npi: string) => {
     setSelectedNpis(prev => {
@@ -319,26 +475,40 @@ export default function ReviewQueue() {
   const allOnPageSelected = items.length > 0 && items.every(i => selectedNpis.has(i.npi))
 
   const tabs: { key: StatusFilter; label: string; count: number }[] = [
-    { key: 'all',            label: 'All',       count: counts.total },
-    { key: 'pending',        label: 'Pending',   count: counts.pending },
-    { key: 'confirmed_fraud',label: 'Confirmed', count: counts.confirmed_fraud },
-    { key: 'reviewed',       label: 'Reviewed',  count: counts.reviewed },
-    { key: 'dismissed',      label: 'Dismissed', count: counts.dismissed },
+    { key: 'all',             label: 'All',           count: counts.total },
+    { key: 'pending',         label: 'Pending',       count: counts.pending },
+    { key: 'assigned',        label: 'Assigned',      count: counts.assigned },
+    { key: 'investigating',   label: 'Investigating', count: counts.investigating },
+    { key: 'confirmed_fraud', label: 'Confirmed',     count: counts.confirmed_fraud },
+    { key: 'referred',        label: 'Referred',      count: counts.referred },
+    { key: 'dismissed',       label: 'Dismissed',     count: counts.dismissed },
   ]
 
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Review Queue</h1>
-          <p className="text-gray-400 text-sm mt-1">
-            Potential fraud cases flagged during scan
+          <h1 className="text-2xl font-bold text-white uppercase tracking-wide">Investigation Queue</h1>
+          <p className="text-gray-500 text-xs mt-1 uppercase tracking-wider">
+            Flagged Providers Requiring Human Review
+          </p>
+          <p className="text-xs text-gray-400 mt-2">
+            <span className="text-yellow-400 font-semibold">{counts.pending}</span> cases pending review
+            <span className="text-gray-600 mx-2">&middot;</span>
+            <span className="text-red-400 font-semibold">{counts.confirmed_fraud}</span> confirmed fraud
+            <span className="text-gray-600 mx-2">&middot;</span>
+            <span className="text-orange-400 font-semibold">{counts.referred}</span> referred to law enforcement
           </p>
         </div>
         <button
           onClick={handleExportCSV}
-          className="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded transition-colors border border-gray-600"
+          className={`px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 ${
+            statusFilter === 'confirmed_fraud'
+              ? 'bg-red-700 hover:bg-red-600 text-white border-red-500 shadow-lg shadow-red-900/30'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600'
+          }`}
         >
+          {statusFilter === 'confirmed_fraud' && <span>&#8659;</span>}
           Export Confirmed CSV
         </button>
       </div>
@@ -352,42 +522,43 @@ export default function ReviewQueue() {
             count={tab.count}
             active={statusFilter === tab.key}
             onClick={() => { setStatusFilter(tab.key); setPage(1) }}
+            variant={tab.key === 'confirmed_fraud' ? 'danger' : 'default'}
           />
         ))}
       </div>
 
       {/* Bulk action bar */}
       {selectedNpis.size > 0 && (
-        <div className="flex items-center gap-3 px-4 py-2.5 bg-blue-900/30 border border-blue-700 rounded-lg">
-          <span className="text-sm text-blue-300 font-medium">
-            {selectedNpis.size} selected
+        <div className="flex items-center gap-4 px-5 py-3 bg-blue-950/60 border-2 border-blue-600 rounded-lg shadow-lg">
+          <span className="text-sm text-blue-200 font-bold uppercase tracking-wider">
+            {selectedNpis.size} Selected
           </span>
           <div className="flex gap-2 ml-2">
             <button
               onClick={() => handleBulkAction('confirmed_fraud')}
               disabled={bulkMutation.isPending}
-              className="px-3 py-1 text-xs rounded bg-red-800 hover:bg-red-700 text-red-200 transition-colors disabled:opacity-50"
+              className="px-4 py-1.5 text-xs rounded bg-red-700 hover:bg-red-600 text-white font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
             >
-              Confirm All
+              Confirm Fraud
             </button>
             <button
               onClick={() => handleBulkAction('dismissed')}
               disabled={bulkMutation.isPending}
-              className="px-3 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors disabled:opacity-50"
+              className="px-4 py-1.5 text-xs rounded bg-gray-600 hover:bg-gray-500 text-white font-medium transition-colors disabled:opacity-50"
             >
               Dismiss All
             </button>
             <button
               onClick={() => handleBulkAction('reviewed')}
               disabled={bulkMutation.isPending}
-              className="px-3 py-1 text-xs rounded bg-blue-800 hover:bg-blue-700 text-blue-200 transition-colors disabled:opacity-50"
+              className="px-4 py-1.5 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white font-medium transition-colors disabled:opacity-50"
             >
               Mark Reviewed
             </button>
           </div>
           <button
             onClick={() => setSelectedNpis(new Set())}
-            className="ml-auto text-xs text-gray-500 hover:text-gray-300"
+            className="ml-auto text-xs text-gray-400 hover:text-gray-200"
           >
             Clear selection
           </button>
@@ -424,19 +595,25 @@ export default function ReviewQueue() {
                 <th className="px-4 py-3">Signals</th>
                 <th className="px-4 py-3">Total Paid</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Assigned To</th>
                 <th className="px-4 py-3">Notes</th>
-                <th className="px-4 py-3">Actions</th>
+                <th className="px-4 py-3">Last Updated</th>
+                <th className="px-4 py-3">Audit</th>
               </tr>
             </thead>
             <tbody>
-              {items.map(item => (
+              {items.map((item, idx) => (
                 <ReviewRow
                   key={item.npi}
                   item={item}
+                  rowIndex={idx}
                   selected={selectedNpis.has(item.npi)}
+                  expanded={expandedNpis.has(item.npi)}
                   onToggleSelect={handleToggleSelect}
+                  onToggleExpand={handleToggleExpand}
                   onStatusChange={handleStatusChange}
                   onNotesSave={handleNotesSave}
+                  onAssignedToSave={handleAssignedToSave}
                 />
               ))}
             </tbody>

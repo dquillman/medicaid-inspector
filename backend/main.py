@@ -55,6 +55,17 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
         ghost_billing,
         total_spend_outlier,
         billing_consistency,
+        bene_concentration,
+        upcoding_pattern,
+        address_cluster_risk,
+        oig_excluded,
+        compute_address_clusters,
+        specialty_mismatch,
+        corporate_shell_risk,
+        compute_auth_official_clusters,
+        dead_npi_billing,
+        new_provider_explosion,
+        geographic_impossibility,
     )
     import statistics as _stats
     from collections import defaultdict as _dd
@@ -215,6 +226,10 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
         spend_mean = _stats.mean(all_spend)  if len(all_spend) >= 3 else 0.0
         spend_std  = _stats.stdev(all_spend) if len(all_spend) >= 3 else 0.0
 
+        # Pre-compute cluster sizes from prescan cache NPPES data
+        cluster_sizes = compute_address_clusters()
+        auth_clusters = compute_auth_official_clusters()
+
         results = []
         for row in agg_rows:
             npi      = row["npi"]
@@ -232,8 +247,17 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
             s6 = ghost_billing(row, timeline)
             s7 = total_spend_outlier(row, spend_mean, spend_std)
             s8 = billing_consistency(row, timeline)
+            s9 = bene_concentration(row)
+            s10 = upcoding_pattern(row, hcpcs)
+            s11 = address_cluster_risk(row, cluster_sizes.get(npi, 0))
+            s12 = oig_excluded(npi)
+            s13 = specialty_mismatch(row, hcpcs)
+            s14 = corporate_shell_risk(row, auth_clusters.get(npi, 0))
+            s15 = dead_npi_billing(row)
+            s16 = new_provider_explosion(row)
+            s17 = geographic_impossibility(row)
 
-            signals = [s1, s2, s3, s4, s5, s6, s7, s8]
+            signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17]
             composite = sum(s["score"] * s["weight"] for s in signals)
             risk_score = round(min(composite, 100.0), 1)
             flags = [s for s in signals if s["flagged"]]
@@ -252,7 +276,7 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
         new_offset = offset + len(agg_rows)
         set_scan_progress(new_offset, total, active_filter, batches + 1)
 
-        flagged_results = [r for r in results if r["risk_score"] >= settings.RISK_THRESHOLD]
+        flagged_results = [r for r in results if r["risk_score"] > settings.RISK_THRESHOLD]
         flagged = len(flagged_results)
         if flagged_results:
             added = add_to_review_queue(flagged_results)
@@ -315,7 +339,7 @@ async def lifespan(app: FastAPI):
 
         # Backfill review queue from existing cache (catches providers scanned
         # before the review queue feature existed, and applies new threshold)
-        flagged = [p for p in get_prescanned() if p.get("risk_score", 0) >= settings.RISK_THRESHOLD]
+        flagged = [p for p in get_prescanned() if p.get("risk_score", 0) > settings.RISK_THRESHOLD]
         if flagged:
             added = add_to_review_queue(flagged)
             log.info("Backfilled review queue with %d providers from prescan cache", added)
@@ -411,6 +435,17 @@ async def rescore_cached_providers():
         ghost_billing,
         total_spend_outlier,
         billing_consistency,
+        bene_concentration,
+        upcoding_pattern,
+        address_cluster_risk,
+        oig_excluded,
+        compute_address_clusters,
+        specialty_mismatch,
+        corporate_shell_risk,
+        compute_auth_official_clusters,
+        dead_npi_billing,
+        new_provider_explosion,
+        geographic_impossibility,
     )
     import statistics as _stats
     from collections import defaultdict as _dd
@@ -449,10 +484,15 @@ async def rescore_cached_providers():
     spend_mean = _stats.mean(all_spend)  if len(all_spend) >= 3 else 0.0
     spend_std  = _stats.stdev(all_spend) if len(all_spend) >= 3 else 0.0
 
+    # Pre-compute cluster sizes from NPPES data
+    cluster_sizes = compute_address_clusters()
+    auth_clusters = compute_auth_official_clusters()
+
     rescored = []
     for p in providers:
         hcpcs    = p.get("hcpcs") or []
         timeline = p.get("timeline") or []
+        npi      = p["npi"]
 
         s1 = billing_concentration(p, hcpcs)
         code = p.get("top_hcpcs") or (hcpcs[0].get("hcpcs_code", "") if hcpcs else "")
@@ -465,8 +505,17 @@ async def rescore_cached_providers():
         s6 = ghost_billing(p, timeline)
         s7 = total_spend_outlier(p, spend_mean, spend_std)
         s8 = billing_consistency(p, timeline)
+        s9 = bene_concentration(p)
+        s10 = upcoding_pattern(p, hcpcs)
+        s11 = address_cluster_risk(p, cluster_sizes.get(npi, 0))
+        s12 = oig_excluded(npi)
+        s13 = specialty_mismatch(p, hcpcs)
+        s14 = corporate_shell_risk(p, auth_clusters.get(npi, 0))
+        s15 = dead_npi_billing(p)
+        s16 = new_provider_explosion(p)
+        s17 = geographic_impossibility(p)
 
-        signals = [s1, s2, s3, s4, s5, s6, s7, s8]
+        signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17]
         risk_score = round(min(sum(s["score"] * s["weight"] for s in signals), 100.0), 1)
         flags = [s for s in signals if s["flagged"]]
 
@@ -476,7 +525,7 @@ async def rescore_cached_providers():
 
     # Rebuild review queue with updated scores
     from core.review_store import add_to_review_queue, get_review_queue, update_review_item
-    flagged = [p for p in rescored if p["risk_score"] >= settings.RISK_THRESHOLD]
+    flagged = [p for p in rescored if p["risk_score"] > settings.RISK_THRESHOLD]
     added = add_to_review_queue(flagged)
 
     log.info("Rescore complete: %d providers, %d flagged, %d new review items", len(rescored), len(flagged), added)
@@ -502,7 +551,7 @@ async def _run_smart_scan(state_filter: Optional[str]):
                candidates (any metric >= 2σ above mean, or total_paid >= $1M).
 
     Phase 2 — For each candidate batch, fetch HCPCS + timeline, then run all
-               8 fraud signals for a full risk score.  Only candidates are stored
+               17 fraud signals for a full risk score.  Only candidates are stored
                in the prescan cache and review queue.
     """
     global _scan_running, _auto_mode, _smart_scan_mode
@@ -516,6 +565,17 @@ async def _run_smart_scan(state_filter: Optional[str]):
         ghost_billing,
         total_spend_outlier,
         billing_consistency,
+        bene_concentration,
+        upcoding_pattern,
+        address_cluster_risk,
+        oig_excluded,
+        compute_address_clusters,
+        specialty_mismatch,
+        corporate_shell_risk,
+        compute_auth_official_clusters,
+        dead_npi_billing,
+        new_provider_explosion,
+        geographic_impossibility,
     )
     import statistics as _stats
     from collections import defaultdict as _dd
@@ -658,6 +718,10 @@ async def _run_smart_scan(state_filter: Optional[str]):
                 for code, vals in peer_cpb.items() if len(vals) >= 3
             }
 
+            # Pre-compute cluster sizes from prescan cache NPPES data
+            cluster_sizes = compute_address_clusters()
+            auth_clusters = compute_auth_official_clusters()
+
             for row in batch:
                 npi      = row["npi"]
                 hcpcs    = hcpcs_by_npi.get(npi, [])
@@ -674,8 +738,17 @@ async def _run_smart_scan(state_filter: Optional[str]):
                 s6 = ghost_billing(row, timeline)
                 s7 = total_spend_outlier(row, spend_mean, spend_std)
                 s8 = billing_consistency(row, timeline)
+                s9 = bene_concentration(row)
+                s10 = upcoding_pattern(row, hcpcs)
+                s11 = address_cluster_risk(row, cluster_sizes.get(npi, 0))
+                s12 = oig_excluded(npi)
+                s13 = specialty_mismatch(row, hcpcs)
+                s14 = corporate_shell_risk(row, auth_clusters.get(npi, 0))
+                s15 = dead_npi_billing(row)
+                s16 = new_provider_explosion(row)
+                s17 = geographic_impossibility(row)
 
-                signals    = [s1, s2, s3, s4, s5, s6, s7, s8]
+                signals    = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17]
                 risk_score = round(min(sum(s["score"] * s["weight"] for s in signals), 100.0), 1)
                 flags      = [s for s in signals if s["flagged"]]
 
@@ -705,7 +778,7 @@ async def _run_smart_scan(state_filter: Optional[str]):
             set_scan_progress(len(results), n_candidates, state_filter, batch_i + 1)
 
             # Update review queue incrementally too
-            batch_flagged = [r for r in results[-len(batch):] if r["risk_score"] >= settings.RISK_THRESHOLD]
+            batch_flagged = [r for r in results[-len(batch):] if r["risk_score"] > settings.RISK_THRESHOLD]
             if batch_flagged:
                 add_to_review_queue(batch_flagged)
 
@@ -803,7 +876,7 @@ async def summary():
     total_paid = sum(p.get("total_paid") or 0 for p in prescanned)
     total_claims = sum(p.get("total_claims") or 0 for p in prescanned)
     total_bene = sum(p.get("total_beneficiaries") or 0 for p in prescanned)
-    flagged    = sum(1 for p in prescanned if p.get("risk_score", 0) >= settings.RISK_THRESHOLD)
+    flagged    = sum(1 for p in prescanned if p.get("risk_score", 0) > settings.RISK_THRESHOLD)
     high_risk  = sum(1 for p in prescanned if p.get("risk_score", 0) >= 50)
     avg_risk = sum(p.get("risk_score", 0) for p in prescanned) / len(prescanned)
 

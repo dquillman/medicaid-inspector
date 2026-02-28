@@ -1,6 +1,6 @@
 """
 Composite risk scorer.
-Fetches all required data for a provider from DuckDB, runs all 6 detectors,
+Fetches all required data for a provider from DuckDB, runs all 17 detectors,
 and returns a composite score (0–100) + list of active flags.
 """
 from __future__ import annotations
@@ -14,6 +14,17 @@ from services.anomaly_detector import (
     billing_ramp_rate,
     bust_out_pattern,
     ghost_billing,
+    bene_concentration,
+    upcoding_pattern,
+    address_cluster_risk,
+    oig_excluded,
+    compute_address_clusters,
+    specialty_mismatch,
+    corporate_shell_risk,
+    compute_auth_official_clusters,
+    dead_npi_billing,
+    new_provider_explosion,
+    geographic_impossibility,
     SignalResult,
 )
 
@@ -37,6 +48,10 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
     peer_mean = float(peer.get("mean_rpb") or 0)
     peer_std = float(peer.get("std_rpb") or 0)
 
+    # Pre-compute cluster sizes from prescan cache
+    cluster_sizes = compute_address_clusters()
+    auth_clusters = compute_auth_official_clusters()
+
     signals: list[SignalResult] = [
         billing_concentration(provider_agg, hcpcs_rows),
         revenue_per_bene_outlier(provider_agg, peer_mean, peer_std),
@@ -44,6 +59,15 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
         billing_ramp_rate(timeline_rows),
         bust_out_pattern(timeline_rows),
         ghost_billing(provider_agg, timeline_rows),
+        bene_concentration(provider_agg),
+        upcoding_pattern(provider_agg, hcpcs_rows),
+        address_cluster_risk(provider_agg, cluster_sizes.get(npi, 0)),
+        oig_excluded(npi),
+        specialty_mismatch(provider_agg, hcpcs_rows),
+        corporate_shell_risk(provider_agg, auth_clusters.get(npi, 0)),
+        dead_npi_billing(provider_agg),
+        new_provider_explosion(provider_agg),
+        geographic_impossibility(provider_agg),
     ]
 
     composite = sum(s["score"] * s["weight"] for s in signals)

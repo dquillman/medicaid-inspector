@@ -28,7 +28,7 @@ export interface ScoredProvider extends ProviderAggregate {
   flags: SignalResult[]
   signal_results: SignalResult[]
   // Optionally enriched from review queue
-  review_status?: 'pending' | 'reviewed' | 'confirmed_fraud' | 'dismissed'
+  review_status?: 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
   review_notes?: string
 }
 
@@ -120,7 +120,7 @@ export interface Summary {
   total_paid: number
   total_claims: number
   total_beneficiaries: number
-  flagged_providers: number   // score >= review threshold (10)
+  flagged_providers: number   // score > review threshold (10)
   high_risk_providers: number // score >= 50
   avg_risk_score: number
   prescan_complete: boolean
@@ -132,6 +132,14 @@ export interface SignalSummary {
   count: number
 }
 
+export interface AuditEntry {
+  action: string
+  previous_status: string
+  new_status: string
+  timestamp: number
+  note?: string
+}
+
 export interface ReviewItem {
   npi: string
   risk_score: number
@@ -139,10 +147,12 @@ export interface ReviewItem {
   signal_results: SignalResult[]
   total_paid: number
   total_claims: number
-  status: 'pending' | 'reviewed' | 'confirmed_fraud' | 'dismissed'
+  status: 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
   notes: string
+  assigned_to?: string | null
   added_at: number
   updated_at: number
+  audit_trail?: AuditEntry[]
   // Enriched from prescan cache
   provider_name?: string
   state?: string
@@ -209,8 +219,25 @@ export interface ProviderPeers {
 
 export interface ReviewCounts {
   pending: number
-  reviewed: number
+  assigned: number
+  investigating: number
   confirmed_fraud: number
+  referred: number
   dismissed: number
   total: number
+}
+
+export interface OpenPaymentsData {
+  has_payments: boolean
+  payment_count: number
+  total_amount: number
+  unique_companies: string[]
+  records: Record<string, unknown>[]
+  error?: string
+}
+
+export interface SamExclusion {
+  excluded: boolean
+  records: Record<string, unknown>[]
+  error?: string
 }
