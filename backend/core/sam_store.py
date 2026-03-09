@@ -1,29 +1,46 @@
 """
 SAM.gov federal exclusion list check.
-Uses the SAM.gov Entity API (public, no key needed for basic queries).
+Uses the SAM.gov Entity/Exclusions API v4.
 
-NOTE: The SAM.gov API uses DEMO_KEY for limited testing (rate-limited).
-For production use, register at https://sam.gov/content/entity-information
-to obtain a personal API key and replace DEMO_KEY below.
+NOTE: SAM.gov requires a real API key — DEMO_KEY is not supported.
+Register at https://sam.gov/profile/details to get a free Public API Key,
+then set the SAM_API_KEY environment variable.
 """
 import logging
+import os
 import httpx
 
 log = logging.getLogger(__name__)
 
-_SAM_API_BASE = "https://api.sam.gov/entity-information/v3/exclusions"
+_SAM_API_BASE = "https://api.sam.gov/entity-information/v4/exclusions"
+_SAM_API_KEY = os.environ.get("SAM_API_KEY", "")
 
 
 async def check_sam_exclusion(npi: str = "", name: str = "") -> dict:
     """
     Check if a provider is on the SAM.gov federal exclusion list.
-    Can search by name since SAM doesn't always have NPI.
+    Can search by name since SAM doesn't index by NPI.
     Returns {"excluded": bool, "records": [...]}
     """
+    if not _SAM_API_KEY:
+        return {
+            "excluded": False,
+            "records": [],
+            "error": "No SAM_API_KEY configured. Get a free key at sam.gov/profile/details and set SAM_API_KEY env var.",
+        }
+
+    if not name:
+        return {
+            "excluded": False,
+            "records": [],
+            "error": "No provider name available for SAM.gov lookup (requires name, not NPI).",
+        }
+
     try:
-        params = {"api_key": "DEMO_KEY"}  # SAM.gov allows DEMO_KEY for limited queries
-        if name:
-            params["recipientName"] = name
+        params = {
+            "api_key": _SAM_API_KEY,
+            "exclusionName": name,
+        }
 
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(_SAM_API_BASE, params=params)
@@ -31,9 +48,19 @@ async def check_sam_exclusion(npi: str = "", name: str = "") -> dict:
                 data = resp.json()
                 records = data.get("results", [])
                 return {"excluded": len(records) > 0, "records": records[:5]}
+            elif resp.status_code == 403:
+                return {
+                    "excluded": False,
+                    "records": [],
+                    "error": "SAM.gov API key is invalid or rate-limited. Check your SAM_API_KEY.",
+                }
             else:
                 log.warning("SAM.gov API returned %d", resp.status_code)
-                return {"excluded": False, "records": [], "error": f"API returned {resp.status_code}"}
+                return {
+                    "excluded": False,
+                    "records": [],
+                    "error": f"SAM.gov API returned {resp.status_code}",
+                }
     except Exception as e:
         log.warning("SAM.gov check failed: %s", e)
         return {"excluded": False, "records": [], "error": str(e)}

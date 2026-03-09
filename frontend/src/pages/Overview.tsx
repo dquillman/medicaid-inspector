@@ -531,7 +531,7 @@ export default function Overview() {
         {/* State heatmap */}
         <div className="card">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Flagged Providers by State</h2>
-          <div className="h-64">
+          <div className="h-[28rem]">
             {heatmap ? (
               <StateHeatmap data={heatmap.by_state} onStateClick={(st) => navigate(`/providers?state=${st}`)} />
             ) : (

@@ -24,7 +24,7 @@ from data.duckdb_client import (
     provider_aggregate_sql, count_providers_sql,
     detect_state_column, get_parquet_path,
 )
-from routes import providers, anomalies, states, network, review
+from routes import providers, anomalies, states, network, review, auth, billing
 from core.review_store import load_review_from_disk, add_to_review_queue
 from core.oig_store import load_oig_from_disk, download_oig_list
 
@@ -377,6 +377,8 @@ app.include_router(anomalies.router)
 app.include_router(states.router)
 app.include_router(network.router)
 app.include_router(review.router)
+app.include_router(auth.router)
+app.include_router(billing.router)
 
 
 # ── Scan control endpoints ────────────────────────────────────────────────────

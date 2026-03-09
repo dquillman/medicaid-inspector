@@ -381,7 +381,19 @@ export default function ProviderDetail() {
             )}
           </h2>
           {openPaymentsData ? (
-            openPaymentsData.error ? (
+            (openPaymentsData as any).unavailable ? (
+              <div className="space-y-2">
+                <p className="text-sm text-gray-400">{(openPaymentsData as any).message}</p>
+                <a
+                  href={(openPaymentsData as any).lookup_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-block text-xs px-3 py-1.5 bg-blue-900/40 border border-blue-700 rounded text-blue-400 hover:bg-blue-900/60 transition-colors"
+                >
+                  Search on CMS Open Payments &rarr;
+                </a>
+              </div>
+            ) : openPaymentsData.error ? (
               <p className="text-xs text-gray-500">Could not reach Open Payments API: {openPaymentsData.error}</p>
             ) : openPaymentsData.has_payments ? (
               <div className="space-y-3">
@@ -444,7 +456,19 @@ export default function ProviderDetail() {
           </h2>
           {samData ? (
             samData.error ? (
-              <p className="text-xs text-gray-500">Could not reach SAM.gov API: {samData.error}</p>
+              <div className="space-y-2">
+                <p className="text-xs text-gray-400">{samData.error}</p>
+                {samData.error.includes('SAM_API_KEY') && (
+                  <a
+                    href="https://sam.gov/profile/details"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-block text-xs px-3 py-1.5 bg-blue-900/40 border border-blue-700 rounded text-blue-400 hover:bg-blue-900/60 transition-colors"
+                  >
+                    Get free API key at SAM.gov &rarr;
+                  </a>
+                )}
+              </div>
             ) : samData.excluded ? (
               <div className="space-y-2">
                 <p className="text-sm text-red-400">

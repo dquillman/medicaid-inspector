@@ -115,7 +115,15 @@ _CPT_DESCRIPTIONS: dict[str, str] = {
     "71250": "CT thorax, without contrast",
     "73721": "MRI knee, without contrast",
     "74177": "CT abdomen and pelvis, with contrast",
-    # Therapy
+    # Speech-language therapy
+    "92507": "Speech/language/communication treatment, individual",
+    "92508": "Speech/language/communication treatment, group",
+    "92521": "Evaluation of speech fluency",
+    "92522": "Evaluation of speech sound production",
+    "92523": "Evaluation of speech sound production with language comprehension",
+    "92524": "Behavioral and qualitative analysis of voice and resonance",
+    "92526": "Treatment of swallowing dysfunction and/or oral function",
+    # Physical / occupational therapy
     "97110": "Therapeutic exercises",
     "97112": "Neuromuscular reeducation",
     "97116": "Gait training",
@@ -1124,6 +1132,108 @@ _CPT_DESCRIPTIONS: dict[str, str] = {
     "99496": "Transitional care management, high complexity, 7-day follow-up",
     "99497": "Advance care planning, first 30 minutes",
     "99498": "Advance care planning, each additional 30 minutes",
+    # Dental (CDT D-codes)
+    "D0120": "Periodic oral evaluation, established patient",
+    "D0140": "Limited oral evaluation, problem focused",
+    "D0145": "Oral evaluation for patient under 3",
+    "D0150": "Comprehensive oral evaluation, new or established patient",
+    "D0210": "Intraoral radiographic images, complete series",
+    "D0220": "Intraoral periapical, first radiographic image",
+    "D0230": "Intraoral periapical, each additional radiographic image",
+    "D0272": "Bitewings, two radiographic images",
+    "D0274": "Bitewings, four radiographic images",
+    "D0330": "Panoramic radiographic image",
+    "D1110": "Prophylaxis (cleaning), adult",
+    "D1120": "Prophylaxis (cleaning), child",
+    "D1206": "Topical application of fluoride varnish",
+    "D1208": "Topical application of fluoride",
+    "D1351": "Sealant, per tooth",
+    "D2330": "Resin-based composite, one surface, anterior",
+    "D2391": "Resin-based composite, one surface, posterior",
+    "D2392": "Resin-based composite, two surfaces, posterior",
+    "D2393": "Resin-based composite, three surfaces, posterior",
+    "D2930": "Prefabricated stainless steel crown, primary tooth",
+    "D3220": "Therapeutic pulpotomy",
+    "D7140": "Extraction, erupted tooth or exposed root",
+    "D7210": "Extraction, erupted tooth requiring elevation of flap and/or removal of bone",
+    "D9230": "Inhalation of nitrous oxide / analgesia, anxiolysis",
+    # Lab — additional
+    "80305": "Drug test, presumptive, direct optical observation",
+    "80307": "Drug test, presumptive, chemistry analyzers",
+    "83605": "Lactic acid (lactate)",
+    "83655": "Lead, quantitative",
+    "87426": "Infectious agent antigen detection, SARS-CoV-2 (COVID-19)",
+    "87428": "Infectious agent antigen detection, SARS-CoV-2, rapid test",
+    "87651": "Streptococcus, group A, amplified probe",
+    "87804": "Influenza virus assay with direct optical observation",
+    "87807": "Respiratory syncytial virus assay with direct optical observation",
+    "87811": "SARS-CoV-2 (COVID-19), rapid antigen test",
+    # Audiology / vision screening
+    "92551": "Screening test, pure tone, air only",
+    "99173": "Visual acuity screening",
+    # Critical care
+    "99291": "Critical care, first 30-74 minutes",
+    # Specimen handling
+    "99000": "Handling and/or conveyance of specimen for transfer",
+    # Vaccines — additional
+    "90619": "Meningococcal conjugate vaccine, quadrivalent (MenACWY-TT)",
+    "90677": "Pneumococcal conjugate vaccine, 20-valent (PCV20)",
+    "90680": "Rotavirus vaccine, pentavalent, 3-dose",
+    "90744": "Hepatitis B vaccine, pediatric, 3-dose",
+    "0001A": "COVID-19 vaccine administration, Pfizer, first dose",
+    "0002A": "COVID-19 vaccine administration, Pfizer, second dose",
+    "0011A": "COVID-19 vaccine administration, Moderna, first dose",
+    "0012A": "COVID-19 vaccine administration, Moderna, second dose",
+    "0071A": "COVID-19 vaccine administration, Pfizer, booster",
+    "0072A": "COVID-19 vaccine administration, Moderna, booster",
+    # HCPCS Level II — drugs / injections
+    "J0696": "Ceftriaxone sodium injection",
+    "J1100": "Dexamethasone sodium phosphate injection, 1 mg",
+    "J1885": "Ketorolac tromethamine injection, per 15 mg",
+    "J2405": "Ondansetron HCl injection, per 1 mg",
+    "J3010": "Fentanyl citrate injection, per 0.1 mg",
+    "J3301": "Triamcinolone acetonide injection, per 10 mg",
+    "J3490": "Unclassified drugs",
+    # HCPCS Level II — behavioral health services
+    "H0004": "Behavioral health counseling and therapy, per 15 minutes",
+    "H0031": "Mental health assessment by non-physician",
+    "H0032": "Mental health service plan development by non-physician",
+    "H2015": "Comprehensive community support services, per 15 minutes",
+    "H2017": "Psychosocial rehabilitation services, per 15 minutes",
+    "H2019": "Therapeutic behavioral services, per 15 minutes",
+    # HCPCS Level II — home/community/transport
+    "T1015": "Clinic visit/encounter",
+    "T1016": "Case management, per 15 minutes",
+    "T1019": "Personal care services, per 15 minutes",
+    "S5125": "Attendant care services, per 15 minutes",
+    "A0425": "Ground mileage, per statute mile",
+    "Q9967": "Low osmolar contrast material, 300-399 mg/ml iodine, per ml",
+    # HCPCS Level II — administrative / E&M add-on
+    "G0008": "Administration of influenza virus vaccine",
+    "G0467": "Federally qualified health center (FQHC) visit, established patient",
+    "G2211": "Visit complexity add-on for E/M services",
+    "G8510": "Screening for depression negative, no follow-up plan required",
+    "U0003": "COVID-19 infectious agent detection, high throughput",
+    # Quality measure codes (PQRS)
+    "1036F": "Current medications documented in medical record",
+    "1159F": "Medication list documented in medical record",
+    "3008F": "Body mass index documented",
+    "3074F": "Most recent systolic blood pressure < 130 mmHg",
+    "3075F": "Most recent systolic blood pressure 130-139 mmHg",
+    "3077F": "Most recent systolic blood pressure >= 140 mmHg",
+    "3078F": "Most recent diastolic blood pressure < 80 mmHg",
+    "3079F": "Most recent diastolic blood pressure 80-89 mmHg",
+    # Revenue codes — Behavioral health treatment/services (091X)
+    "0910": "Behavioral health treatment, general",
+    "0911": "Behavioral health treatment, electroshock therapy",
+    "0912": "Behavioral health treatment, milieu therapy",
+    "0913": "Behavioral health treatment, play therapy",
+    "0914": "Behavioral health treatment, individual therapy",
+    "0915": "Behavioral health treatment, group therapy",
+    "0916": "Behavioral health treatment, family therapy",
+    "0917": "Behavioral health treatment, biofeedback",
+    "0918": "Behavioral health treatment, testing",
+    "0919": "Behavioral health treatment, other",
 }
 
 
@@ -1272,6 +1382,7 @@ def _build_report_html(provider: dict, review_item: dict | None, hcpcs_descripti
     hcpcs_list = provider.get("hcpcs") or []
     total_hcpcs_paid = sum(h.get("total_paid", 0) for h in hcpcs_list) or 1
     hcpcs_rows = ""
+    no_desc_html = '<em style="color:#9ca3af">—</em>'
     for h in hcpcs_list[:25]:
         code = h.get("hcpcs_code", "")
         paid = h.get("total_paid", 0)
@@ -1279,7 +1390,7 @@ def _build_report_html(provider: dict, review_item: dict | None, hcpcs_descripti
         desc = hcpcs_descriptions.get(code, "")
         hcpcs_rows += (
             f"<tr><td><strong>{esc(code)}</strong></td>"
-            f"<td>{esc(desc) if desc else '<em style=\"color:#9ca3af\">—</em>'}</td>"
+            f"<td>{esc(desc) if desc else no_desc_html}</td>"
             f"<td style='text-align:right'>{fmt(paid)}</td>"
             f"<td style='text-align:right'>{h.get('total_claims',0):,}</td>"
             f"<td style='text-align:right'>{pct:.1f}%</td></tr>\n"

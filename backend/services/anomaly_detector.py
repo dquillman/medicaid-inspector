@@ -986,7 +986,7 @@ SPECIALTY_HCPCS_MAP: dict[str, list[str]] = {
     "physical therap": [
         "970", "971", "972", "973", "974", "975", "976", "977", "97",
     ],
-    "speech": ["920", "V57"],
+    "speech": ["920", "921", "925", "V57"],
     "occupational therap": ["970", "971", "972", "973", "97"],
 }
 
