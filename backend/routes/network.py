@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from data.duckdb_client import query_async, PARQUET
+from routes.auth import require_user
 
-router = APIRouter(prefix="/api/network", tags=["network"])
+router = APIRouter(prefix="/api/network", tags=["network"], dependencies=[Depends(require_user)])
 
 
 @router.get("/{npi}")

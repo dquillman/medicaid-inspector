@@ -7,6 +7,8 @@ import json
 import time
 import pathlib
 
+from core.safe_io import atomic_write_json
+
 _CACHE_FILE = pathlib.Path(__file__).parent.parent / "prescan_cache.json"
 
 prescanned_providers: list[dict] = []
@@ -25,15 +27,12 @@ scan_progress: dict = {
 def save_to_disk() -> None:
     from core.config import settings
     try:
-        _CACHE_FILE.write_text(
-            json.dumps({
-                "parquet_url": settings.PARQUET_URL,
-                "saved_at": time.time(),
-                "scan_progress": scan_progress,
-                "providers": prescanned_providers,
-            }, default=str),
-            encoding="utf-8",
-        )
+        atomic_write_json(_CACHE_FILE, {
+            "parquet_url": settings.PARQUET_URL,
+            "saved_at": time.time(),
+            "scan_progress": scan_progress,
+            "providers": prescanned_providers,
+        })
     except Exception as e:
         print(f"[store] Could not save cache: {e}")
 

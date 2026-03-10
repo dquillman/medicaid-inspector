@@ -11,10 +11,11 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
+from routes.auth import require_user
 
-router = APIRouter(prefix="/api/billing", tags=["billing"])
+router = APIRouter(prefix="/api/billing", tags=["billing"], dependencies=[Depends(require_user)])
 log = logging.getLogger(__name__)
 
 _STRIPE_KEY = os.environ.get("STRIPE_SECRET_KEY", "")

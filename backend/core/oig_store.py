@@ -14,7 +14,7 @@ import logging
 log = logging.getLogger(__name__)
 
 _OIG_CACHE   = pathlib.Path(__file__).parent.parent / "oig_exclusions.json"
-_OIG_CSV_URL = "https://oig.hhs.gov/exclusions/downloads/UPDATED.csv"
+_OIG_CSV_URL = "https://oig.hhs.gov/exclusions/downloadables/UPDATED.csv"
 
 # In-memory: NPI (10-digit string) -> exclusion record dict
 _exclusions: dict[str, dict] = {}
@@ -42,7 +42,7 @@ async def download_oig_list() -> bool:
     try:
         import httpx
         log.info("OIG: downloading LEIE from HHS…")
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(timeout=180) as client:
             r = await client.get(_OIG_CSV_URL)
             r.raise_for_status()
             text = r.text

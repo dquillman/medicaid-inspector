@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, Depends
 from core.config import settings
 from core.store import get_prescanned
+from routes.auth import require_user
 
-router = APIRouter(prefix="/api/anomalies", tags=["anomalies"])
+router = APIRouter(prefix="/api/anomalies", tags=["anomalies"], dependencies=[Depends(require_user)])
 
 VALID_SIGNALS = {
     "billing_concentration",

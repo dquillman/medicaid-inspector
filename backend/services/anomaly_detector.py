@@ -986,7 +986,19 @@ SPECIALTY_HCPCS_MAP: dict[str, list[str]] = {
     "physical therap": [
         "970", "971", "972", "973", "974", "975", "976", "977", "97",
     ],
-    "speech": ["920", "921", "925", "V57"],
+    "speech": [
+        "925",   # 92507-92508 therapy, 92521-92526 evals, 92550-92599 function tests
+        "926",   # 92610-92618 swallowing evaluations
+        "920",   # 92002-92014 ophth (shared eval codes)
+        "921",   # audiology
+        "97129", "97130",  # cognitive function interventions
+        "97530", "97535",  # therapeutic activities, self-care training
+        "97150",           # group therapy
+        "96105",           # assessment of aphasia
+        "31575",           # flexible diagnostic laryngoscopy
+        "V57",             # rehab procedures
+        "S9152",           # speech therapy per visit
+    ],
     "occupational therap": ["970", "971", "972", "973", "97"],
 }
 
@@ -1038,6 +1050,7 @@ def specialty_mismatch(row: dict, hcpcs: list[dict]) -> SignalResult:
             False,
         )
 
+    taxonomy_desc = taxonomy_desc.strip().rstrip(",").strip()
     taxonomy_lower = taxonomy_desc.lower()
 
     # ── Find matching specialty keyword ──────────────────────────────────
@@ -1113,12 +1126,9 @@ def compute_address_clusters() -> dict[str, int]:
 
     for p in get_prescanned():
         nppes = p.get("nppes") or {}
-        addresses = nppes.get("addresses") or []
-        if not addresses:
-            continue
-        addr = addresses[0] if isinstance(addresses, list) else {}
-        zip_code = (addr.get("postal_code") or "")[:5].strip()
-        street = (addr.get("address_1") or "").strip().upper()
+        addr = nppes.get("address") or {}
+        zip_code = (addr.get("zip") or "")[:5].strip()
+        street = (addr.get("line1") or "").strip().upper()
         if not zip_code or not street:
             continue
         key = f"{zip_code}|{street}"

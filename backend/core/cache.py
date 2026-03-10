@@ -42,3 +42,7 @@ def cached_nppes(func):
 
 def invalidate_query_cache():
     _query_cache.clear()
+
+
+def invalidate_nppes_cache():
+    _nppes_cache.clear()

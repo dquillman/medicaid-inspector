@@ -500,17 +500,27 @@ export default function ReviewQueue() {
             <span className="text-orange-400 font-semibold">{counts.referred}</span> referred to law enforcement
           </p>
         </div>
-        <button
-          onClick={handleExportCSV}
-          className={`px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 ${
-            statusFilter === 'confirmed_fraud'
-              ? 'bg-red-700 hover:bg-red-600 text-white border-red-500 shadow-lg shadow-red-900/30'
-              : 'bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600'
-          }`}
-        >
-          {statusFilter === 'confirmed_fraud' && <span>&#8659;</span>}
-          Export Confirmed CSV
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => window.open('/api/review/export/csv', '_blank')}
+            className="px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600"
+            aria-label="Export full review queue as CSV"
+          >
+            Export All CSV
+          </button>
+          <button
+            onClick={handleExportCSV}
+            className={`px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 ${
+              statusFilter === 'confirmed_fraud'
+                ? 'bg-red-700 hover:bg-red-600 text-white border-red-500 shadow-lg shadow-red-900/30'
+                : 'bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600'
+            }`}
+            aria-label="Export confirmed fraud cases as CSV"
+          >
+            {statusFilter === 'confirmed_fraud' && <span>&#8659;</span>}
+            Export Confirmed CSV
+          </button>
+        </div>
       </div>
 
       {/* Status tabs */}
@@ -555,6 +565,13 @@ export default function ReviewQueue() {
             >
               Mark Reviewed
             </button>
+            <button
+              onClick={() => handleBulkAction('referred')}
+              disabled={bulkMutation.isPending}
+              className="px-4 py-1.5 text-xs rounded bg-orange-700 hover:bg-orange-600 text-white font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+            >
+              Refer to MFCU
+            </button>
           </div>
           <button
             onClick={() => setSelectedNpis(new Set())}
@@ -566,7 +583,7 @@ export default function ReviewQueue() {
       )}
 
       {/* Table */}
-      <div className="card p-0 overflow-hidden">
+      <div className="card p-0 overflow-x-auto">
         {isLoading ? (
           <div className="p-8 text-center text-gray-500 text-sm">Loading…</div>
         ) : items.length === 0 ? (
@@ -643,6 +660,118 @@ export default function ReviewQueue() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* MFCU Referral Status Panel */}
+      <ReferralStatusPanel />
+    </div>
+  )
+}
+
+function ReferralStatusPanel() {
+  const { data: refData } = useQuery({
+    queryKey: ['referral-stats'],
+    queryFn: api.referralStats,
+    refetchInterval: 30000,
+  })
+  const { data: listData } = useQuery({
+    queryKey: ['referrals-list'],
+    queryFn: () => api.listReferrals(),
+    refetchInterval: 30000,
+  })
+
+  const stats = refData
+  const referrals = listData?.referrals ?? []
+
+  const STAGE_LABELS: Record<string, string> = {
+    draft: 'Draft',
+    submitted: 'Submitted',
+    acknowledged: 'Acknowledged',
+    under_investigation: 'Under Investigation',
+    outcome_received: 'Outcome Received',
+  }
+  const STAGE_COLORS: Record<string, string> = {
+    draft: 'text-gray-400 bg-gray-700',
+    submitted: 'text-orange-400 bg-orange-900/40',
+    acknowledged: 'text-blue-400 bg-blue-900/40',
+    under_investigation: 'text-purple-400 bg-purple-900/40',
+    outcome_received: 'text-green-400 bg-green-900/40',
+  }
+
+  if (!stats && referrals.length === 0) return null
+
+  return (
+    <div className="card p-5">
+      <h2 className="text-lg font-bold text-white uppercase tracking-wide mb-4">MFCU Referral Tracker</h2>
+
+      {stats && stats.total_referrals > 0 && (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
+          <div className="bg-gray-800 rounded p-3 text-center">
+            <div className="text-2xl font-bold text-orange-400">{stats.total_referrals}</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Total Referrals</div>
+          </div>
+          <div className="bg-gray-800 rounded p-3 text-center">
+            <div className="text-2xl font-bold text-blue-400">{stats.unique_providers}</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Unique Providers</div>
+          </div>
+          <div className="bg-gray-800 rounded p-3 text-center">
+            <div className="text-2xl font-bold text-purple-400">{stats.by_stage?.under_investigation ?? 0}</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Under Investigation</div>
+          </div>
+          <div className="bg-gray-800 rounded p-3 text-center">
+            <div className="text-2xl font-bold text-green-400">{stats.by_stage?.outcome_received ?? 0}</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wider mt-1">Outcomes Received</div>
+          </div>
+        </div>
+      )}
+
+      {referrals.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-gray-700 text-xs text-gray-500 uppercase tracking-wider">
+                <th className="px-3 py-2">Ref #</th>
+                <th className="px-3 py-2">NPI</th>
+                <th className="px-3 py-2">Provider</th>
+                <th className="px-3 py-2">Stage</th>
+                <th className="px-3 py-2">Jurisdiction</th>
+                <th className="px-3 py-2">Submitted</th>
+                <th className="px-3 py-2">Outcome</th>
+              </tr>
+            </thead>
+            <tbody>
+              {referrals.slice(0, 10).map(ref => (
+                <tr key={ref.id} className="border-b border-gray-800 hover:bg-gray-800/40">
+                  <td className="px-3 py-2 text-xs font-mono text-orange-400">{ref.referral_id}</td>
+                  <td className="px-3 py-2">
+                    <Link to={`/providers/${ref.npi}`} className="text-blue-400 hover:text-blue-300 text-xs font-mono underline">
+                      {ref.npi}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 text-gray-300 text-xs truncate max-w-[160px]">{ref.provider_name || '--'}</td>
+                  <td className="px-3 py-2">
+                    <span className={`text-xs px-2 py-0.5 rounded ${STAGE_COLORS[ref.stage] ?? 'text-gray-400 bg-gray-700'}`}>
+                      {STAGE_LABELS[ref.stage] ?? ref.stage}
+                    </span>
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-500">{ref.jurisdiction || '--'}</td>
+                  <td className="px-3 py-2 text-xs text-gray-500">
+                    {ref.referral_date ? new Date(ref.referral_date * 1000).toLocaleDateString() : '--'}
+                  </td>
+                  <td className="px-3 py-2 text-xs">
+                    {ref.outcome ? (
+                      <span className="text-green-400">{ref.outcome.replace('_', ' ')}</span>
+                    ) : (
+                      <span className="text-gray-600">Pending</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="text-gray-500 text-sm">No MFCU referrals yet. Use "Refer to MFCU" on confirmed fraud cases.</p>
       )}
     </div>
   )

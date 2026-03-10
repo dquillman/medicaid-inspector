@@ -1,8 +1,11 @@
 """
 Review queue API routes.
 """
+import io as _io
+import csv as _csv
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from core.review_store import (
@@ -15,8 +18,9 @@ from core.review_store import (
 )
 from core.store import get_prescanned
 from core.config import settings
+from routes.auth import require_user
 
-router = APIRouter(prefix="/api/review", tags=["review"])
+router = APIRouter(prefix="/api/review", tags=["review"], dependencies=[Depends(require_user)])
 
 
 _UNSET = object()  # sentinel for "field not provided"
@@ -75,6 +79,38 @@ async def backfill_review_queue():
     flagged = [p for p in prescanned if p.get("risk_score", 0) > settings.RISK_THRESHOLD]
     added = add_to_review_queue(flagged)
     return {"scanned": len(prescanned), "flagged": len(flagged), "added": added, "threshold": settings.RISK_THRESHOLD}
+
+
+@router.get("/export/csv")
+async def export_review_csv():
+    """Export the full review queue as a CSV download."""
+    items = get_review_queue()
+    if not items:
+        raise HTTPException(404, "Review queue is empty")
+
+    output = _io.StringIO()
+    writer = _csv.writer(output)
+    writer.writerow(["NPI", "Name", "State", "Risk Score", "Flags", "Total Paid", "Status", "Assigned To", "Notes"])
+    for item in sorted(items, key=lambda x: -(x.get("risk_score") or 0)):
+        flags = item.get("flags") or []
+        flag_names = "; ".join(f.get("signal", "") if isinstance(f, dict) else str(f) for f in flags)
+        writer.writerow([
+            item.get("npi", ""),
+            item.get("provider_name", ""),
+            item.get("state", ""),
+            f'{item.get("risk_score", 0):.1f}',
+            flag_names,
+            f'{item.get("total_paid", 0):.2f}',
+            item.get("status", ""),
+            item.get("assigned_to", ""),
+            item.get("notes", ""),
+        ])
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=review_queue_export.csv"},
+    )
 
 
 @router.post("/bulk-update")

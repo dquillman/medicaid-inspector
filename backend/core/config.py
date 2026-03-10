@@ -19,6 +19,17 @@ class Settings(BaseSettings):
     ANOMALY_PRESCAN_LIMIT: int = 1000  # top providers scanned at startup
     SCAN_BATCH_SIZE: int = 100         # providers per manual scan batch
 
+    # MMIS integration (stub — requires state-specific credentials)
+    MMIS_ENDPOINT_URL: str = ""
+    MMIS_API_KEY: str = ""
+
+    # SMTP / Email
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 0
+    SMTP_USER: str = ""
+    SMTP_PASS: str = ""
+    FROM_EMAIL: str = ""
+
     class Config:
         env_file = ".env"
 

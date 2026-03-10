@@ -60,8 +60,8 @@ export default function StateHeatmap({ data, onStateClick }: Props) {
         style={{ width: '100%', height: '100%' }}
       >
         <Geographies geography={GEO_URL}>
-          {({ geographies }) =>
-            geographies.map(geo => {
+          {({ geographies }: { geographies: any[] }) =>
+            geographies.map((geo: any) => {
               const fips = geo.id as string
               const abbr = FIPS_STATE[fips] ?? ''
               const d = stateMap[abbr]
@@ -78,11 +78,11 @@ export default function StateHeatmap({ data, onStateClick }: Props) {
                     hover:   { outline: 'none', opacity: 0.75 },
                     pressed: { outline: 'none' },
                   }}
-                  onMouseEnter={(e) => {
+                  onMouseEnter={(e: any) => {
                     if (!d) return
                     setTooltip({ x: e.clientX, y: e.clientY, d, abbr })
                   }}
-                  onMouseMove={(e) => {
+                  onMouseMove={(e: any) => {
                     if (!d) return
                     setTooltip(prev => prev ? { ...prev, x: e.clientX, y: e.clientY } : null)
                   }}

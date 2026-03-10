@@ -1,0 +1,34 @@
+version: "3.9"
+
+services:
+  medicaid-inspector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: medicaid-inspector
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist JSON data files across container restarts
+      - ./backend/prescan_cache.json:/app/prescan_cache.json
+      - ./backend/review_queue.json:/app/review_queue.json
+      - ./backend/users.json:/app/users.json
+      - ./backend/enrollment_cache.json:/app/enrollment_cache.json
+      - ./backend/oig_exclusions.json:/app/oig_exclusions.json
+      # Persist backups and evidence
+      - ./backend/backups:/app/backups
+      - ./backend/evidence:/app/evidence
+      # Local Parquet data (optional — mount if downloaded)
+      - ./backend/data:/app/data
+    environment:
+      - PARQUET_URL=https://stopendataprod.blob.core.windows.net/datasets/medicaid-provider-spending/2026-02-09/medicaid-provider-spending.parquet
+      - RISK_THRESHOLD=10.0
+      - SCAN_BATCH_SIZE=100
+      - CACHE_TTL=3600
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s

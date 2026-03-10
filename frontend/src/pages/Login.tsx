@@ -1,16 +1,13 @@
 import { useState } from 'react'
 
 interface Props {
-  onLogin: (email: string, password: string) => Promise<string | null>
-  onRegister: (email: string, password: string) => Promise<string | null>
+  onLogin: (username: string, password: string) => Promise<string | null>
   onBack: () => void
 }
 
-export default function Login({ onLogin, onRegister, onBack }: Props) {
-  const [mode, setMode] = useState<'login' | 'register'>('login')
-  const [email, setEmail] = useState('')
+export default function Login({ onLogin, onBack }: Props) {
+  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
-  const [confirm, setConfirm] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -18,26 +15,14 @@ export default function Login({ onLogin, onRegister, onBack }: Props) {
     e.preventDefault()
     setError('')
 
-    if (!email || !password) {
-      setError('Email and password are required')
-      return
-    }
-
-    if (mode === 'register' && password !== confirm) {
-      setError('Passwords do not match')
-      return
-    }
-
-    if (mode === 'register' && password.length < 8) {
-      setError('Password must be at least 8 characters')
+    if (!username || !password) {
+      setError('Username and password are required')
       return
     }
 
     setLoading(true)
     try {
-      const err = mode === 'login'
-        ? await onLogin(email, password)
-        : await onRegister(email, password)
+      const err = await onLogin(username, password)
       if (err) setError(err)
     } finally {
       setLoading(false)
@@ -61,12 +46,8 @@ export default function Login({ onLogin, onRegister, onBack }: Props) {
               <text x="46" y="22" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="9" fill="white">!</text>
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-white">
-            {mode === 'login' ? 'Welcome Back' : 'Create Account'}
-          </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {mode === 'login' ? 'Sign in to Medicaid Inspector' : 'Start your free trial'}
-          </p>
+          <h1 className="text-2xl font-bold text-white">Welcome Back</h1>
+          <p className="text-sm text-gray-500 mt-1">Sign in to Medicaid Inspector</p>
         </div>
 
         {/* Form */}
@@ -78,13 +59,13 @@ export default function Login({ onLogin, onRegister, onBack }: Props) {
           )}
 
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5 uppercase tracking-wider">Email</label>
+            <label className="block text-xs text-gray-400 mb-1.5 uppercase tracking-wider">Username</label>
             <input
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
+              type="text"
+              value={username}
+              onChange={e => setUsername(e.target.value)}
               className="input w-full"
-              placeholder="you@company.com"
+              placeholder="admin"
               autoFocus
             />
           </div>
@@ -96,48 +77,17 @@ export default function Login({ onLogin, onRegister, onBack }: Props) {
               value={password}
               onChange={e => setPassword(e.target.value)}
               className="input w-full"
-              placeholder="••••••••"
+              placeholder="********"
             />
           </div>
-
-          {mode === 'register' && (
-            <div>
-              <label className="block text-xs text-gray-400 mb-1.5 uppercase tracking-wider">Confirm Password</label>
-              <input
-                type="password"
-                value={confirm}
-                onChange={e => setConfirm(e.target.value)}
-                className="input w-full"
-                placeholder="••••••••"
-              />
-            </div>
-          )}
 
           <button
             type="submit"
             disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold text-sm transition-colors"
           >
-            {loading ? 'Please wait...' : mode === 'login' ? 'Sign In' : 'Create Account'}
+            {loading ? 'Signing in...' : 'Sign In'}
           </button>
-
-          <div className="text-center text-sm text-gray-500">
-            {mode === 'login' ? (
-              <>
-                Don&apos;t have an account?{' '}
-                <button type="button" onClick={() => { setMode('register'); setError('') }} className="text-blue-400 hover:text-blue-300">
-                  Sign up
-                </button>
-              </>
-            ) : (
-              <>
-                Already have an account?{' '}
-                <button type="button" onClick={() => { setMode('login'); setError('') }} className="text-blue-400 hover:text-blue-300">
-                  Sign in
-                </button>
-              </>
-            )}
-          </div>
         </form>
 
         <div className="text-center mt-4">

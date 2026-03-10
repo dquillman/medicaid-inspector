@@ -4,14 +4,32 @@ Run with: uvicorn main:app --reload --port 8000
 """
 import asyncio
 import logging
+import os
+import time as _time_mod
 from contextlib import asynccontextmanager
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
+from datetime import datetime
+import re
+
+from routes.auth import require_user, require_admin
+from core.rate_limiter import RateLimitMiddleware, check_login_rate
 
 from core.config import settings
+
+
+def _validate_state_filter(state: Optional[str]) -> Optional[str]:
+    """Whitelist validation for state codes — only allow 2-letter uppercase codes."""
+    if state is None:
+        return None
+    state = state.strip().upper()
+    if not re.match(r'^[A-Z]{2}$', state):
+        raise HTTPException(400, f"Invalid state filter '{state}' — must be a 2-letter state code")
+    return state
 from core.store import (
     set_prescanned, get_prescanned,
     append_prescanned, reset_scan,
@@ -25,8 +43,54 @@ from data.duckdb_client import (
     detect_state_column, get_parquet_path,
 )
 from routes import providers, anomalies, states, network, review, auth, billing
+from routes import alerts, cases, audit, ownership, roi, exclusions, geography
+from routes import demographics, hotspots, beneficiary, utilization, population, trends
+from routes import timeline, temporal
+from routes import related
+from routes import watchlist
+from routes import rings
+from routes import specialty
+from routes import score_trends
+from routes import medicare
+from routes import news
+from routes import referral
+from routes import license
+from routes import data_pipeline
+from routes import beneficiary_fraud
+from routes import ml as ml_routes
+from routes import pharmacy_dme
+from routes import notifications
+from routes import saved_searches
+from routes import claim_patterns
+from routes import integrations
+from routes import tasks as tasks_route
+from routes import retention as retention_routes
+from routes import evidence as evidence_routes
+from routes import mfcu_referral
+from routes import backup as backup_routes
+from routes import phi_admin
+from core.metrics import record_request, get_metrics, get_prometheus_text
+from core.phi_middleware import PHIAccessMiddleware
+from core.phi_logger import load_phi_log_from_disk, log_phi_access, PHI_PATH_PATTERNS
+from core.evidence_store import load_evidence_from_disk
+from core.referral_workflow import load_referrals_from_disk
+from core.notification_store import load_notifications_from_disk
+from core.saved_search_store import load_saved_searches_from_disk
+from core.news_store import load_news_from_disk
 from core.review_store import load_review_from_disk, add_to_review_queue
 from core.oig_store import load_oig_from_disk, download_oig_list
+from core.enrollment_store import load_or_fetch_enrollment
+from core.alert_store import load_rules_from_disk
+from core.audit_log import load_audit_from_disk
+from core.roi_store import load_roi_from_disk
+from core.auth_store import init_auth_store
+from core.score_history import load_history_from_disk, record_batch_snapshots
+from core.watchlist_store import load_watchlist_from_disk
+from core.lineage_store import load_lineage_from_disk, record_scan_run
+from core.scan_lock import acquire_scan_lock, release_scan_lock, is_scan_running
+from core.task_queue import enqueue_task
+from core.database import init_db, migrate_users_from_json
+from services.data_discovery import load_dataset_config
 
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
@@ -37,7 +101,7 @@ _auto_mode = False
 _smart_scan_mode = False
 
 
-async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
+async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: bool = False):
     """
     Scans the next `batch_size` providers from the Parquet file.
     Appends results to the disk cache and updates scan progress.
@@ -71,7 +135,18 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
     from collections import defaultdict as _dd
 
     try:
+        _scan_start_time = _time_mod.time()
+
+        # Run data validation at scan startup (first batch only)
         progress = get_scan_progress()
+        if progress.get("offset", 0) == 0:
+            try:
+                from services.data_validator import run_validation
+                set_prescan_status(1, "Running data quality validation…")
+                await run_validation(sample_limit=2000)
+                log.info("Pre-scan data validation complete")
+            except Exception as val_err:
+                log.warning("Data validation failed (non-fatal): %s", val_err)
 
         # If caller provides a different state filter, start offset over
         active_filter = state_filter or progress.get("state_filter")
@@ -118,6 +193,31 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
             set_scan_progress(offset, total, active_filter, batches)
             log.info("Scan complete at offset %d", offset)
             return
+
+        # ── Incremental loading (#10): skip already-scanned NPIs unless force=True
+        if not force:
+            already_scanned = {p["npi"] for p in get_prescanned()}
+            new_rows = [r for r in agg_rows if r["npi"] not in already_scanned]
+            if new_rows and len(new_rows) < len(agg_rows):
+                skipped = len(agg_rows) - len(new_rows)
+                log.info("Incremental: skipped %d already-scanned providers, %d new", skipped, len(new_rows))
+            if not new_rows:
+                # All providers in this batch already scanned — advance offset and continue
+                new_offset = offset + len(agg_rows)
+                set_scan_progress(new_offset, total, active_filter, batches + 1)
+                log.info("Incremental: entire batch already scanned — advancing offset to %d", new_offset)
+                remaining = total - new_offset
+                set_prescan_status(
+                    0,
+                    f"Idle — {new_offset:,} of {total:,} providers scanned"
+                    + (f" · {remaining:,} remaining" if remaining > 0 else " · Complete"),
+                )
+                if _auto_mode and len(agg_rows) == batch_size:
+                    await asyncio.sleep(0.2)
+                    asyncio.create_task(_run_scan_batch(batch_size, active_filter, force=False))
+                    return
+                return
+            agg_rows = new_rows
 
         npi_list = [r["npi"] for r in agg_rows]
         npi_in = ", ".join(f"'{n}'" for n in npi_list)
@@ -273,6 +373,7 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
 
         # ── Persist ────────────────────────────────────────────────────────────
         append_prescanned(results)
+        record_batch_snapshots(results)
         new_offset = offset + len(agg_rows)
         set_scan_progress(new_offset, total, active_filter, batches + 1)
 
@@ -285,6 +386,21 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
         # Background: enrich ALL scanned providers with NPPES name/state/city
         from services.nppes_enricher import enrich_batch_with_nppes
         asyncio.create_task(enrich_batch_with_nppes([r["npi"] for r in results]))
+
+        # Record data lineage for this scan batch
+        _batch_claims = sum(r.get("total_claims") or 0 for r in results)
+        _batch_duration = round(_time_mod.time() - _scan_start_time, 2)
+        from services.data_discovery import _extract_date_from_url
+        record_scan_run(
+            dataset_url=get_parquet_path(),
+            dataset_date=_extract_date_from_url(get_parquet_path()),
+            provider_count=len(results),
+            total_claims=int(_batch_claims),
+            scan_type="batch",
+            duration_sec=_batch_duration,
+            state_filter=active_filter,
+            details={"offset": new_offset, "total": total, "flagged": flagged},
+        )
 
         log.info(
             "Batch done — %d providers scored (%d flagged), offset now %d/%d",
@@ -302,7 +418,7 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
         if _auto_mode and len(agg_rows) == batch_size:
             _hand_off = True  # tell finally not to release the lock
             await asyncio.sleep(0.5)
-            asyncio.create_task(_run_scan_batch(batch_size, active_filter))
+            asyncio.create_task(_run_scan_batch(batch_size, active_filter, force=force))
         else:
             _auto_mode = False
 
@@ -313,6 +429,7 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str]):
     finally:
         if not _hand_off:
             _scan_running = False
+            release_scan_lock()
 
 
 @asynccontextmanager
@@ -321,11 +438,34 @@ async def lifespan(app: FastAPI):
     await asyncio.to_thread(get_connection)
     log.info("DuckDB ready.")
 
+    # Initialize SQLite database for critical app state
+    init_db()
+    import pathlib as _pl
+    _users_json = _pl.Path(__file__).parent / "users.json"
+    migrate_users_from_json(_users_json)
+
     load_review_from_disk()
+    load_rules_from_disk()
+    load_audit_from_disk()
+    load_roi_from_disk()
+    load_watchlist_from_disk()
+    load_history_from_disk()
+    load_news_from_disk()
+    load_lineage_from_disk()
+    load_dataset_config()
+    load_notifications_from_disk()
+    load_saved_searches_from_disk()
+    load_phi_log_from_disk()
+    load_evidence_from_disk()
+    load_referrals_from_disk()
+    init_auth_store()
 
     # Load OIG exclusion list — try cache first, download if missing
     if not load_oig_from_disk():
         asyncio.create_task(download_oig_list())
+
+    # Load Medicaid enrollment data (disk cache or CMS API)
+    asyncio.create_task(load_or_fetch_enrollment())
 
     if load_prescanned_from_disk():
         prog = get_scan_progress()
@@ -345,11 +485,17 @@ async def lifespan(app: FastAPI):
             log.info("Backfilled review queue with %d providers from prescan cache", added)
 
         # Enrich any providers that are missing NPPES data (name/state/city)
-        missing_nppes = [p["npi"] for p in get_prescanned() if not p.get("nppes")]
+        # Also re-enrich providers missing enumeration_date (added after initial enrichment)
+        missing_nppes = [
+            p["npi"] for p in get_prescanned()
+            if not p.get("nppes") or not (p.get("nppes") or {}).get("enumeration_date")
+        ]
         if missing_nppes:
             from services.nppes_enricher import enrich_batch_with_nppes
+            from core.cache import invalidate_nppes_cache
+            invalidate_nppes_cache()  # Clear stale NPPES cache so we get fresh data with enumeration_date
             asyncio.create_task(enrich_batch_with_nppes(missing_nppes))
-            log.info("Queued NPPES enrichment for %d providers missing name/state/city", len(missing_nppes))
+            log.info("Queued NPPES enrichment for %d providers missing name/state/city or enumeration_date", len(missing_nppes))
     else:
         set_prescan_status(0, "Idle — use the Scan button to begin")
         log.info("No cache found — idle, waiting for manual scan trigger.")
@@ -372,6 +518,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Rate limiting middleware — must be added after CORS middleware
+app.add_middleware(RateLimitMiddleware)
+
 app.include_router(providers.router)
 app.include_router(anomalies.router)
 app.include_router(states.router)
@@ -379,6 +528,60 @@ app.include_router(network.router)
 app.include_router(review.router)
 app.include_router(auth.router)
 app.include_router(billing.router)
+app.include_router(alerts.router)
+app.include_router(cases.router)
+app.include_router(audit.router)
+app.include_router(ownership.router)
+app.include_router(roi.router)
+app.include_router(exclusions.router)
+app.include_router(geography.router)
+app.include_router(demographics.router)
+app.include_router(hotspots.router)
+app.include_router(beneficiary.router)
+app.include_router(utilization.router)
+app.include_router(population.router)
+app.include_router(trends.router)
+app.include_router(timeline.router)
+app.include_router(temporal.router)
+app.include_router(related.router)
+app.include_router(watchlist.router)
+app.include_router(specialty.router)
+app.include_router(rings.router)
+app.include_router(medicare.router)
+app.include_router(score_trends.router)
+app.include_router(news.router)
+app.include_router(news.provider_news_router)
+app.include_router(referral.router)
+app.include_router(license.router)
+app.include_router(beneficiary_fraud.router)
+app.include_router(ml_routes.router)
+app.include_router(pharmacy_dme.router)
+app.include_router(data_pipeline.router)
+app.include_router(notifications.router)
+app.include_router(saved_searches.router)
+app.include_router(claim_patterns.router)
+app.include_router(integrations.router)
+app.include_router(integrations.admin_router)
+app.include_router(integrations.provider_router)
+app.include_router(tasks_route.router)
+app.include_router(retention_routes.router)
+app.include_router(evidence_routes.router)
+app.include_router(mfcu_referral.router)
+app.include_router(backup_routes.router)
+app.include_router(phi_admin.router)
+app.add_middleware(PHIAccessMiddleware)
+
+
+# ── Request timing middleware ─────────────────────────────────────────────────
+
+@app.middleware("http")
+async def metrics_middleware(request: Request, call_next):
+    start = _time_mod.time()
+    response = await call_next(request)
+    duration = _time_mod.time() - start
+    path = request.url.path
+    record_request(path, request.method, response.status_code, duration)
+    return response
 
 
 # ── Scan control endpoints ────────────────────────────────────────────────────
@@ -386,42 +589,48 @@ app.include_router(billing.router)
 class ScanBatchRequest(BaseModel):
     batch_size: int = settings.SCAN_BATCH_SIZE
     state_filter: Optional[str] = None
+    force: bool = False  # When True, skip incremental check and rescan all providers
 
 
-@app.post("/api/prescan/scan-batch")
+@app.post("/api/prescan/scan-batch", dependencies=[Depends(require_user)])
 async def trigger_scan_batch(body: ScanBatchRequest = None):
     global _scan_running
     if body is None:
         body = ScanBatchRequest()
-    if _scan_running:
+    body.state_filter = _validate_state_filter(body.state_filter)
+    if _scan_running or is_scan_running():
         raise HTTPException(409, "A scan is already in progress")
+    if not acquire_scan_lock():
+        raise HTTPException(409, "A scan is already in progress (another worker)")
     _scan_running = True
-    asyncio.create_task(_run_scan_batch(body.batch_size, body.state_filter or None))
-    return {"started": True, "batch_size": body.batch_size, "state_filter": body.state_filter}
+    task_id = enqueue_task("scan_batch", _run_scan_batch, body.batch_size, body.state_filter or None, body.force)
+    return {"started": True, "batch_size": body.batch_size, "state_filter": body.state_filter, "force": body.force, "task_id": task_id}
 
 
-@app.post("/api/prescan/auto-start")
+@app.post("/api/prescan/auto-start", dependencies=[Depends(require_user)])
 async def auto_start_scan(body: ScanBatchRequest = None):
     global _scan_running, _auto_mode
     if body is None:
         body = ScanBatchRequest()
+    body.state_filter = _validate_state_filter(body.state_filter)
     _auto_mode = True
-    if _scan_running:
-        # Auto mode will kick in once current batch finishes
+    if _scan_running or is_scan_running():
         return {"started": False, "auto_mode": True, "note": "Auto mode enabled — will continue after current batch"}
+    if not acquire_scan_lock():
+        return {"started": False, "auto_mode": True, "note": "Auto mode enabled — another worker is scanning"}
     _scan_running = True
-    asyncio.create_task(_run_scan_batch(body.batch_size, body.state_filter or None))
+    enqueue_task("auto_scan", _run_scan_batch, body.batch_size, body.state_filter or None, body.force)
     return {"started": True, "auto_mode": True, "batch_size": body.batch_size}
 
 
-@app.post("/api/prescan/auto-stop")
+@app.post("/api/prescan/auto-stop", dependencies=[Depends(require_user)])
 async def auto_stop_scan():
     global _auto_mode
     _auto_mode = False
     return {"auto_mode": False, "note": "Auto mode disabled — current batch will finish normally"}
 
 
-@app.post("/api/prescan/rescore")
+@app.post("/api/prescan/rescore", dependencies=[Depends(require_user)])
 async def rescore_cached_providers():
     """
     Re-run all fraud signals against every provider already in the prescan cache,
@@ -814,6 +1023,7 @@ async def _run_smart_scan(state_filter: Optional[str]):
         set_prescan_status(0, f"Smart scan error: {exc}")
     finally:
         _scan_running = False
+        release_scan_lock()
         _smart_scan_mode = False
 
 
@@ -821,7 +1031,7 @@ class SmartScanRequest(BaseModel):
     state_filter: Optional[str] = None
 
 
-@app.post("/api/prescan/smart-scan")
+@app.post("/api/prescan/smart-scan", dependencies=[Depends(require_user)])
 async def smart_scan_endpoint(body: SmartScanRequest = None):
     """
     High-risk-first scan: loads ALL provider aggregates at once, pre-screens with
@@ -834,18 +1044,20 @@ async def smart_scan_endpoint(body: SmartScanRequest = None):
             400,
             "Smart scan requires the local dataset — download it first via the Data Source card.",
         )
-    if _scan_running:
+    if _scan_running or is_scan_running():
         raise HTTPException(409, "A scan is already in progress")
+    if not acquire_scan_lock():
+        raise HTTPException(409, "A scan is already in progress (another worker)")
     _scan_running = True
-    state = body.state_filter if body else None
-    asyncio.create_task(_run_smart_scan(state or None))
-    return {"started": True, "mode": "smart"}
+    state = _validate_state_filter(body.state_filter if body else None)
+    task_id = enqueue_task("smart_scan", _run_smart_scan, state or None)
+    return {"started": True, "mode": "smart", "task_id": task_id}
 
 
-@app.post("/api/prescan/reset")
+@app.post("/api/prescan/reset", dependencies=[Depends(require_admin)])
 async def reset_scan_endpoint():
     global _scan_running, _auto_mode
-    if _scan_running:
+    if _scan_running or is_scan_running():
         raise HTTPException(409, "Cannot reset while a scan is in progress")
     _auto_mode = False
     reset_scan()
@@ -855,7 +1067,7 @@ async def reset_scan_endpoint():
 
 # ── Summary + status ──────────────────────────────────────────────────────────
 
-@app.get("/api/summary")
+@app.get("/api/summary", dependencies=[Depends(require_user)])
 async def summary():
     """
     Instant KPIs from prescan cache. No DuckDB queries on this endpoint.
@@ -901,17 +1113,63 @@ async def summary():
     }
 
 
-@app.get("/api/prescan/status")
+@app.get("/api/prescan/status", dependencies=[Depends(require_user)])
 async def prescan_status_endpoint():
     status = get_prescan_status()
     status["auto_mode"] = _auto_mode
     status["smart_scan_mode"] = _smart_scan_mode
+    status["scan_locked"] = is_scan_running()
     return status
 
 
+@app.post("/api/ml/train", dependencies=[Depends(require_user)])
+async def train_ml_model():
+    """Train Isolation Forest on all cached providers and return anomaly scores."""
+    from services.ml_scorer import train_and_score
+    try:
+        result = train_and_score()
+        return result
+    except RuntimeError as e:
+        raise HTTPException(500, str(e))
+
+
+@app.get("/api/ml/status", dependencies=[Depends(require_user)])
+async def ml_status():
+    """Return ML model training status and stats."""
+    from services.ml_scorer import get_ml_status
+    return get_ml_status()
+
+
 @app.get("/health")
-async def health():
-    return {"status": "ok"}
+async def health_check():
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat(), "version": "2.1.5"}
+
+
+@app.get("/ready")
+async def readiness_check():
+    """Check DuckDB connection, disk space, etc."""
+    checks = {}
+    try:
+        from data.duckdb_client import get_connection
+        get_connection()
+        checks["duckdb"] = "ok"
+    except Exception:
+        checks["duckdb"] = "error"
+    checks["disk"] = "ok"
+    all_ok = all(v == "ok" for v in checks.values())
+    return {"ready": all_ok, "checks": checks}
+
+
+@app.get("/api/admin/metrics")
+async def admin_metrics(user: dict = Depends(require_admin)):
+    """JSON metrics dashboard — request counts, timing, scan stats, cache hit rates."""
+    return get_metrics()
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+async def prometheus_metrics():
+    """Prometheus-compatible text format metrics."""
+    return get_prometheus_text()
 
 
 # ── Local data download ───────────────────────────────────────────────────────
@@ -952,7 +1210,7 @@ async def _do_download():
             tmp.unlink()
 
 
-@app.get("/api/data/status")
+@app.get("/api/data/status", dependencies=[Depends(require_user)])
 async def data_status():
     """Report whether the dataset is local or remote, and download progress if active."""
     dl = _download_state
@@ -977,7 +1235,7 @@ async def data_status():
     }
 
 
-@app.post("/api/data/download")
+@app.post("/api/data/download", dependencies=[Depends(require_admin)])
 async def start_download():
     """Start downloading the dataset to local disk (runs in background)."""
     if is_local():

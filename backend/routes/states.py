@@ -1,9 +1,10 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from data.duckdb_client import query_async, get_parquet_path
 from core.config import settings
 from core.store import get_prescanned
+from routes.auth import require_user
 
-router = APIRouter(prefix="/api/states", tags=["states"])
+router = APIRouter(prefix="/api/states", tags=["states"], dependencies=[Depends(require_user)])
 
 
 @router.get("/heatmap")

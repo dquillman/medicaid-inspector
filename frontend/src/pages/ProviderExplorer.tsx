@@ -468,19 +468,147 @@ export default function ProviderExplorer() {
     return () => window.removeEventListener('keydown', handler)
   }, [providers, focusedRow, navigate])
 
+  // ── CSV export ────────────────────────────────────────────────────────────
+  const handleExportCSV = () => {
+    window.open('/api/providers/export/csv', '_blank')
+  }
+
+  // ── Saved searches ──────────────────────────────────────────────────────
+  const [savedSearchOpen, setSavedSearchOpen] = useState(false)
+  const [savedSearchName, setSavedSearchName] = useState('')
+  const savedSearchRef = useRef<HTMLDivElement>(null)
+
+  const { data: savedSearches, refetch: refetchSaved } = useQuery({
+    queryKey: ['saved-searches'],
+    queryFn: async () => {
+      const resp = await fetch('/api/saved-searches')
+      if (!resp.ok) return { searches: [] }
+      return resp.json()
+    },
+    staleTime: 10_000,
+  })
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (savedSearchRef.current && !savedSearchRef.current.contains(e.target as Node)) setSavedSearchOpen(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const handleSaveSearch = async () => {
+    if (!savedSearchName.trim()) return
+    await fetch('/api/saved-searches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: savedSearchName.trim(), filters: { ...filters, search } }),
+    })
+    setSavedSearchName('')
+    refetchSaved()
+  }
+
+  const handleLoadSearch = (saved: any) => {
+    const f = saved.filters || {}
+    setFilters({
+      states: f.states || [],
+      cities: f.cities || [],
+      flag_counts: f.flag_counts || [],
+      risk: f.risk || { min: '', max: '' },
+      total_paid: f.total_paid || { min: '', max: '' },
+      total_claims: f.total_claims || { min: '', max: '' },
+      active_months: f.active_months || { min: '', max: '' },
+    })
+    if (f.search) setSearch(f.search)
+    setPage(1)
+    setSavedSearchOpen(false)
+  }
+
+  const handleDeleteSearch = async (id: string) => {
+    await fetch(`/api/saved-searches/${id}`, { method: 'DELETE' })
+    refetchSaved()
+  }
+
   return (
     <div className="space-y-4" onClick={() => setOpenFilter(null)}>
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold text-white">Provider Explorer</h1>
-        {anyFilter && (
-          <button onClick={handleClearAll} className="text-sm text-red-400 hover:text-red-300">
-            Clear all filters
+        <div className="flex items-center gap-2">
+          {anyFilter && (
+            <button onClick={handleClearAll} className="text-sm text-red-400 hover:text-red-300">
+              Clear all filters
+            </button>
+          )}
+          {/* Saved searches dropdown */}
+          <div className="relative" ref={savedSearchRef}>
+            <button
+              onClick={(e) => { e.stopPropagation(); setSavedSearchOpen(!savedSearchOpen) }}
+              className="btn-ghost text-sm flex items-center gap-1"
+              aria-label="Saved searches"
+            >
+              Saved Searches
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {savedSearchOpen && (
+              <div className="absolute top-full right-0 mt-1 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 p-3" onClick={e => e.stopPropagation()}>
+                <div className="flex gap-1 mb-2">
+                  <input
+                    className="flex-1 bg-gray-700 text-white text-xs px-2 py-1.5 rounded border border-gray-600 focus:border-blue-500 focus:outline-none"
+                    placeholder="Save current filters as..."
+                    value={savedSearchName}
+                    onChange={e => setSavedSearchName(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') handleSaveSearch() }}
+                  />
+                  <button
+                    onClick={handleSaveSearch}
+                    disabled={!savedSearchName.trim()}
+                    className="btn-primary text-xs py-1"
+                  >
+                    Save
+                  </button>
+                </div>
+                <div className="max-h-48 overflow-y-auto space-y-1">
+                  {(savedSearches?.searches ?? []).length === 0 ? (
+                    <p className="text-xs text-gray-500 text-center py-2">No saved searches</p>
+                  ) : (
+                    (savedSearches?.searches ?? []).map((s: any) => (
+                      <div
+                        key={s.id}
+                        className="flex items-center justify-between px-2 py-1.5 rounded hover:bg-gray-700 cursor-pointer group"
+                      >
+                        <button
+                          onClick={() => handleLoadSearch(s)}
+                          className="text-xs text-gray-300 hover:text-white text-left flex-1 truncate"
+                        >
+                          {s.name}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteSearch(s.id)}
+                          className="text-xs text-gray-600 hover:text-red-400 opacity-0 group-hover:opacity-100 ml-2"
+                          aria-label={`Delete search ${s.name}`}
+                        >
+                          x
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+          <button
+            onClick={handleExportCSV}
+            className="btn-ghost text-sm flex items-center gap-1"
+            aria-label="Export providers to CSV"
+          >
+            Export CSV
           </button>
-        )}
+        </div>
       </div>
 
       {/* Search bar */}
-      <div className="card flex gap-3 items-center py-3">
+      <div className="card flex flex-wrap gap-3 items-center py-3">
         <input
           className="input flex-1 max-w-sm"
           placeholder="Search by NPI or provider name…"

@@ -7,12 +7,15 @@ import time
 import pathlib
 from typing import Optional
 
+from core.safe_io import atomic_write_json
+
 _QUEUE_FILE = pathlib.Path(__file__).parent.parent / "review_queue.json"
 
 # In-memory store: NPI -> item dict
 _review_items: dict[str, dict] = {}
 
 VALID_STATUSES = {"pending", "assigned", "investigating", "confirmed_fraud", "referred", "dismissed"}
+VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 
 
 # ── disk persistence ──────────────────────────────────────────────────────────
@@ -31,10 +34,7 @@ def load_review_from_disk() -> None:
 
 def save_review_to_disk() -> None:
     try:
-        _QUEUE_FILE.write_text(
-            json.dumps({"items": list(_review_items.values())}, default=str),
-            encoding="utf-8",
-        )
+        atomic_write_json(_QUEUE_FILE, {"items": list(_review_items.values())})
     except Exception as e:
         print(f"[review_store] Could not save review queue: {e}")
 
@@ -180,3 +180,122 @@ def get_review_history(npi: str) -> Optional[list]:
     if item is None:
         return None
     return item.get("audit_trail", [])
+
+
+def get_review_item(npi: str) -> Optional[dict]:
+    """Return a single review item by NPI, or None."""
+    return _review_items.get(npi)
+
+
+# ── case management extensions ───────────────────────────────────────────────
+
+def add_document(npi: str, doc: dict) -> Optional[dict]:
+    """Add a document record to a review case. Returns updated item or None."""
+    item = _review_items.get(npi)
+    if item is None:
+        return None
+    if "documents" not in item:
+        item["documents"] = []
+    doc["added_at"] = time.time()
+    item["documents"].append(doc)
+    item["updated_at"] = time.time()
+    save_review_to_disk()
+    return item
+
+
+def log_hours(npi: str, hours: float, description: str = "") -> Optional[dict]:
+    """Log investigator hours on a case. Returns updated item or None."""
+    item = _review_items.get(npi)
+    if item is None:
+        return None
+    if "hours_logged" not in item:
+        item["hours_logged"] = []
+    item["hours_logged"].append({
+        "hours": hours,
+        "description": description,
+        "logged_at": time.time(),
+    })
+    item["total_hours"] = sum(h["hours"] for h in item["hours_logged"])
+    item["updated_at"] = time.time()
+    save_review_to_disk()
+    return item
+
+
+def set_priority(npi: str, priority: str) -> Optional[dict]:
+    """Set case priority. Raises ValueError for invalid priority."""
+    if priority not in VALID_PRIORITIES:
+        raise ValueError(f"Invalid priority: {priority!r}. Must be one of {VALID_PRIORITIES}")
+    item = _review_items.get(npi)
+    if item is None:
+        return None
+    item["priority"] = priority
+    item["updated_at"] = time.time()
+    save_review_to_disk()
+    return item
+
+
+def set_due_date(npi: str, due_date: Optional[str]) -> Optional[dict]:
+    """Set or clear case due date (ISO date string). Returns updated item or None."""
+    item = _review_items.get(npi)
+    if item is None:
+        return None
+    item["due_date"] = due_date
+    item["updated_at"] = time.time()
+    save_review_to_disk()
+    return item
+
+
+def get_case_stats() -> dict:
+    """Return aggregate case management statistics."""
+    items = list(_review_items.values())
+    now = time.time()
+    total = len(items)
+    by_status = {}
+    by_priority = {}
+    total_hours = 0.0
+    overdue = 0
+
+    for item in items:
+        s = item.get("status", "pending")
+        by_status[s] = by_status.get(s, 0) + 1
+        p = item.get("priority", "medium")
+        by_priority[p] = by_priority.get(p, 0) + 1
+        total_hours += item.get("total_hours", 0.0)
+        dd = item.get("due_date")
+        if dd and s not in ("confirmed_fraud", "referred", "dismissed"):
+            # Simple ISO date comparison
+            try:
+                import datetime
+                if datetime.date.fromisoformat(dd) < datetime.date.today():
+                    overdue += 1
+            except (ValueError, TypeError):
+                pass
+
+    return {
+        "total_cases": total,
+        "by_status": by_status,
+        "by_priority": by_priority,
+        "total_hours": round(total_hours, 1),
+        "overdue_count": overdue,
+    }
+
+
+def get_overdue_cases() -> list[dict]:
+    """Return cases past their due date that are still open."""
+    import datetime
+    now = datetime.date.today()
+    open_statuses = {"pending", "assigned", "investigating"}
+    result = []
+    for item in _review_items.values():
+        if item.get("status", "pending") not in open_statuses:
+            continue
+        dd = item.get("due_date")
+        if not dd:
+            continue
+        try:
+            if datetime.date.fromisoformat(dd) < now:
+                result.append(item)
+        except (ValueError, TypeError):
+            pass
+    result.sort(key=lambda x: x.get("due_date", ""))
+    return result

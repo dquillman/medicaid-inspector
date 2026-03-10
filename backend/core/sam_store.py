@@ -46,8 +46,10 @@ async def check_sam_exclusion(npi: str = "", name: str = "") -> dict:
             resp = await client.get(_SAM_API_BASE, params=params)
             if resp.status_code == 200:
                 data = resp.json()
-                records = data.get("results", [])
-                return {"excluded": len(records) > 0, "records": records[:5]}
+                # SAM v4 uses "excludedEntity" (not "results")
+                records = data.get("excludedEntity", []) or []
+                total = data.get("totalRecords", len(records))
+                return {"excluded": total > 0, "records": records[:5]}
             elif resp.status_code == 403:
                 return {
                     "excluded": False,
