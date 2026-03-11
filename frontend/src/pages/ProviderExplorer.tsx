@@ -270,6 +270,7 @@ const STATUS_LABELS: Record<string, string> = {
 const COLUMNS: ColDef[] = [
   { key: 'npi',                 label: 'NPI' },
   { key: 'provider_name',       label: 'Name' },
+  { key: 'oig_excluded',        label: 'OIG' },
   { key: 'risk_score',          label: 'Risk Score',   filterable: true },
   { key: 'flag_count',          label: 'Flags',        filterable: true },
   { key: 'state',               label: 'State',        filterable: true },
@@ -698,6 +699,12 @@ export default function ProviderExplorer() {
                   <td className="px-3 py-2.5 font-mono-data text-blue-400 text-xs">{p.npi}</td>
                   <td className="px-3 py-2.5 text-gray-300 max-w-[200px] truncate" title={name}>
                     {name || <span className="text-gray-600 italic">—</span>}
+                  </td>
+                  <td className="px-3 py-2.5 text-center">
+                    {(p as any).oig_excluded
+                      ? <span className="text-xs px-1.5 py-0.5 rounded font-bold bg-red-900/60 text-red-300 border border-red-700" title={(p as any).oig_detail?.excl_type || 'OIG Excluded'}>EXCLUDED</span>
+                      : <span className="text-gray-700 text-xs">—</span>
+                    }
                   </td>
                   <td className="px-3 py-2.5"><RiskScoreBadge score={p.risk_score} size="sm" /></td>
                   <td className="px-3 py-2.5">

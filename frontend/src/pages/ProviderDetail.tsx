@@ -174,99 +174,107 @@ export default function ProviderDetail() {
   const queryClient = useQueryClient()
   const [watchlistMsg, setWatchlistMsg] = useState('')
 
+  // ── Primary query (loads first) ─────────────────────────────────────────
   const { data: detail, isLoading, error } = useQuery({
     queryKey: ['provider', npi],
     queryFn: () => api.providerDetail(npi!),
     enabled: !!npi,
+    staleTime: 120_000,
   })
 
+  const detailReady = !!detail
+
+  // ── Fast local queries (fire once detail is ready) ────────────────────
   const { data: timelineData } = useQuery({
     queryKey: ['timeline', npi],
     queryFn: () => api.providerTimeline(npi!),
-    enabled: !!npi,
+    enabled: detailReady,
+    staleTime: 300_000,
   })
 
   const { data: hcpcsData } = useQuery({
     queryKey: ['hcpcs', npi],
     queryFn: () => api.providerHcpcs(npi!),
-    enabled: !!npi,
+    enabled: detailReady,
+    staleTime: 300_000,
   })
 
   const { data: oigData } = useQuery({
     queryKey: ['oig', npi],
     queryFn: () => api.oigStatus(npi!),
-    enabled: !!npi,
-    staleTime: 60_000,
+    enabled: detailReady,
+    staleTime: 300_000,
   })
 
   const { data: clusterData } = useQuery({
     queryKey: ['cluster', npi],
     queryFn: () => api.addressCluster(npi!),
-    enabled: !!npi,
-    staleTime: 60_000,
+    enabled: detailReady,
+    staleTime: 300_000,
   })
 
   const { data: peersData } = useQuery({
     queryKey: ['peers', npi],
     queryFn: () => api.providerPeers(npi!),
-    enabled: !!npi,
-    staleTime: 60_000,
-  })
-
-  const { data: openPaymentsData } = useQuery<OpenPaymentsData>({
-    queryKey: ['open-payments', npi],
-    queryFn: () => api.openPayments(npi!),
-    enabled: !!npi,
-    staleTime: 60_000,
-  })
-
-  const { data: samData } = useQuery<SamExclusion>({
-    queryKey: ['sam-exclusion', npi],
-    queryFn: () => api.samExclusion(npi!),
-    enabled: !!npi,
-    staleTime: 60_000,
-  })
-
-  const { data: relatedData } = useQuery({
-    queryKey: ['related-providers', npi],
-    queryFn: () => api.relatedProviders(npi!),
-    enabled: !!npi,
-    staleTime: 60_000,
-  })
-
-  const { data: medicareData } = useQuery<MedicareComparison>({
-    queryKey: ['medicare-compare', npi],
-    queryFn: () => api.medicareCompare(npi!),
-    enabled: !!npi,
-    staleTime: 60_000,
+    enabled: detailReady,
+    staleTime: 300_000,
   })
 
   const { data: watchlistStatus } = useQuery({
     queryKey: ['watchlist-check', npi],
     queryFn: () => api.watchlistCheck(npi!),
-    enabled: !!npi,
-    staleTime: 30_000,
+    enabled: detailReady,
+    staleTime: 120_000,
   })
 
   const { data: scoreTrendData } = useQuery({
     queryKey: ['score-trend', npi],
     queryFn: () => api.scoreTrend(npi!),
-    enabled: !!npi,
-    staleTime: 30_000,
+    enabled: detailReady,
+    staleTime: 300_000,
   })
 
-  const { data: licenseData } = useQuery<LicenseVerification>({
-    queryKey: ['license', npi],
-    queryFn: () => api.providerLicense(npi!),
-    enabled: !!npi,
-    staleTime: 60_000,
+  const { data: relatedData } = useQuery({
+    queryKey: ['related-providers', npi],
+    queryFn: () => api.relatedProviders(npi!),
+    enabled: detailReady,
+    staleTime: 300_000,
   })
 
   const { data: providerNewsData } = useQuery({
     queryKey: ['provider-news', npi],
     queryFn: () => api.providerNews(npi!),
-    enabled: !!npi,
-    staleTime: 60_000,
+    enabled: detailReady,
+    staleTime: 300_000,
+  })
+
+  // ── Slow external API queries (fire after detail, cached 10 min) ──────
+  const { data: openPaymentsData } = useQuery<OpenPaymentsData>({
+    queryKey: ['open-payments', npi],
+    queryFn: () => api.openPayments(npi!),
+    enabled: detailReady,
+    staleTime: 600_000,
+  })
+
+  const { data: samData } = useQuery<SamExclusion>({
+    queryKey: ['sam-exclusion', npi],
+    queryFn: () => api.samExclusion(npi!),
+    enabled: detailReady,
+    staleTime: 600_000,
+  })
+
+  const { data: medicareData } = useQuery<MedicareComparison>({
+    queryKey: ['medicare-compare', npi],
+    queryFn: () => api.medicareCompare(npi!),
+    enabled: detailReady,
+    staleTime: 600_000,
+  })
+
+  const { data: licenseData } = useQuery<LicenseVerification>({
+    queryKey: ['license', npi],
+    queryFn: () => api.providerLicense(npi!),
+    enabled: detailReady,
+    staleTime: 600_000,
   })
 
   const addToWatchlistMutation = useMutation({

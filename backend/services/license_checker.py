@@ -277,10 +277,11 @@ def _generate_credential_flags(
     return flags
 
 
+@cached_nppes
 async def verify_provider_credentials(npi: str) -> dict:
     """
     Full license and credential verification for a provider.
-    Returns comprehensive verification results.
+    Returns comprehensive verification results. Cached for 24 hours.
     """
     # Fetch full NPPES data (with all taxonomies)
     nppes_raw = await get_full_nppes_data(npi)

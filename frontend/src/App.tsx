@@ -40,25 +40,28 @@ const NAV = [
   { to: '/geographic', label: 'Geographic'    },
 ]
 
+const ANALYTICS_NAV = [
+  { to: '/rings',              label: 'Fraud Rings'       },
+  { to: '/hotspots',           label: 'Fraud Hotspots'    },
+  { to: '/claim-patterns',     label: 'Claim Patterns'    },
+  { to: '/beneficiary-fraud',  label: 'Beneficiary Fraud' },
+  { to: '/pharmacy-dme',       label: 'Pharmacy & DME'    },
+  { to: '/news',               label: 'News & Legal'      },
+  { to: '/demographics',       label: 'Demographics'      },
+  { to: '/trends',             label: 'Trends'            },
+  { to: '/utilization',        label: 'Utilization'       },
+  { to: '/population',         label: 'Population'        },
+  { to: '/density',            label: 'Density Map'       },
+]
+
 const ADMIN_NAV = [
-  { to: '/admin/scan',    label: 'Scan & Data'    },
-  { to: '/alerts',        label: 'Alert Rules'    },
-  { to: '/audit',         label: 'Audit Log'      },
-  { to: '/roi',           label: 'ROI Dashboard'  },
-  { to: '/ownership',     label: 'Ownership'      },
-  { to: '/demographics',  label: 'Demographics'   },
-  { to: '/hotspots',      label: 'Fraud Hotspots' },
-  { to: '/density',       label: 'Density Map'    },
-  { to: '/utilization',   label: 'Utilization'    },
-  { to: '/population',    label: 'Population'     },
-  { to: '/trends',        label: 'Trends'         },
-  { to: '/rings',         label: 'Fraud Rings'    },
-  { to: '/news',          label: 'News & Legal'   },
-  { to: '/ml-model',      label: 'ML Model'       },
-  { to: '/claim-patterns', label: 'Claim Patterns' },
-  { to: '/beneficiary-fraud', label: 'Beneficiary Fraud' },
-  { to: '/pharmacy-dme', label: 'Pharmacy & DME' },
-  { to: '/users',         label: 'User Management' },
+  { to: '/admin/scan',    label: 'Scan & Data'      },
+  { to: '/alerts',        label: 'Alert Rules'      },
+  { to: '/audit',         label: 'Audit Log'        },
+  { to: '/roi',           label: 'ROI Dashboard'    },
+  { to: '/ownership',     label: 'Ownership'        },
+  { to: '/ml-model',      label: 'ML Model'         },
+  { to: '/users',         label: 'User Management'  },
 ]
 
 interface AuthUser {
@@ -66,11 +69,11 @@ interface AuthUser {
   token: string
 }
 
-function AdminMenu() {
+function DropdownMenu({ items, label }: { items: typeof ADMIN_NAV; label: string }) {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const location = useLocation()
-  const isAdminActive = ADMIN_NAV.some(n => location.pathname.startsWith(n.to))
+  const isActive = items.some(n => location.pathname.startsWith(n.to))
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -84,33 +87,33 @@ function AdminMenu() {
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen(!open)}
-        className={isAdminActive ? 'btn-primary flex items-center gap-1' : 'btn-ghost flex items-center gap-1'}
-        aria-label="Admin menu"
+        className={isActive ? 'btn-primary flex items-center gap-1' : 'btn-ghost flex items-center gap-1'}
+        aria-label={`${label} menu`}
         aria-expanded={open}
         aria-haspopup="true"
       >
-        Admin
+        {label}
         <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
           <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
         </svg>
       </button>
       {open && (
         <div className="absolute top-full left-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 py-1 max-h-[70vh] overflow-y-auto" role="menu">
-          {ADMIN_NAV.map(({ to, label }) => (
+          {items.map(({ to, label: itemLabel }) => (
             <NavLink
               key={to}
               to={to}
               onClick={() => setOpen(false)}
               role="menuitem"
-              className={({ isActive }) =>
+              className={({ isActive: active }) =>
                 `block px-4 py-2 text-sm transition-colors ${
-                  isActive
+                  active
                     ? 'text-blue-400 bg-gray-700'
                     : 'text-gray-300 hover:text-white hover:bg-gray-700'
                 }`
               }
             >
-              {label}
+              {itemLabel}
             </NavLink>
           ))}
         </div>
@@ -271,16 +274,17 @@ export default function App() {
     }
   }, [])
 
-  const handleLogin = async (email: string, password: string): Promise<string | null> => {
+  const handleLogin = async (username: string, password: string): Promise<string | null> => {
     try {
       const resp = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username, password }),
       })
       const data = await resp.json()
       if (!resp.ok) return data.detail || 'Login failed'
-      const session = { email: data.email, token: data.token }
+      const email = data.user?.username || username
+      const session = { email, token: data.token }
       setUser(session)
       localStorage.setItem('mfi_session', JSON.stringify(session))
       setView('app')
@@ -290,16 +294,17 @@ export default function App() {
     }
   }
 
-  const handleRegister = async (email: string, password: string): Promise<string | null> => {
+  const handleRegister = async (username: string, password: string): Promise<string | null> => {
     try {
       const resp = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({ username, password }),
       })
       const data = await resp.json()
       if (!resp.ok) return data.detail || 'Registration failed'
-      const session = { email: data.email, token: data.token }
+      const email = data.user?.username || username
+      const session = { email, token: data.token }
       setUser(session)
       localStorage.setItem('mfi_session', JSON.stringify(session))
       setView('app')
@@ -392,7 +397,8 @@ export default function App() {
                 {label}
               </NavLink>
             ))}
-            <AdminMenu />
+            <DropdownMenu items={ANALYTICS_NAV} label="Analytics" />
+            <DropdownMenu items={ADMIN_NAV} label="Admin" />
           </nav>
           <div className="ml-auto hidden lg:flex items-center gap-3 text-xs text-gray-500">
             <span className="hidden xl:inline">HHS/DOGE Medicaid Dataset</span>
@@ -434,6 +440,25 @@ export default function App() {
                   {label}
                 </NavLink>
               ))}
+            </div>
+            <div className="border-t border-gray-800 pt-2">
+              <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">Analytics</p>
+              <div className="flex flex-wrap gap-1">
+                {ANALYTICS_NAV.map(({ to, label }) => (
+                  <NavLink
+                    key={to}
+                    to={to}
+                    onClick={() => setMobileMenuOpen(false)}
+                    className={({ isActive }) =>
+                      `text-xs px-2 py-1 rounded transition-colors ${
+                        isActive ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                      }`
+                    }
+                  >
+                    {label}
+                  </NavLink>
+                ))}
+              </div>
             </div>
             <div className="border-t border-gray-800 pt-2">
               <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">Admin</p>

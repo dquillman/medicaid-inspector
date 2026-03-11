@@ -138,7 +138,7 @@ async def generate_referral_packet(npi: str):
         desc = hcpcs_descriptions.get(code, "")
         hcpcs_rows += (
             f"<tr><td><strong>{_esc(code)}</strong></td>"
-            f"<td>{_esc(desc) if desc else '<em style=\"color:#9ca3af\">—</em>'}</td>"
+            f"<td>{_esc(desc) if desc else '<em style=color:#9ca3af>—</em>'}</td>"
             f"<td style='text-align:right'>{_fmt(paid)}</td>"
             f"<td style='text-align:right'>{h.get('total_claims', 0):,}</td>"
             f"<td style='text-align:right'>{pct:.1f}%</td></tr>\n"

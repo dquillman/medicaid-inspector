@@ -2088,7 +2088,8 @@ async def list_providers(
             if to_cache:
                 _append(to_cache)
 
-        # Attach review status / notes from review queue
+        # Attach review status / notes from review queue + OIG exclusion status
+        from core.oig_store import is_excluded as _oig_check
         review_by_npi = {item["npi"]: item for item in get_review_queue()}
         enriched_slice = []
         for p in page_slice:
@@ -2097,6 +2098,10 @@ async def list_providers(
             if rev:
                 entry["review_status"] = rev.get("status")
                 entry["review_notes"]  = rev.get("notes", "")
+            oig_excluded, oig_record = _oig_check(p["npi"])
+            entry["oig_excluded"] = oig_excluded
+            if oig_record:
+                entry["oig_detail"] = oig_record
             enriched_slice.append(entry)
 
         return {"providers": enriched_slice, "page": page, "limit": limit, "total": total}

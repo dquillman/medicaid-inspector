@@ -11,7 +11,8 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from datetime import datetime
 import re
@@ -521,6 +522,14 @@ app.add_middleware(
 # Rate limiting middleware — must be added after CORS middleware
 app.add_middleware(RateLimitMiddleware)
 
+# Routers sharing /api/providers prefix with specific sub-paths must come
+# BEFORE the main providers router (which has a /{npi} catch-all).
+app.include_router(referral.router)
+app.include_router(timeline.router)
+app.include_router(related.router)
+app.include_router(medicare.router)
+app.include_router(license.router)
+app.include_router(news.provider_news_router)
 app.include_router(providers.router)
 app.include_router(anomalies.router)
 app.include_router(states.router)
@@ -541,18 +550,12 @@ app.include_router(beneficiary.router)
 app.include_router(utilization.router)
 app.include_router(population.router)
 app.include_router(trends.router)
-app.include_router(timeline.router)
 app.include_router(temporal.router)
-app.include_router(related.router)
 app.include_router(watchlist.router)
 app.include_router(specialty.router)
 app.include_router(rings.router)
-app.include_router(medicare.router)
 app.include_router(score_trends.router)
 app.include_router(news.router)
-app.include_router(news.provider_news_router)
-app.include_router(referral.router)
-app.include_router(license.router)
 app.include_router(beneficiary_fraud.router)
 app.include_router(ml_routes.router)
 app.include_router(pharmacy_dme.router)
@@ -1244,3 +1247,23 @@ async def start_download():
         return {"ok": False, "message": "Download already in progress"}
     asyncio.create_task(_do_download())
     return {"ok": True, "message": "Download started"}
+
+
+# ── Serve frontend static files (production) ─────────────────────────────────
+_static_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "dist"))
+log.info("Static dir: %s (exists=%s)", _static_dir, os.path.isdir(_static_dir))
+if os.path.isdir(_static_dir):
+    # Serve static assets (JS, CSS, etc.)
+    app.mount("/assets", StaticFiles(directory=os.path.join(_static_dir, "assets")), name="static-assets")
+
+    # Catch-all for SPA routing — must be last
+    @app.get("/", include_in_schema=False)
+    async def serve_spa_root():
+        return FileResponse(os.path.join(_static_dir, "index.html"))
+
+    @app.get("/{path:path}", include_in_schema=False)
+    async def serve_spa(path: str):
+        file_path = os.path.join(_static_dir, path)
+        if os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(_static_dir, "index.html"))

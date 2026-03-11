@@ -1,0 +1,9 @@
+.git
+.claude
+node_modules
+frontend/node_modules
+__pycache__
+*.pyc
+backend/tests
+backend/backups
+backend/evidence

@@ -1,0 +1,40 @@
+{
+  "hosting": {
+    "public": "frontend/dist",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "medicaid-inspector",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/health",
+        "run": {
+          "serviceId": "medicaid-inspector",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/ready",
+        "run": {
+          "serviceId": "medicaid-inspector",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "/metrics",
+        "run": {
+          "serviceId": "medicaid-inspector",
+          "region": "us-central1"
+        }
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
+  }
+}
