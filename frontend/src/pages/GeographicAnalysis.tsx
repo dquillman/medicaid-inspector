@@ -3,13 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import StateHeatmap from '../components/StateHeatmap'
-
-function fmtM(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(1)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(0)}`
-}
+import { fmtM } from '../lib/format'
 
 function SeverityBadge({ count }: { count: number }) {
   if (count >= 10) {
@@ -59,7 +53,7 @@ export default function GeographicAnalysis() {
   const { data: heatmapData } = useQuery({
     queryKey: ['state-heatmap'],
     queryFn: api.stateHeatmap,
-    refetchInterval: 30000,
+    refetchInterval: 120000,
   })
 
   const { data: hotspotsData, isLoading: hotspotsLoading } = useQuery({

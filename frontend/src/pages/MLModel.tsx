@@ -5,59 +5,14 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
 } from 'recharts'
 import { api } from '../lib/api'
-
-// ── Types ────────────────────────────────────────────────────────────────────
-
-interface SupervisedStatus {
-  trained: boolean
-  trained_at?: number
-  total_labeled?: number
-  positive_count?: number
-  negative_count?: number
-  accuracy?: number | null
-  precision?: number | null
-  recall?: number | null
-  f1?: number | null
-  auc?: number | null
-  confusion_matrix?: number[][] | null
-  feature_importance?: Record<string, number>
-  cv_folds?: number
-  providers_scored?: number
-  message?: string
-  error?: string
-}
-
-interface FeatureImportance {
-  features: { feature: string; importance: number }[]
-  error?: string
-}
-
-interface Prediction {
-  npi: string
-  fraud_probability: number
-  label: number | null
-  provider_name?: string
-  state?: string
-  total_paid?: number
-  risk_score?: number
-}
-
-interface PredictionsResponse {
-  predictions: Prediction[]
-  total: number
-  limit: number
-  offset: number
-  error?: string
-}
+import { fmt } from '../lib/format'
+import type {
+  SupervisedModelStatus,
+  SupervisedFeatureImportance,
+  SupervisedPredictionsResponse,
+} from '../lib/types'
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmt(v: number): string {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(2)}`
-}
 
 function pct(v: number | null | undefined): string {
   if (v == null) return 'N/A'
@@ -115,51 +70,35 @@ const FEATURE_LABELS: Record<string, string> = {
   sig_new_provider_explosion: 'New Provider Explosion',
 }
 
-// ── API extensions ───────────────────────────────────────────────────────────
-
-const supervisedApi = {
-  status: () =>
-    fetch('/api/ml/supervised/status').then(r => r.json()) as Promise<SupervisedStatus>,
-
-  train: () =>
-    fetch('/api/ml/supervised/train', { method: 'POST' }).then(r => r.json()) as Promise<SupervisedStatus>,
-
-  featureImportance: () =>
-    fetch('/api/ml/supervised/feature-importance').then(r => r.json()) as Promise<FeatureImportance>,
-
-  predictions: (limit = 50, offset = 0) =>
-    fetch(`/api/ml/supervised/predictions?limit=${limit}&offset=${offset}`).then(r => {
-      if (!r.ok) return r.json().then(d => ({ predictions: [], total: 0, limit, offset, error: d.detail }))
-      return r.json()
-    }) as Promise<PredictionsResponse>,
-}
-
 // ── Component ────────────────────────────────────────────────────────────────
 
 export default function MLModel() {
   const queryClient = useQueryClient()
   const [activeTab, setActiveTab] = useState<'overview' | 'features' | 'predictions'>('overview')
+  const [isTraining, setIsTraining] = useState(false)
 
-  const { data: status, isLoading: statusLoading } = useQuery({
+  const { data: status, isLoading: statusLoading } = useQuery<SupervisedModelStatus>({
     queryKey: ['supervised-status'],
-    queryFn: supervisedApi.status,
-    refetchInterval: 5000,
+    queryFn: () => api.supervisedStatus(),
+    refetchInterval: isTraining ? 5000 : 60000,
   })
 
-  const { data: features } = useQuery({
+  const { data: features } = useQuery<SupervisedFeatureImportance>({
     queryKey: ['supervised-features'],
-    queryFn: supervisedApi.featureImportance,
+    queryFn: () => api.supervisedFeatureImportance(),
     enabled: !!status?.trained,
   })
 
-  const { data: predictions } = useQuery({
+  const { data: predictions } = useQuery<SupervisedPredictionsResponse>({
     queryKey: ['supervised-predictions'],
-    queryFn: () => supervisedApi.predictions(50, 0),
+    queryFn: () => api.supervisedPredictions(50, 0),
     enabled: !!status?.trained,
   })
 
   const trainMutation = useMutation({
-    mutationFn: supervisedApi.train,
+    mutationFn: () => api.supervisedTrain(),
+    onMutate: () => setIsTraining(true),
+    onSettled: () => setIsTraining(false),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['supervised-status'] })
       queryClient.invalidateQueries({ queryKey: ['supervised-features'] })

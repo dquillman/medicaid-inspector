@@ -18,6 +18,9 @@ from core.config import settings
 
 log = logging.getLogger(__name__)
 
+# Reusable async HTTP client (avoids creating a new client per request)
+_http_client = httpx.AsyncClient(timeout=10.0)
+
 # ── Taxonomy-to-specialty mapping (common Medicaid categories) ────────────
 # Maps taxonomy code prefixes to broad specialty categories for mismatch detection
 TAXONOMY_SPECIALTY_MAP: dict[str, str] = {
@@ -73,10 +76,9 @@ async def get_full_nppes_data(npi: str) -> dict:
     """
     url = f"{settings.NPPES_BASE_URL}?version=2.1&number={npi}"
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            data = resp.json()
+        resp = await _http_client.get(url)
+        resp.raise_for_status()
+        data = resp.json()
     except Exception as e:
         log.warning("NPPES full fetch failed for %s: %s", npi, e)
         return {}
@@ -308,9 +310,8 @@ async def verify_provider_credentials(npi: str) -> dict:
     billing_hcpcs = None
     total_paid = 0
     try:
-        from core.store import get_prescanned
-        providers = get_prescanned()
-        match = next((p for p in providers if p.get("npi") == npi), None)
+        from core.store import get_provider_by_npi
+        match = get_provider_by_npi(npi)
         if match:
             total_paid = match.get("total_paid", 0)
             billing_hcpcs = match.get("hcpcs_top", None)

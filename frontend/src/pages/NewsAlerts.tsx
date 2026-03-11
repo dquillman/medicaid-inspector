@@ -54,7 +54,7 @@ export default function NewsAlerts() {
         severity: sevFilter || undefined,
         search: searchText || undefined,
       }),
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   })
 
   const createMut = useMutation({

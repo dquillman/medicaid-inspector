@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
+import { fmt } from '../lib/format'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -98,13 +99,6 @@ interface ImpossibleDay {
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-
-const fmt = (n: number) =>
-  n >= 1_000_000
-    ? `$${(n / 1_000_000).toFixed(1)}M`
-    : n >= 1_000
-      ? `$${(n / 1_000).toFixed(0)}K`
-      : `$${n.toFixed(0)}`
 
 const pct = (n: number) => `${(n * 100).toFixed(1)}%`
 

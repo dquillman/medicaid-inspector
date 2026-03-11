@@ -12,6 +12,7 @@ from core.safe_io import atomic_write_json
 _CACHE_FILE = pathlib.Path(__file__).parent.parent / "prescan_cache.json"
 
 prescanned_providers: list[dict] = []
+_npi_index: dict[str, dict] = {}
 prescan_status: dict = {"phase": 0, "message": "Idle — use the Scan button to begin", "started_at": None}
 scan_progress: dict = {
     "offset": 0,
@@ -39,7 +40,7 @@ def save_to_disk() -> None:
 
 def load_from_disk() -> bool:
     from core.config import settings
-    global prescanned_providers, scan_progress
+    global prescanned_providers, scan_progress, _npi_index
     try:
         if not _CACHE_FILE.exists():
             return False
@@ -51,6 +52,7 @@ def load_from_disk() -> bool:
             print(f"[store] Parquet URL changed — cache invalidated")
             return False
         prescanned_providers = raw.get("providers", [])
+        _npi_index = {p["npi"]: p for p in prescanned_providers}
         saved_prog = raw.get("scan_progress", {})
         scan_progress.update({
             "offset": saved_prog.get("offset", 0),
@@ -69,23 +71,29 @@ def load_from_disk() -> bool:
 # ── in-memory state ───────────────────────────────────────────────────────────
 
 def set_prescanned(data: list[dict]) -> None:
-    global prescanned_providers
+    global prescanned_providers, _npi_index
     prescanned_providers = data
+    _npi_index = {p["npi"]: p for p in prescanned_providers}
     save_to_disk()
 
 
-def append_prescanned(new_providers: list[dict]) -> None:
+def append_prescanned(new_providers: list[dict], save: bool = True) -> None:
     """Merge new providers into existing cache, de-dup by NPI, sort by total_paid DESC."""
-    global prescanned_providers
-    existing = {p["npi"]: p for p in prescanned_providers}
+    global prescanned_providers, _npi_index
     for p in new_providers:
-        existing[p["npi"]] = p
-    prescanned_providers = sorted(existing.values(), key=lambda p: p.get("total_paid") or 0, reverse=True)
-    save_to_disk()
+        _npi_index[p["npi"]] = p
+    prescanned_providers = sorted(_npi_index.values(), key=lambda p: p.get("total_paid") or 0, reverse=True)
+    if save:
+        save_to_disk()
 
 
 def get_prescanned() -> list[dict]:
     return prescanned_providers
+
+
+def get_provider_by_npi(npi: str) -> dict | None:
+    """O(1) lookup of a single provider by NPI."""
+    return _npi_index.get(npi)
 
 
 def load_prescanned_from_disk() -> bool:
@@ -97,7 +105,7 @@ def get_scan_progress() -> dict:
     return dict(scan_progress)
 
 
-def set_scan_progress(offset: int, total: int | None, state_filter: str | None, batches: int) -> None:
+def set_scan_progress(offset: int, total: int | None, state_filter: str | None, batches: int, save: bool = True) -> None:
     global scan_progress
     scan_progress = {
         "offset": offset,
@@ -106,13 +114,15 @@ def set_scan_progress(offset: int, total: int | None, state_filter: str | None, 
         "batches_completed": batches,
         "last_batch_at": time.time(),
     }
-    save_to_disk()
+    if save:
+        save_to_disk()
 
 
 def reset_scan() -> None:
     """Clear all scanned providers and reset progress to zero."""
-    global prescanned_providers, scan_progress
+    global prescanned_providers, scan_progress, _npi_index
     prescanned_providers = []
+    _npi_index = {}
     scan_progress = {
         "offset": 0,
         "total_provider_count": None,

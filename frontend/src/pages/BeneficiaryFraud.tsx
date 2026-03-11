@@ -2,14 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-
-function fmt(v: number | null | undefined) {
-  if (v == null) return '--'
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(2)}`
-}
+import { fmt } from '../lib/format'
 
 function num(v: number | null | undefined) {
   if (v == null) return '--'

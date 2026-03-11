@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { api } from '../lib/api'
+import { fmt } from '../lib/format'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 import SpendingTimeline from '../components/SpendingTimeline'
 import HcpcsBreakdown from '../components/HcpcsBreakdown'
@@ -13,12 +14,6 @@ import SpecialtyBenchmark from '../components/SpecialtyBenchmark'
 import TemporalAnalysisSection from '../components/TemporalAnalysisSection'
 import type { ClusterProvider, OpenPaymentsData, SamExclusion, RelatedProvider, MedicareComparison, LicenseVerification } from '../lib/types'
 
-function fmt(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v?.toFixed(2) ?? 0}`
-}
 
 function fmtPct(v: number | null | undefined) {
   if (v == null) return '—'
@@ -174,6 +169,7 @@ export default function ProviderDetail() {
   const queryClient = useQueryClient()
   const [watchlistMsg, setWatchlistMsg] = useState('')
 
+  // TODO: Consider batch /api/providers/{npi}/full-profile endpoint
   // ── Primary query (loads first) ─────────────────────────────────────────
   const { data: detail, isLoading, error } = useQuery({
     queryKey: ['provider', npi],

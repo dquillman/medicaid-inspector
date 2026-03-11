@@ -78,6 +78,36 @@ import type {
   MFCUReferral,
   ReferralsResponse,
   ReferralStats,
+  DemographicState,
+  DemographicCorrelation,
+  DemographicStateDetail,
+  HotspotArea,
+  HotspotAreaDetail,
+  TrendState,
+  BeneficiaryFraudSummary,
+  BeneficiaryFraudResult,
+  BeneficiaryFraudProviderResult,
+  BeneficiaryDensityResponse,
+  BeneficiaryDensityStateDetail,
+  ClaimPatternSummary,
+  ClaimPatternResult,
+  ProviderClaimPatterns,
+  SupervisedModelStatus,
+  SupervisedFeatureImportance,
+  SupervisedPredictionsResponse,
+} from './types'
+
+// Re-export types that consumers import from api.ts (backwards compat)
+export type {
+  DemographicState,
+  DemographicCorrelation,
+  DemographicStateDetail,
+  HotspotArea,
+  HotspotAreaDetail,
+  TrendState,
+  BeneficiaryFraudSummary,
+  BeneficiaryFraudResult,
+  BeneficiaryFraudProviderResult,
 } from './types'
 
 const BASE = '/api'
@@ -94,7 +124,7 @@ function authHeaders(): Record<string, string> {
   return {}
 }
 
-async function get<T>(path: string, params?: Record<string, string | number | boolean>): Promise<T> {
+export async function get<T>(path: string, params?: Record<string, string | number | boolean>): Promise<T> {
   const url = new URL(BASE + path, window.location.origin)
   if (params) {
     Object.entries(params).forEach(([k, v]) => {
@@ -103,6 +133,21 @@ async function get<T>(path: string, params?: Record<string, string | number | bo
   }
   const res = await fetch(url.toString(), { headers: { ...authHeaders() } })
   if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`)
+  return res.json()
+}
+
+export async function mutate<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = { ...authHeaders() }
+  const init: RequestInit = { method, headers }
+  if (body !== undefined) {
+    headers['Content-Type'] = 'application/json'
+    init.body = JSON.stringify(body)
+  }
+  const res = await fetch(BASE + path, init)
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => null)
+    throw new Error(errBody?.detail || `API error ${res.status}`)
+  }
   return res.json()
 }
 
@@ -165,14 +210,10 @@ export const api = {
   prescanStatus: () => get<PrescanStatus>('/prescan/status'),
 
   scanBatch: (batchSize = 100, stateFilter?: string) =>
-    fetch('/api/prescan/scan-batch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ batch_size: batchSize, state_filter: stateFilter ?? null }),
-    }).then(r => r.json()),
+    mutate<{ status: string }>('POST', '/prescan/scan-batch', { batch_size: batchSize, state_filter: stateFilter ?? null }),
 
   resetScan: () =>
-    fetch('/api/prescan/reset', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()),
+    mutate<{ status: string }>('POST', '/prescan/reset'),
 
   dataStatus: () => get<{
     is_local: boolean
@@ -184,27 +225,19 @@ export const api = {
   }>('/data/status'),
 
   startDownload: () =>
-    fetch('/api/data/download', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()),
+    mutate<{ status: string }>('POST', '/data/download'),
 
   smartScan: (stateFilter?: string) =>
-    fetch('/api/prescan/smart-scan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ state_filter: stateFilter ?? null }),
-    }).then(r => r.json()),
+    mutate<{ status: string }>('POST', '/prescan/smart-scan', { state_filter: stateFilter ?? null }),
 
   autoStart: (stateFilter?: string) =>
-    fetch('/api/prescan/auto-start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ state_filter: stateFilter ?? null }),
-    }).then(r => r.json()),
+    mutate<{ status: string }>('POST', '/prescan/auto-start', { state_filter: stateFilter ?? null }),
 
   autoStop: () =>
-    fetch('/api/prescan/auto-stop', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()),
+    mutate<{ status: string }>('POST', '/prescan/auto-stop'),
 
   rescoreAll: () =>
-    fetch('/api/prescan/rescore', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()),
+    mutate<{ status: string }>('POST', '/prescan/rescore'),
 
   reviewQueue: (params: { status?: string; page?: number; limit?: number }) =>
     get<{ items: ReviewItem[]; total: number; page: number }>('/review', params as Record<string, string | number>),
@@ -221,24 +254,16 @@ export const api = {
   },
 
   reviewBackfill: () =>
-    fetch('/api/review/backfill', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()),
+    mutate<{ status: string; added: number }>('POST', '/review/backfill'),
 
   updateReview: (npi: string, data: { status?: string; notes?: string; assigned_to?: string | null }) =>
-    fetch(`/api/review/${npi}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => r.json()),
+    mutate<ReviewItem>('PATCH', `/review/${npi}`, data),
 
   getReviewHistory: (npi: string) =>
     get<{ npi: string; audit_trail: AuditEntry[] }>(`/review/${npi}/history`),
 
   bulkUpdateReview: (data: { npis: string[]; status: string }) =>
-    fetch('/api/review/bulk-update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => r.json()),
+    mutate<{ updated: number }>('POST', '/review/bulk-update', data),
 
   oigStatus: (npi: string) => get<OigStatus>(`/providers/${npi}/oig`),
 
@@ -265,7 +290,7 @@ export const api = {
   }>(`/providers/${npi}/ml-score`),
 
   trainMl: () =>
-    fetch('/api/ml/train', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()),
+    mutate<{ status: string; provider_count?: number; anomaly_count?: number }>('POST', '/ml/train'),
 
   mlStatus: () => get<{
     trained: boolean
@@ -279,24 +304,16 @@ export const api = {
   alertRules: () => get<{ rules: AlertRule[] }>('/alerts/rules'),
 
   createAlertRule: (data: { name: string; conditions: AlertCondition[]; enabled?: boolean }) =>
-    fetch('/api/alerts/rules', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => r.json()),
+    mutate<AlertRule>('POST', '/alerts/rules', data),
 
   updateAlertRule: (id: string, data: { name?: string; conditions?: AlertCondition[]; enabled?: boolean }) =>
-    fetch(`/api/alerts/rules/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => r.json()),
+    mutate<AlertRule>('PATCH', `/alerts/rules/${id}`, data),
 
   deleteAlertRule: (id: string) =>
-    fetch(`/api/alerts/rules/${id}`, { method: 'DELETE', headers: { ...authHeaders() } }).then(r => r.json()),
+    mutate<{ ok: boolean }>('DELETE', `/alerts/rules/${id}`),
 
   evaluateAlerts: () =>
-    fetch('/api/alerts/evaluate', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()) as Promise<{ results: AlertRuleResult[]; provider_count: number }>,
+    mutate<{ results: AlertRuleResult[]; provider_count: number }>('POST', '/alerts/evaluate'),
 
   alertResults: () => get<{ results: AlertRuleResult[] }>('/alerts/results'),
 
@@ -306,32 +323,16 @@ export const api = {
   caseOverdue: () => get<{ items: ReviewItem[]; total: number }>('/cases/overdue'),
 
   addCaseDocument: (npi: string, data: { filename: string; description?: string; data_type?: string }) =>
-    fetch(`/api/cases/${npi}/documents`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => r.json()),
+    mutate<{ ok: boolean }>('POST', `/cases/${npi}/documents`, data),
 
   logCaseHours: (npi: string, data: { hours: number; description?: string }) =>
-    fetch(`/api/cases/${npi}/hours`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => r.json()),
+    mutate<{ ok: boolean }>('POST', `/cases/${npi}/hours`, data),
 
   setCasePriority: (npi: string, priority: string) =>
-    fetch(`/api/cases/${npi}/priority`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ priority }),
-    }).then(r => r.json()),
+    mutate<{ ok: boolean }>('PATCH', `/cases/${npi}/priority`, { priority }),
 
   setCaseDueDate: (npi: string, due_date: string | null) =>
-    fetch(`/api/cases/${npi}/due-date`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ due_date }),
-    }).then(r => r.json()),
+    mutate<{ ok: boolean }>('PATCH', `/cases/${npi}/due-date`, { due_date }),
 
   // Audit Log
   auditLog: (params: {
@@ -371,26 +372,16 @@ export const api = {
     ),
 
   logRecovery: (data: { npi: string; amount: number; recovery_type: string; notes?: string }) =>
-    fetch('/api/roi/recovery', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => {
-      if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed to log recovery') })
-      return r.json()
-    }),
+    mutate<RecoveryRecord>('POST', '/roi/recovery', data),
 
   deleteRecovery: (id: string) =>
-    fetch(`/api/roi/recovery/${id}`, { method: 'DELETE', headers: { ...authHeaders() } }).then(r => {
-      if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed to delete') })
-      return r.json()
-    }),
+    mutate<{ ok: boolean }>('DELETE', `/roi/recovery/${id}`),
 
   // Exclusion Cross-Referencing
   exclusionSummary: (npi: string) => get<ExclusionSummary>(`/providers/${npi}/exclusion-summary`),
 
   batchExclusionScan: () =>
-    fetch('/api/exclusions/scan-all', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()) as Promise<BatchExclusionResults>,
+    mutate<BatchExclusionResults>('POST', '/exclusions/scan-all'),
 
   batchExclusionResults: () => get<BatchExclusionResults>('/exclusions/summary'),
 
@@ -458,18 +449,10 @@ export const api = {
   dataSources: () => get<DataSourcesResponse>('/data/sources'),
 
   addDataSource: (url: string, state?: string) =>
-    fetch('/api/data/add-source', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ url, state: state ?? null }),
-    }).then(r => r.json()),
+    mutate<{ ok: boolean }>('POST', '/data/add-source', { url, state: state ?? null }),
 
   removeDataSource: (path: string) =>
-    fetch('/api/data/remove-source', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ path }),
-    }).then(r => r.json()),
+    mutate<{ ok: boolean }>('POST', '/data/remove-source', { path }),
 
   // Time-Series Forecasting
   providerForecast: (npi: string) => get<BillingForecast>(`/providers/${npi}/forecast`),
@@ -523,8 +506,8 @@ export const api = {
   hotspotZip: (zip3: string) => get<HotspotAreaDetail>(`/hotspots/zip/${zip3}`),
 
   // Beneficiary Density
-  beneficiaryDensity: () => get<{states: any[]; national_avg_billing_per_enrollee: number; total_enrollment: number; flagged_count: number}>('/beneficiary/density'),
-  beneficiaryDensityState: (state: string) => get<any>(`/beneficiary/density/${state}`),
+  beneficiaryDensity: () => get<BeneficiaryDensityResponse>('/beneficiary/density'),
+  beneficiaryDensityState: (state: string) => get<BeneficiaryDensityStateDetail>(`/beneficiary/density/${state}`),
 
   // Utilization Analysis
   utilizationByState: () => get<{
@@ -653,30 +636,13 @@ export const api = {
   watchlistCheck: (npi: string) => get<{ npi: string; watched: boolean }>(`/watchlist/check/${npi}`),
 
   addToWatchlist: (data: { npi: string; reason?: string; alert_threshold?: number; notes?: string }) =>
-    fetch('/api/watchlist', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => {
-      if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed to add to watchlist') })
-      return r.json() as Promise<WatchlistEntry>
-    }),
+    mutate<WatchlistEntry>('POST', '/watchlist', data),
 
   removeFromWatchlist: (npi: string) =>
-    fetch(`/api/watchlist/${npi}`, { method: 'DELETE', headers: { ...authHeaders() } }).then(r => {
-      if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed to remove') })
-      return r.json()
-    }),
+    mutate<{ ok: boolean }>('DELETE', `/watchlist/${npi}`),
 
   updateWatchlist: (npi: string, data: { notes?: string; alert_threshold?: number; active?: boolean; reason?: string }) =>
-    fetch(`/api/watchlist/${npi}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => {
-      if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed to update') })
-      return r.json() as Promise<WatchlistEntry>
-    }),
+    mutate<WatchlistEntry>('PATCH', `/watchlist/${npi}`, data),
 
   // Specialty Benchmarking
   specialtyList: () => get<{ specialties: SpecialtyListItem[]; total: number }>('/specialty/list'),
@@ -709,7 +675,7 @@ export const api = {
   fraudRingDetail: (ringId: string) => get<FraudRingDetail>(`/rings/${ringId}`),
 
   detectRings: () =>
-    fetch('/api/rings/detect', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()) as Promise<{ status: string; rings_found: number; total_providers_in_rings: number }>,
+    mutate<{ status: string; rings_found: number; total_providers_in_rings: number }>('POST', '/rings/detect'),
 
   // Temporal Anomaly Detection
   temporalAnalysis: (npi: string) => get<TemporalAnalysis>(`/temporal/providers/${npi}`),
@@ -737,17 +703,13 @@ export const api = {
     npi?: string
     date?: string
   }) =>
-    fetch('/api/news', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => r.json()) as Promise<{ ok: boolean; alert: NewsAlert }>,
+    mutate<{ ok: boolean; alert: NewsAlert }>('POST', '/news', data),
 
   deleteNewsAlert: (id: string) =>
-    fetch(`/api/news/${id}`, { method: 'DELETE', headers: { ...authHeaders() } }).then(r => r.json()) as Promise<{ ok: boolean }>,
+    mutate<{ ok: boolean }>('DELETE', `/news/${id}`),
 
   scanHhsNews: () =>
-    fetch('/api/news/scan-hhs', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()) as Promise<{ ok: boolean; fetched: number; message: string }>,
+    mutate<{ ok: boolean; fetched: number; message: string }>('POST', '/news/scan-hhs'),
 
   // License & Credential Verification
   providerLicense: (npi: string) => get<LicenseVerification>(`/license/providers/${npi}`),
@@ -755,7 +717,8 @@ export const api = {
   licenseFlags: () => get<LicenseFlagsResponse>('/license/flags'),
 
   // Beneficiary Fraud Detection
-  beneficiaryFraudSummary: () => get<BeneficiaryFraudSummary>('/beneficiary-fraud/summary'),
+  beneficiaryFraudSummary: () =>
+    get<BeneficiaryFraudSummary>('/beneficiary-fraud/summary'),
 
   beneficiaryFraudDoctorShopping: (limit = 100) =>
     get<BeneficiaryFraudResult>('/beneficiary-fraud/doctor-shopping', { limit }),
@@ -787,41 +750,41 @@ export const api = {
     get<DMEProviderDetail>(`/dme/provider/${npi}`),
 
   // Claim-Level Fraud Patterns
-  claimPatternSummary: () => get<any>('/claim-patterns/summary'),
+  claimPatternSummary: () => get<ClaimPatternSummary>('/claim-patterns/summary'),
 
   claimPatternUnbundling: (limit = 100) =>
-    get<any>('/claim-patterns/unbundling', { limit }),
+    get<ClaimPatternResult>('/claim-patterns/unbundling', { limit }),
 
   claimPatternDuplicates: (limit = 100) =>
-    get<any>('/claim-patterns/duplicates', { limit }),
+    get<ClaimPatternResult>('/claim-patterns/duplicates', { limit }),
 
   claimPatternPos: (limit = 100) =>
-    get<any>('/claim-patterns/place-of-service', { limit }),
+    get<ClaimPatternResult>('/claim-patterns/place-of-service', { limit }),
 
   claimPatternModifiers: (limit = 100) =>
-    get<any>('/claim-patterns/modifiers', { limit }),
+    get<ClaimPatternResult>('/claim-patterns/modifiers', { limit }),
 
   claimPatternImpossible: (limit = 100) =>
-    get<any>('/claim-patterns/impossible-days', { limit }),
+    get<ClaimPatternResult>('/claim-patterns/impossible-days', { limit }),
 
   claimPatternProvider: (npi: string) =>
-    get<any>(`/claim-patterns/provider/${npi}`),
+    get<ProviderClaimPatterns>(`/claim-patterns/provider/${npi}`),
 
   // Supervised ML Model
   supervisedTrain: () =>
-    fetch('/api/ml/supervised/train', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()),
+    mutate<SupervisedModelStatus>('POST', '/ml/supervised/train'),
 
   supervisedStatus: () =>
-    get<any>('/ml/supervised/status'),
+    get<SupervisedModelStatus>('/ml/supervised/status'),
 
   supervisedFeatureImportance: () =>
-    get<any>('/ml/supervised/feature-importance'),
+    get<SupervisedFeatureImportance>('/ml/supervised/feature-importance'),
 
   supervisedPredict: (npi: string) =>
-    get<any>(`/ml/supervised/predict/${npi}`),
+    get<{ npi: string; fraud_probability: number; label: number | null; error?: string }>(`/ml/supervised/predict/${npi}`),
 
   supervisedPredictions: (limit = 50, offset = 0) =>
-    get<any>('/ml/supervised/predictions', { limit, offset }),
+    get<SupervisedPredictionsResponse>('/ml/supervised/predictions', { limit, offset }),
 
   // ── Integration: MMIS ──────────────────────────────────────────────────────
   mmisStatus: () => get<MMISStatus>('/integrations/mmis/status'),
@@ -836,10 +799,7 @@ export const api = {
   nppesBulkStatus: () => get<NPPESBulkStatus>('/admin/nppes-bulk-status'),
 
   nppesBulkRefresh: () =>
-    fetch('/api/admin/nppes-bulk-refresh', {
-      method: 'POST',
-      headers: authHeaders(),
-    }).then(r => r.json()),
+    mutate<{ status: string }>('POST', '/admin/nppes-bulk-refresh'),
 
   // ── Integration: DEA ──────────────────────────────────────────────────────
   providerDea: (npi: string) => get<DEAStatus>(`/providers/${npi}/dea`),
@@ -848,11 +808,7 @@ export const api = {
   emailStatus: () => get<SMTPStatus>('/admin/email/status'),
 
   emailTest: (to: string) =>
-    fetch('/api/admin/email/test', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ to }),
-    }).then(r => r.json()),
+    mutate<{ ok: boolean; message: string }>('POST', '/admin/email/test', { to }),
 
   // ── Integration: FHIR Export ──────────────────────────────────────────────
   providerFhir: (npi: string) => get<FHIRPractitioner>(`/providers/${npi}/fhir`),
@@ -872,7 +828,7 @@ export const api = {
   }>('/admin/dataset-info'),
 
   datasetRefresh: () =>
-    fetch('/api/admin/dataset-refresh', { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()) as Promise<{
+    mutate<{
       checked_at: number
       current_url: string
       current_date: string | null
@@ -880,14 +836,10 @@ export const api = {
       new_date: string | null
       update_available: boolean
       message: string
-    }>,
+    }>('POST', '/admin/dataset-refresh'),
 
   datasetSwitch: (url: string) =>
-    fetch('/api/admin/dataset-switch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
-    }).then(r => r.json()),
+    mutate<{ ok: boolean }>('POST', '/admin/dataset-switch', { url }),
 
   dataQuality: () => get<{
     last_run: number | null
@@ -907,7 +859,7 @@ export const api = {
   }>('/admin/data-quality'),
 
   runDataQuality: (sampleLimit = 5000) =>
-    fetch(`/api/admin/data-quality/run?sample_limit=${sampleLimit}`, { method: 'POST', headers: { ...authHeaders() } }).then(r => r.json()),
+    mutate<{ status: string }>('POST', `/admin/data-quality/run?sample_limit=${sampleLimit}`),
 
   dataLineage: (page = 1, limit = 50) => get<{
     entries: {
@@ -945,10 +897,7 @@ export const api = {
   retentionPolicy: () => get<{ policies: RetentionPolicy[] }>('/admin/retention/policy'),
 
   enforceRetention: () =>
-    fetch('/api/admin/retention/enforce', {
-      method: 'POST',
-      headers: { ...authHeaders() },
-    }).then(r => r.json()),
+    mutate<{ ok: boolean }>('POST', '/admin/retention/enforce'),
 
   // Evidence Chain of Custody
   uploadEvidence: (caseId: string, file: File, description?: string, evidenceType?: string) => {
@@ -982,14 +931,7 @@ export const api = {
 
   // MFCU Referral Workflow
   submitReferral: (npi: string, data: { mfcu_contact?: string; jurisdiction?: string; case_number?: string; notes?: string }) =>
-    fetch(`/api/referrals/${npi}/submit`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => {
-      if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed to submit referral') })
-      return r.json() as Promise<MFCUReferral>
-    }),
+    mutate<MFCUReferral>('POST', `/referrals/${npi}/submit`, data),
 
   listReferrals: (params?: { stage?: string; npi?: string }) =>
     get<ReferralsResponse>('/referrals', params as Record<string, string>),
@@ -1000,14 +942,7 @@ export const api = {
     get<{ npi: string; referrals: MFCUReferral[]; total: number }>(`/referrals/provider/${npi}`),
 
   updateReferral: (id: number, data: { stage?: string; outcome?: string; outcome_notes?: string; mfcu_contact?: string; case_number?: string; jurisdiction?: string; notes?: string }) =>
-    fetch(`/api/referrals/${id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify(data),
-    }).then(r => {
-      if (!r.ok) return r.json().then(d => { throw new Error(d.detail || 'Failed to update referral') })
-      return r.json() as Promise<MFCUReferral>
-    }),
+    mutate<MFCUReferral>('PATCH', `/referrals/${id}`, data),
 
   referralStats: () => get<ReferralStats>('/referrals/stats/summary'),
 
@@ -1016,159 +951,3 @@ export const api = {
   referralOutcomes: () => get<{ outcomes: string[] }>('/referrals/meta/outcomes'),
 }
 
-// ── Demographic Risk types ──────────────────────────────────────────────────
-export interface DemographicState {
-  state: string
-  population: number
-  poverty_rate: number
-  median_income: number
-  pct_uninsured: number
-  medicaid_pct: number
-  provider_count: number
-  total_paid: number
-  total_claims: number
-  total_beneficiaries: number
-  avg_risk_score: number
-  billing_per_capita: number
-  demographic_risk_score: number
-}
-
-export interface DemographicCorrelation {
-  state: string
-  poverty_rate: number
-  avg_risk_score: number
-  provider_count: number
-  median_income: number
-  medicaid_pct: number
-  demographic_risk_score: number
-}
-
-export interface DemographicStateDetail extends DemographicState {
-  providers: {
-    npi: string
-    provider_name: string
-    city: string
-    total_paid: number
-    total_claims: number
-    risk_score: number
-    flag_count: number
-  }[]
-  providers_total: number
-}
-
-// ── Hotspot types ──────────────────────────────────────────────────────────
-export interface HotspotComponents {
-  avg_risk: number
-  flagged_pct: number
-  billing_concentration: number
-  density_anomaly: number
-  high_risk_count: number
-}
-
-export interface HotspotArea {
-  zip3: string
-  composite_score: number
-  severity: string
-  provider_count: number
-  flagged_count: number
-  flagged_pct: number
-  high_risk_count: number
-  avg_risk_score: number
-  total_billing: number
-  billing_concentration: number
-  density_ratio: number
-  states: string[]
-  cities: string[]
-  components: HotspotComponents
-}
-
-export interface HotspotProvider {
-  npi: string
-  provider_name: string
-  risk_score: number
-  total_paid: number
-  total_claims: number
-  flag_count: number
-  state: string
-  city: string
-}
-
-export interface HotspotAreaDetail extends HotspotArea {
-  top_providers: HotspotProvider[]
-}
-
-// ── Trend Divergence types ──────────────────────────────────────────────────
-export interface TrendYearly {
-  year: number
-  enrollment_millions: number
-  total_billing: number
-  billing_per_enrollee: number
-}
-
-export interface TrendYoY {
-  year: number
-  enrollment_change_pct: number
-  billing_change_pct: number
-  divergence_pct: number
-  is_divergent: boolean
-}
-
-export interface TrendState {
-  state: string
-  has_billing_data: boolean
-  enrollment_trend: 'up' | 'down' | 'flat'
-  billing_trend: 'up' | 'down' | 'flat'
-  divergence_score: number
-  consecutive_divergent_years: number
-  flagged: boolean
-  yearly: TrendYearly[]
-  yoy: TrendYoY[]
-}
-
-// ── Beneficiary Fraud Detection types ──────────────────────────────────────
-export interface BeneficiaryFraudSummary {
-  total_providers_analyzed: number
-  total_beneficiary_records: number
-  total_paid: number
-  has_individual_bene_id: boolean
-  flagged_counts: {
-    doctor_shopping: number
-    high_utilization: number
-    geographic_anomalies: number
-    excessive_services: number
-  }
-  note: string
-}
-
-export interface BeneficiaryFraudResult {
-  flagged: Record<string, any>[]
-  total_flagged: number
-  note?: string
-  error?: string
-}
-
-export interface BeneficiaryFraudProviderFlag {
-  type: string
-  severity: string
-  description: string
-}
-
-export interface BeneficiaryFraudProviderResult {
-  npi: string
-  found: boolean
-  provider_stats?: {
-    total_paid: number
-    total_claims: number
-    total_benes: number
-    distinct_hcpcs: number
-    active_months: number
-    claims_per_bene: number
-    rev_per_bene: number
-  }
-  peer_comparison?: Record<string, number>
-  code_overlap?: { hcpcs_code: string; other_providers: number }[]
-  flags?: BeneficiaryFraudProviderFlag[]
-  flag_count?: number
-  error?: string
-  note?: string
-}

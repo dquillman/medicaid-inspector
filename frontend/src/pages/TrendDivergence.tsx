@@ -5,12 +5,7 @@ import {
   ResponsiveContainer, BarChart, Legend, ReferenceLine, Cell,
 } from 'recharts'
 import { api, TrendState } from '../lib/api'
-
-const fmt = (n: number) =>
-  n >= 1_000_000_000 ? `$${(n / 1_000_000_000).toFixed(1)}B`
-    : n >= 1_000_000 ? `$${(n / 1_000_000).toFixed(1)}M`
-      : n >= 1_000 ? `$${(n / 1_000).toFixed(1)}K`
-        : `$${n.toFixed(0)}`
+import { fmt } from '../lib/format'
 
 function TrendArrow({ direction }: { direction: 'up' | 'down' | 'flat' }) {
   if (direction === 'up') return <span className="text-green-400 font-bold text-lg">&#9650;</span>

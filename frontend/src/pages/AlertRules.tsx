@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { AlertRule, AlertCondition, AlertRuleResult } from '../lib/types'
+import { fmt } from '../lib/format'
 
 const FIELD_OPTIONS: { value: string; label: string }[] = [
   { value: 'risk_score',               label: 'Risk Score' },
@@ -26,13 +27,6 @@ const OPERATOR_OPTIONS: { value: string; label: string }[] = [
 
 const OPERATOR_LABELS: Record<string, string> = {
   gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=',
-}
-
-function fmt(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toLocaleString()}`
 }
 
 function RiskBadge({ score }: { score: number }) {

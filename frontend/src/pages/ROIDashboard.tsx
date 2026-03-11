@@ -5,6 +5,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
 } from 'recharts'
 import { api } from '../lib/api'
+import { fmt } from '../lib/format'
 
 const RECOVERY_TYPES = [
   { value: 'overpayment', label: 'Overpayment Recovery' },
@@ -12,13 +13,6 @@ const RECOVERY_TYPES = [
   { value: 'penalty', label: 'Penalty / Fine' },
   { value: 'voluntary_refund', label: 'Voluntary Refund' },
 ]
-
-function fmt(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
 
 function rateColor(rate: number): string {
   if (rate > 0.5) return 'text-green-400'

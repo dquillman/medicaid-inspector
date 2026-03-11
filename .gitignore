@@ -13,7 +13,7 @@ frontend/dist/
 # Data files (large, generated)
 backend/prescan_cache.json
 backend/review_queue.json
-backend/data/
+backend/data/*.parquet
 
 # IDE
 .vscode/

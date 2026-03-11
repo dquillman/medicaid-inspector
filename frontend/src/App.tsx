@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
+import { useClickOutside } from './hooks/useClickOutside'
 import Overview from './pages/Overview'
 import ProviderExplorer from './pages/ProviderExplorer'
 import AnomalyDashboard from './pages/AnomalyDashboard'
@@ -29,6 +30,7 @@ import UserManagement from './pages/UserManagement'
 import Landing from './pages/Landing'
 import Login from './pages/Login'
 import NotificationBell from './components/NotificationBell'
+import { mutate } from './lib/api'
 
 const NAV = [
   { to: '/',           label: 'Overview'      },
@@ -64,9 +66,12 @@ const ADMIN_NAV = [
   { to: '/users',         label: 'User Management'  },
 ]
 
+const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000 // 24 hours
+
 interface AuthUser {
   email: string
   token: string
+  savedAt?: number
 }
 
 function DropdownMenu({ items, label }: { items: typeof ADMIN_NAV; label: string }) {
@@ -75,13 +80,7 @@ function DropdownMenu({ items, label }: { items: typeof ADMIN_NAV; label: string
   const location = useLocation()
   const isActive = items.some(n => location.pathname.startsWith(n.to))
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+  useClickOutside(ref, useCallback(() => setOpen(false), []))
 
   return (
     <div className="relative" ref={ref}>
@@ -135,16 +134,10 @@ function SettingsDropdown({ userEmail }: { userEmail: string }) {
   const [loading, setLoading] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false)
-        setShowPwChange(false)
-      }
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+  useClickOutside(ref, useCallback(() => {
+    setOpen(false)
+    setShowPwChange(false)
+  }, []))
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -154,17 +147,7 @@ function SettingsDropdown({ userEmail }: { userEmail: string }) {
     if (newPw !== confirmPw) { setError('Passwords do not match'); return }
     setLoading(true)
     try {
-      const token = JSON.parse(localStorage.getItem('mfi_session') || '{}').token
-      const resp = await fetch('/api/auth/change-password', {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ old_password: oldPw, new_password: newPw }),
-      })
-      const data = await resp.json()
-      if (!resp.ok) { setError(data.detail || 'Failed to change password'); return }
+      await mutate<{ ok: boolean }>('PATCH', '/auth/change-password', { old_password: oldPw, new_password: newPw })
       setSuccess('Password changed successfully')
       setOldPw(''); setNewPw(''); setConfirmPw('')
       setTimeout(() => { setShowPwChange(false); setSuccess('') }, 2000)
@@ -260,59 +243,50 @@ export default function App() {
   const [view, setView] = useState<'landing' | 'login' | 'app'>('landing')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
-  // Restore session from localStorage
+  // Restore session from localStorage (with expiry check)
   useEffect(() => {
     const saved = localStorage.getItem('mfi_session')
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
         if (parsed.token && parsed.email) {
-          setUser(parsed)
-          setView('app')
+          const age = Date.now() - (parsed.savedAt ?? 0)
+          if (parsed.savedAt && age > SESSION_MAX_AGE_MS) {
+            // Token expired — clear it
+            localStorage.removeItem('mfi_session')
+          } else {
+            setUser(parsed)
+            setView('app')
+          }
         }
       } catch { /* ignore */ }
     }
   }, [])
 
-  const handleLogin = async (username: string, password: string): Promise<string | null> => {
+  const authRequest = async (
+    path: string,
+    username: string,
+    password: string,
+    failLabel: string,
+  ): Promise<string | null> => {
     try {
-      const resp = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      const data = await resp.json()
-      if (!resp.ok) return data.detail || 'Login failed'
+      const data = await mutate<{ token: string; user: { username: string } }>('POST', path, { username, password })
       const email = data.user?.username || username
-      const session = { email, token: data.token }
+      const session: AuthUser = { email, token: data.token, savedAt: Date.now() }
       setUser(session)
       localStorage.setItem('mfi_session', JSON.stringify(session))
       setView('app')
       return null
-    } catch {
-      return 'Could not reach server'
+    } catch (e) {
+      return e instanceof Error ? e.message : failLabel
     }
   }
 
-  const handleRegister = async (username: string, password: string): Promise<string | null> => {
-    try {
-      const resp = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      const data = await resp.json()
-      if (!resp.ok) return data.detail || 'Registration failed'
-      const email = data.user?.username || username
-      const session = { email, token: data.token }
-      setUser(session)
-      localStorage.setItem('mfi_session', JSON.stringify(session))
-      setView('app')
-      return null
-    } catch {
-      return 'Could not reach server'
-    }
-  }
+  const handleLogin = (username: string, password: string) =>
+    authRequest('/auth/login', username, password, 'Login failed')
+
+  const handleRegister = (username: string, password: string) =>
+    authRequest('/auth/register', username, password, 'Registration failed')
 
   const handleLogout = () => {
     setUser(null)
@@ -320,30 +294,17 @@ export default function App() {
     setView('landing')
   }
 
-  // Landing page (not logged in)
-  if (view === 'landing') {
-    return (
-      <BrowserRouter>
+  // Single BrowserRouter with conditional views based on auth state
+  return (
+    <BrowserRouter>
+      {view === 'landing' ? (
         <Landing onLogin={() => setView('login')} />
-      </BrowserRouter>
-    )
-  }
-
-  // Login / register page
-  if (view === 'login') {
-    return (
-      <BrowserRouter>
+      ) : view === 'login' ? (
         <Login
           onLogin={handleLogin}
           onBack={() => setView('landing')}
         />
-      </BrowserRouter>
-    )
-  }
-
-  // Authenticated app
-  return (
-    <BrowserRouter>
+      ) : (
       <div className="min-h-screen flex flex-col" lang="en">
         {/* Top nav */}
         <header className="no-print bg-gray-900 border-b-2 border-red-900 px-4 md:px-6 py-3 flex items-center gap-4 md:gap-8">
@@ -534,6 +495,7 @@ export default function App() {
           </p>
         </footer>
       </div>
+      )}
     </BrowserRouter>
   )
 }

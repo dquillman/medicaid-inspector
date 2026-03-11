@@ -3,13 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { FraudRingSummary, FraudRingDetail, FraudRingMember, FraudRingEdge } from '../lib/types'
-
-function fmt(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v?.toFixed(2) ?? 0}`
-}
+import { fmt } from '../lib/format'
 
 function RiskBadge({ score }: { score: number }) {
   const cls = score >= 50
@@ -323,7 +317,7 @@ export default function FraudRings() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['fraud-rings'],
     queryFn: () => api.fraudRings(),
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   })
 
   const handleDetect = useCallback(async () => {

@@ -3,13 +3,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { OwnershipNetworkEntry, OwnershipNpi } from '../lib/types'
-
-function fmt(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v?.toFixed(2) ?? 0}`
-}
+import { fmt } from '../lib/format'
 
 function RiskBadge({ score }: { score: number }) {
   const cls = score >= 50

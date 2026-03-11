@@ -1,5 +1,7 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useClickOutside } from '../hooks/useClickOutside'
+import { get, mutate } from '../lib/api'
 
 interface Notification {
   id: string
@@ -41,32 +43,22 @@ export default function NotificationBell() {
 
   const { data } = useQuery({
     queryKey: ['notifications'],
-    queryFn: async () => {
-      const resp = await fetch('/api/notifications')
-      if (!resp.ok) return { notifications: [], unread_count: 0 }
-      return resp.json()
-    },
+    queryFn: () => get<{ notifications: Notification[]; unread_count: number }>('/notifications').catch(() => ({ notifications: [], unread_count: 0 })),
     refetchInterval: 30000,
   })
 
   const notifications: Notification[] = data?.notifications ?? []
   const unreadCount: number = data?.unread_count ?? 0
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+  useClickOutside(ref, useCallback(() => setOpen(false), []))
 
   const markRead = async (id: string) => {
-    await fetch(`/api/notifications/${id}/read`, { method: 'PATCH' })
+    await mutate<{ ok: boolean }>('PATCH', `/notifications/${id}/read`)
     queryClient.invalidateQueries({ queryKey: ['notifications'] })
   }
 
   const markAllRead = async () => {
-    await fetch('/api/notifications/read-all', { method: 'POST' })
+    await mutate<{ ok: boolean }>('POST', '/notifications/read-all')
     queryClient.invalidateQueries({ queryKey: ['notifications'] })
   }
 

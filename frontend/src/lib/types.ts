@@ -1385,3 +1385,274 @@ export interface ReferralStats {
   by_stage: Record<string, number>
   by_outcome: Record<string, number>
 }
+
+// ── Demographic Risk types ──────────────────────────────────────────────────
+export interface DemographicState {
+  state: string
+  population: number
+  poverty_rate: number
+  median_income: number
+  pct_uninsured: number
+  medicaid_pct: number
+  provider_count: number
+  total_paid: number
+  total_claims: number
+  total_beneficiaries: number
+  avg_risk_score: number
+  billing_per_capita: number
+  demographic_risk_score: number
+}
+
+export interface DemographicCorrelation {
+  state: string
+  poverty_rate: number
+  avg_risk_score: number
+  provider_count: number
+  median_income: number
+  medicaid_pct: number
+  demographic_risk_score: number
+}
+
+export interface DemographicStateDetail extends DemographicState {
+  providers: {
+    npi: string
+    provider_name: string
+    city: string
+    total_paid: number
+    total_claims: number
+    risk_score: number
+    flag_count: number
+  }[]
+  providers_total: number
+}
+
+// ── Hotspot types ──────────────────────────────────────────────────────────
+export interface HotspotComponents {
+  avg_risk: number
+  flagged_pct: number
+  billing_concentration: number
+  density_anomaly: number
+  high_risk_count: number
+}
+
+export interface HotspotArea {
+  zip3: string
+  composite_score: number
+  severity: string
+  provider_count: number
+  flagged_count: number
+  flagged_pct: number
+  high_risk_count: number
+  avg_risk_score: number
+  total_billing: number
+  billing_concentration: number
+  density_ratio: number
+  states: string[]
+  cities: string[]
+  components: HotspotComponents
+}
+
+export interface HotspotProvider {
+  npi: string
+  provider_name: string
+  risk_score: number
+  total_paid: number
+  total_claims: number
+  flag_count: number
+  state: string
+  city: string
+}
+
+export interface HotspotAreaDetail extends HotspotArea {
+  top_providers: HotspotProvider[]
+}
+
+// ── Trend Divergence types ──────────────────────────────────────────────────
+export interface TrendYearly {
+  year: number
+  enrollment_millions: number
+  total_billing: number
+  billing_per_enrollee: number
+}
+
+export interface TrendYoY {
+  year: number
+  enrollment_change_pct: number
+  billing_change_pct: number
+  divergence_pct: number
+  is_divergent: boolean
+}
+
+export interface TrendState {
+  state: string
+  has_billing_data: boolean
+  enrollment_trend: 'up' | 'down' | 'flat'
+  billing_trend: 'up' | 'down' | 'flat'
+  divergence_score: number
+  consecutive_divergent_years: number
+  flagged: boolean
+  yearly: TrendYearly[]
+  yoy: TrendYoY[]
+}
+
+// ── Beneficiary Fraud Detection types ──────────────────────────────────────
+export interface BeneficiaryFraudSummary {
+  total_providers_analyzed: number
+  total_beneficiary_records: number
+  total_paid: number
+  has_individual_bene_id: boolean
+  flagged_counts: {
+    doctor_shopping: number
+    high_utilization: number
+    geographic_anomalies: number
+    excessive_services: number
+  }
+  note: string
+}
+
+export interface BeneficiaryFraudResult {
+  flagged: Record<string, unknown>[]
+  total_flagged: number
+  note?: string
+  error?: string
+}
+
+export interface BeneficiaryFraudProviderFlag {
+  type: string
+  severity: string
+  description: string
+}
+
+export interface BeneficiaryFraudProviderResult {
+  npi: string
+  found: boolean
+  provider_stats?: {
+    total_paid: number
+    total_claims: number
+    total_benes: number
+    distinct_hcpcs: number
+    active_months: number
+    claims_per_bene: number
+    rev_per_bene: number
+  }
+  peer_comparison?: Record<string, number>
+  code_overlap?: { hcpcs_code: string; other_providers: number }[]
+  flags?: BeneficiaryFraudProviderFlag[]
+  flag_count?: number
+  error?: string
+  note?: string
+}
+
+// ── Beneficiary Density types ───────────────────────────────────────────────
+export interface BeneficiaryDensityState {
+  state: string
+  medicaid_enrollment: number
+  provider_count: number
+  total_billing: number
+  total_claims: number
+  billing_per_enrollee: number
+  expected_billing_per_enrollee: number
+  ratio: number
+  flagged: boolean
+}
+
+export interface BeneficiaryDensityStateDetail {
+  state: string
+  medicaid_enrollment: number
+  total_billing: number
+  provider_count: number
+  billing_per_enrollee: number
+  cities: {
+    city: string
+    provider_count: number
+    total_billing: number
+    total_claims: number
+    billing_share_pct: number
+    top_providers: { npi: string; name: string; risk_score: number; total_paid: number }[]
+  }[]
+}
+
+export interface BeneficiaryDensityResponse {
+  states: BeneficiaryDensityState[]
+  national_avg_billing_per_enrollee: number
+  total_enrollment: number
+  flagged_count: number
+}
+
+// ── Claim Pattern types ─────────────────────────────────────────────────────
+export interface ClaimPatternSeverityCounts {
+  CRITICAL: number
+  HIGH: number
+  MEDIUM: number
+}
+
+export interface ClaimPatternCategory {
+  count: number
+  total_paid: number
+  severity_counts: ClaimPatternSeverityCounts
+}
+
+export interface ClaimPatternSummary {
+  unbundling: ClaimPatternCategory
+  duplicates: ClaimPatternCategory
+  pos_violations: ClaimPatternCategory
+  modifiers: ClaimPatternCategory
+  impossible_days: ClaimPatternCategory
+}
+
+export interface ClaimPatternResult {
+  patterns: Record<string, unknown>[]
+  total: number
+}
+
+export interface ProviderClaimPatterns {
+  npi: string
+  unbundling: Record<string, unknown>[]
+  duplicates: Record<string, unknown> | null
+  pos_violations: Record<string, unknown> | null
+  modifier_abuse: Record<string, unknown> | null
+  impossible_days: Record<string, unknown> | null
+}
+
+// ── Supervised ML types ─────────────────────────────────────────────────────
+export interface SupervisedModelStatus {
+  trained: boolean
+  trained_at?: number
+  total_labeled?: number
+  positive_count?: number
+  negative_count?: number
+  accuracy?: number | null
+  precision?: number | null
+  recall?: number | null
+  f1?: number | null
+  auc?: number | null
+  confusion_matrix?: number[][] | null
+  feature_importance?: Record<string, number>
+  cv_folds?: number
+  providers_scored?: number
+  message?: string
+  error?: string
+}
+
+export interface SupervisedFeatureImportance {
+  features: { feature: string; importance: number }[]
+  error?: string
+}
+
+export interface SupervisedPrediction {
+  npi: string
+  fraud_probability: number
+  label: number | null
+  provider_name?: string
+  state?: string
+  total_paid?: number
+  risk_score?: number
+}
+
+export interface SupervisedPredictionsResponse {
+  predictions: SupervisedPrediction[]
+  total: number
+  limit: number
+  offset: number
+  error?: string
+}

@@ -4,7 +4,7 @@ detection, gap identification, and notable event extraction.
 """
 
 from fastapi import APIRouter, HTTPException, Depends
-from core.store import get_prescanned
+from core.store import get_prescanned, get_provider_by_npi
 from data.duckdb_client import query_async, get_parquet_path
 from routes.auth import require_user
 
@@ -99,7 +99,7 @@ async def get_timeline_analysis(npi: str):
     """
 
     # Try prescan cache first
-    cached = next((p for p in get_prescanned() if p["npi"] == npi), None)
+    cached = get_provider_by_npi(npi)
     raw_timeline = None
 
     if cached and cached.get("timeline"):

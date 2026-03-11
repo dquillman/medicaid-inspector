@@ -3,16 +3,11 @@ import {
   Legend, ResponsiveContainer, ReferenceLine,
 } from 'recharts'
 import type { TimelineRow, BillingForecast } from '../lib/types'
+import { fmt } from '../lib/format'
 
 interface Props {
   timeline: TimelineRow[]
   forecast: BillingForecast
-}
-
-function fmt(v: number) {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(0)}`
 }
 
 interface ChartRow {

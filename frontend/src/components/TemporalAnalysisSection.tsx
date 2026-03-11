@@ -5,12 +5,7 @@ import {
 } from 'recharts'
 import { api } from '../lib/api'
 import type { TemporalAnalysis, TemporalAnomaly } from '../lib/types'
-
-function fmt(v: number) {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v?.toFixed(0) ?? 0}`
-}
+import { fmt } from '../lib/format'
 
 const SEVERITY_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
   CRITICAL: { bg: 'bg-red-950/40', border: 'border-red-700', text: 'text-red-300', dot: '#ef4444' },

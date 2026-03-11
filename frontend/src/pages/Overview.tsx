@@ -2,14 +2,9 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { api } from '../lib/api'
+import { fmt } from '../lib/format'
 import StateHeatmap from '../components/StateHeatmap'
-
-function fmt(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v}`
-}
+import type { PrescanStatus } from '../lib/types'
 
 const SIGNAL_LABELS: Record<string, string> = {
   billing_concentration:    'Billing Concentration',
@@ -34,34 +29,43 @@ const SIGNAL_LABELS: Record<string, string> = {
 export default function Overview() {
   const navigate = useNavigate()
 
+  // Adaptive polling: poll fast (5s) during active scan, slow (30s) when idle
+  const { data: scanStatus } = useQuery<PrescanStatus>({
+    queryKey: ['prescan-status'],
+    queryFn: api.prescanStatus,
+    refetchInterval: (query) => (query.state.data?.phase ?? 0) > 0 ? 5000 : 30000,
+  })
+  const isScanActive = (scanStatus?.phase ?? 0) > 0
+  const pollInterval = isScanActive ? 5000 : 60000
+
   const { data: summary, isLoading: sumLoading } = useQuery({
     queryKey: ['summary'],
     queryFn: api.summary,
-    refetchInterval: 5000,
+    refetchInterval: pollInterval,
   })
 
   const { data: signals } = useQuery({
     queryKey: ['signal-summary'],
     queryFn: api.signalSummary,
-    refetchInterval: 10000,
+    refetchInterval: pollInterval,
   })
 
   const { data: heatmap } = useQuery({
     queryKey: ['state-heatmap'],
     queryFn: api.stateHeatmap,
-    refetchInterval: 15000,
+    refetchInterval: pollInterval,
   })
 
   const { data: reviewCounts } = useQuery({
     queryKey: ['review-counts'],
     queryFn: api.reviewCounts,
-    refetchInterval: 10000,
+    refetchInterval: pollInterval,
   })
 
   const { data: moversData } = useQuery({
     queryKey: ['score-movers'],
     queryFn: () => api.scoreMovers(5),
-    refetchInterval: 15000,
+    refetchInterval: pollInterval,
   })
 
   const confirmedFraud = reviewCounts?.confirmed_fraud ?? 0

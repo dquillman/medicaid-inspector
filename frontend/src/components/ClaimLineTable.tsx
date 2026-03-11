@@ -2,12 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { ClaimLine, HcpcsDetailResponse } from '../lib/types'
-
-function fmt(v: number) {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(2)}`
-}
+import { fmt } from '../lib/format'
 
 type SortKey = 'month' | 'hcpcs_code' | 'claims' | 'beneficiaries' | 'paid' | 'servicing_npi'
 

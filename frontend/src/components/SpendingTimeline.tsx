@@ -3,15 +3,10 @@ import {
   Line,
 } from 'recharts'
 import type { TimelineRow } from '../lib/types'
+import { fmt } from '../lib/format'
 
 interface Props {
   data: TimelineRow[]
-}
-
-function fmt(v: number) {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(0)}`
 }
 
 export default function SpendingTimeline({ data }: Props) {

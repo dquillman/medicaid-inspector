@@ -5,12 +5,7 @@ import {
 } from 'recharts'
 import { api } from '../lib/api'
 import type { TimelineMonth, TimelineEvent } from '../lib/types'
-
-function fmt(v: number) {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(0)}`
-}
+import { fmt } from '../lib/format'
 
 function EventIcon({ type }: { type: string }) {
   switch (type) {

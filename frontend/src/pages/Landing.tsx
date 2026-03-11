@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { mutate } from '../lib/api'
 
 const PLANS = [
   {
@@ -136,12 +137,7 @@ export default function Landing({ onLogin }: Props) {
       return
     }
     try {
-      const resp = await fetch('/api/billing/create-checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan: priceId, email }),
-      })
-      const data = await resp.json()
+      const data = await mutate<{ url?: string }>('POST', '/billing/create-checkout', { plan: priceId, email })
       if (data.url) {
         window.location.href = data.url
       }

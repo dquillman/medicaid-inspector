@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { SignalResult } from '../lib/types'
+import { fmt } from '../lib/format'
 
 const SIGNAL_LABELS: Record<string, string> = {
   billing_concentration:    'Billing Concentration',
@@ -21,12 +22,6 @@ const SIGNAL_LABELS: Record<string, string> = {
   geographic_impossibility: 'Geographic Impossibility',
   dead_npi_billing:         'Dead NPI Billing',
   new_provider_explosion:   'New Provider Explosion',
-}
-
-function fmt(v: number) {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v?.toFixed(2) ?? 0}`
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

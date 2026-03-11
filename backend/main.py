@@ -97,6 +97,7 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 # Prevents two scan batches from running simultaneously
+# TODO: _scan_running/_auto_mode globals are per-process; broken under multi-worker
 _scan_running = False
 _auto_mode = False
 _smart_scan_mode = False
@@ -159,12 +160,14 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
         total = progress.get("total_provider_count")
         batches = progress.get("batches_completed", 0)
 
-        # Build WHERE clause for state filter
+        # Build WHERE clause for state filter (parameterized)
         state_where = ""
+        state_params: tuple = ()
         if active_filter:
             state_col = await asyncio.to_thread(detect_state_column)
             if state_col:
-                state_where = f"{state_col} = '{active_filter}'"
+                state_where = f"{state_col} = ?"
+                state_params = (active_filter,)
             else:
                 log.warning("State column not found in Parquet — state filter ignored")
                 active_filter = None
@@ -174,7 +177,7 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
             label = f" in {active_filter}" if active_filter else ""
             set_prescan_status(1, f"Counting total providers{label}…")
             log.info("Counting distinct providers%s…", label)
-            count_rows = await query_async(count_providers_sql(where=state_where))
+            count_rows = await query_async(count_providers_sql(where=state_where), state_params)
             total = int(count_rows[0]["total"]) if count_rows else 0
             log.info("Total providers: %d", total)
 
@@ -186,7 +189,8 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
         set_prescan_status(2, f"Fetching provider aggregates (offset {offset:,} of {total:,})…")
         log.info("Scan batch: offset=%d, batch_size=%d, state=%s", offset, batch_size, active_filter)
         agg_rows = await query_async(
-            provider_aggregate_sql(where=state_where, limit=batch_size, offset=offset)
+            provider_aggregate_sql(where=state_where, limit=batch_size, offset=offset),
+            state_params,
         )
 
         if not agg_rows:
@@ -195,9 +199,30 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
             log.info("Scan complete at offset %d", offset)
             return
 
+        # ── Single pass over prescan cache: build already_scanned + peer stats ──
+        already_scanned: set[str] = set()
+        peer_rpb: dict[str, list[float]] = _dd(list)
+        peer_cpb: dict[str, list[float]] = _dd(list)
+        all_spend: list[float] = []
+        for cached in get_prescanned():
+            already_scanned.add(cached["npi"])
+            c_code = cached.get("top_hcpcs") or ""
+            if not c_code:
+                hcpcs_list = cached.get("hcpcs") or []
+                if hcpcs_list:
+                    c_code = hcpcs_list[0].get("hcpcs_code", "")
+            c_rpb = cached.get("revenue_per_beneficiary") or 0.0
+            if c_code and c_rpb > 0:
+                peer_rpb[c_code].append(float(c_rpb))
+            cpb = cached.get("claims_per_beneficiary") or 0
+            if c_code and cpb > 0:
+                peer_cpb[c_code].append(float(cpb))
+            spend = cached.get("total_paid") or 0
+            if spend > 0:
+                all_spend.append(float(spend))
+
         # ── Incremental loading (#10): skip already-scanned NPIs unless force=True
         if not force:
-            already_scanned = {p["npi"] for p in get_prescanned()}
             new_rows = [r for r in agg_rows if r["npi"] not in already_scanned]
             if new_rows and len(new_rows) < len(agg_rows):
                 skipped = len(agg_rows) - len(new_rows)
@@ -221,7 +246,8 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
             agg_rows = new_rows
 
         npi_list = [r["npi"] for r in agg_rows]
-        npi_in = ", ".join(f"'{n}'" for n in npi_list)
+        npi_placeholders = ", ".join("?" for _ in npi_list)
+        npi_params = tuple(npi_list)
 
         # ── Step 2: batch HCPCS ────────────────────────────────────────────────
         set_prescan_status(2, f"Fetching HCPCS breakdown for {len(npi_list)} providers…")
@@ -232,11 +258,11 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
             SUM(TOTAL_PAID)             AS total_paid,
             SUM(TOTAL_CLAIMS)           AS total_claims
         FROM read_parquet('{get_parquet_path()}')
-        WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_in})
+        WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_placeholders})
         GROUP BY npi, hcpcs_code
         ORDER BY npi, total_paid DESC
         """
-        hcpcs_rows = await query_async(hcpcs_sql)
+        hcpcs_rows = await query_async(hcpcs_sql, npi_params)
         hcpcs_by_npi: dict[str, list[dict]] = {}
         for r in hcpcs_rows:
             hcpcs_by_npi.setdefault(r["npi"], []).append(r)
@@ -251,11 +277,11 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
             SUM(TOTAL_CLAIMS)                   AS total_claims,
             SUM(TOTAL_UNIQUE_BENEFICIARIES)     AS total_unique_beneficiaries
         FROM read_parquet('{get_parquet_path()}')
-        WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_in})
+        WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_placeholders})
         GROUP BY npi, month
         ORDER BY npi, month ASC
         """
-        timeline_rows = await query_async(timeline_sql)
+        timeline_rows = await query_async(timeline_sql, npi_params)
         timeline_by_npi: dict[str, list[dict]] = {}
         for r in timeline_rows:
             timeline_by_npi.setdefault(r["npi"], []).append(r)
@@ -268,26 +294,18 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
             for npi, rows in hcpcs_by_npi.items() if rows
         }
 
-        # Build peer stats from current batch PLUS all already-scanned providers
-        # so z-scores are meaningful even on small batches
-        peer_rpb: dict[str, list[float]] = _dd(list)
-        # Seed with historical data from cache
-        for cached in get_prescanned():
-            c_code = cached.get("top_hcpcs") or ""
-            if not c_code:
-                # Derive top HCPCS from stored hcpcs list (present for recently scanned providers)
-                hcpcs_list = cached.get("hcpcs") or []
-                if hcpcs_list:
-                    c_code = hcpcs_list[0].get("hcpcs_code", "")
-            c_rpb = cached.get("revenue_per_beneficiary") or 0.0
-            if c_code and c_rpb > 0:
-                peer_rpb[c_code].append(float(c_rpb))
-        # Add current batch
+        # Add current batch to peer stats (cache-seeded above in single pass)
         for row in agg_rows:
             code = top_hcpcs_by_npi.get(row["npi"])
             rpb = row.get("revenue_per_beneficiary") or 0.0
             if code and rpb > 0:
                 peer_rpb[code].append(float(rpb))
+            cpb = row.get("claims_per_beneficiary") or 0
+            if code and cpb > 0:
+                peer_cpb[code].append(float(cpb))
+            spend = row.get("total_paid") or 0
+            if spend > 0:
+                all_spend.append(float(spend))
             # Store top_hcpcs in the result for future batches
             if code:
                 row["top_hcpcs"] = code
@@ -298,26 +316,6 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
                 m = _stats.mean(vals)
                 s = _stats.stdev(vals) if len(vals) > 1 else 0.0
                 peer_stats[code] = (m, s)
-
-        # Per-HCPCS-code peer pools for claims_per_bene (same grouping as revenue outlier)
-        # and global pool for total_spend_outlier
-        peer_cpb:  dict[str, list[float]] = _dd(list)
-        all_spend: list[float] = []
-        for p in get_prescanned():
-            c_code = p.get("top_hcpcs") or ""
-            if not c_code:
-                hl = p.get("hcpcs") or []
-                if hl: c_code = hl[0].get("hcpcs_code", "")
-            cpb   = p.get("claims_per_beneficiary") or 0
-            spend = p.get("total_paid") or 0
-            if c_code and cpb > 0: peer_cpb[c_code].append(float(cpb))
-            if spend > 0: all_spend.append(float(spend))
-        for row in agg_rows:
-            code  = top_hcpcs_by_npi.get(row["npi"])
-            cpb   = row.get("claims_per_beneficiary") or 0
-            spend = row.get("total_paid") or 0
-            if code and cpb > 0: peer_cpb[code].append(float(cpb))
-            if spend > 0: all_spend.append(float(spend))
 
         cpb_stats: dict[str, tuple[float, float]] = {}
         for code, vals in peer_cpb.items():
@@ -373,10 +371,10 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
             })
 
         # ── Persist ────────────────────────────────────────────────────────────
-        append_prescanned(results)
+        append_prescanned(results, save=False)
         record_batch_snapshots(results)
         new_offset = offset + len(agg_rows)
-        set_scan_progress(new_offset, total, active_filter, batches + 1)
+        set_scan_progress(new_offset, total, active_filter, batches + 1)  # saves to disk
 
         flagged_results = [r for r in results if r["risk_score"] > settings.RISK_THRESHOLD]
         flagged = len(flagged_results)
@@ -445,21 +443,23 @@ async def lifespan(app: FastAPI):
     _users_json = _pl.Path(__file__).parent / "users.json"
     migrate_users_from_json(_users_json)
 
-    load_review_from_disk()
-    load_rules_from_disk()
-    load_audit_from_disk()
-    load_roi_from_disk()
-    load_watchlist_from_disk()
-    load_history_from_disk()
-    load_news_from_disk()
-    load_lineage_from_disk()
-    load_dataset_config()
-    load_notifications_from_disk()
-    load_saved_searches_from_disk()
-    load_phi_log_from_disk()
-    load_evidence_from_disk()
-    load_referrals_from_disk()
-    init_auth_store()
+    await asyncio.gather(
+        asyncio.to_thread(load_review_from_disk),
+        asyncio.to_thread(load_rules_from_disk),
+        asyncio.to_thread(load_audit_from_disk),
+        asyncio.to_thread(load_roi_from_disk),
+        asyncio.to_thread(load_watchlist_from_disk),
+        asyncio.to_thread(load_history_from_disk),
+        asyncio.to_thread(load_news_from_disk),
+        asyncio.to_thread(load_lineage_from_disk),
+        asyncio.to_thread(load_dataset_config),
+        asyncio.to_thread(load_notifications_from_disk),
+        asyncio.to_thread(load_saved_searches_from_disk),
+        asyncio.to_thread(load_phi_log_from_disk),
+        asyncio.to_thread(load_evidence_from_disk),
+        asyncio.to_thread(load_referrals_from_disk),
+        asyncio.to_thread(init_auth_store),
+    )
 
     # Load OIG exclusion list — try cache first, download if missing
     if not load_oig_from_disk():
@@ -800,12 +800,14 @@ async def _run_smart_scan(state_filter: Optional[str]):
         _auto_mode = False  # smart scan is not auto-chainable
         _smart_scan_mode = True
 
-        # Build state WHERE clause
+        # Build state WHERE clause (parameterized)
         state_where = ""
+        state_params: tuple = ()
         if state_filter:
             state_col = await asyncio.to_thread(detect_state_column)
             if state_col:
-                state_where = f"{state_col} = '{state_filter}'"
+                state_where = f"{state_col} = ?"
+                state_params = (state_filter,)
             else:
                 log.warning("State column not found — state filter ignored")
 
@@ -814,7 +816,8 @@ async def _run_smart_scan(state_filter: Optional[str]):
         log.info("Smart scan Phase 1: querying all provider aggregates (state=%s)", state_filter)
 
         all_rows = await query_async(
-            provider_aggregate_sql(where=state_where, limit=None, offset=0)
+            provider_aggregate_sql(where=state_where, limit=None, offset=0),
+            state_params,
         )
 
         if not all_rows:

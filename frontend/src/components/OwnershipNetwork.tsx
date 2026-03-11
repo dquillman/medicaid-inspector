@@ -1,12 +1,6 @@
 import { Link } from 'react-router-dom'
 import type { OwnershipChain } from '../lib/types'
-
-function fmt(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(2)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v?.toFixed(2) ?? 0}`
-}
+import { fmt } from '../lib/format'
 
 function riskColor(score: number) {
   if (score >= 50) return { bg: 'bg-red-900', text: 'text-red-300', border: 'border-red-700', ring: 'ring-red-500/30' }

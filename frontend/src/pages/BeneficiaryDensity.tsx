@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { fmt } from '../lib/format'
 
 type SortKey = 'state' | 'medicaid_enrollment' | 'provider_count' | 'total_billing' | 'billing_per_enrollee' | 'ratio'
 type SortDir = 'asc' | 'desc'
@@ -48,13 +49,6 @@ const STATE_NAMES: Record<string, string> = {
   OR: 'Oregon', PA: 'Pennsylvania', RI: 'Rhode Island', SC: 'South Carolina',
   SD: 'South Dakota', TN: 'Tennessee', TX: 'Texas', UT: 'Utah', VT: 'Vermont',
   VA: 'Virginia', WA: 'Washington', WV: 'West Virginia', WI: 'Wisconsin', WY: 'Wyoming',
-}
-
-function fmt(v: number): string {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v.toFixed(0)}`
 }
 
 function fmtNum(v: number): string {
@@ -235,7 +229,7 @@ export default function BeneficiaryDensity() {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['beneficiary-density'],
     queryFn: api.beneficiaryDensity,
-    refetchInterval: 30_000,
+    refetchInterval: 120_000,
   })
 
   const handleSort = (key: SortKey) => {

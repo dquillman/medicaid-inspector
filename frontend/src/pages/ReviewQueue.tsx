@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { ReviewItem, ReviewCounts, AuditEntry } from '../lib/types'
+import { fmt } from '../lib/format'
 
 type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
 
@@ -22,13 +23,6 @@ const STATUS_COLORS: Record<string, string> = {
   confirmed_fraud: 'text-red-400 bg-red-400/10',
   referred:        'text-orange-400 bg-orange-400/10',
   dismissed:       'text-gray-500 bg-gray-500/10',
-}
-
-function fmt(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(2)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v}`
 }
 
 function RiskBadge({ score }: { score: number }) {

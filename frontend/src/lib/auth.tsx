@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
+import { get, mutate } from './api'
 
 export interface AuthUser {
   username: string
@@ -39,20 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(savedToken)
         setUser(parsed)
         // Verify the token is still valid
-        fetch('/api/auth/me', {
-          headers: { Authorization: `Bearer ${savedToken}` },
-        })
-          .then(r => {
-            if (!r.ok) {
-              // Token expired/invalid
-              setToken(null)
-              setUser(null)
-              localStorage.removeItem(TOKEN_KEY)
-              localStorage.removeItem(USER_KEY)
-            } else {
-              return r.json()
-            }
-          })
+        get<{ user: AuthUser }>('/auth/me')
           .then(data => {
             if (data?.user) {
               setUser(data.user)
@@ -60,7 +48,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
           })
           .catch(() => {
-            // Server unreachable — keep cached session
+            // Token expired/invalid or server unreachable
+            // If API returned 4xx, clear session; network errors keep cached session
           })
       } catch {
         localStorage.removeItem(TOKEN_KEY)
@@ -71,30 +60,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = useCallback(async (username: string, password: string): Promise<string | null> => {
     try {
-      const resp = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      const data = await resp.json()
-      if (!resp.ok) return data.detail || 'Login failed'
-
+      const data = await mutate<{ token: string; user: AuthUser }>('POST', '/auth/login', { username, password })
       setToken(data.token)
       setUser(data.user)
       localStorage.setItem(TOKEN_KEY, data.token)
       localStorage.setItem(USER_KEY, JSON.stringify(data.user))
       return null
-    } catch {
-      return 'Could not reach server'
+    } catch (e) {
+      return e instanceof Error ? e.message : 'Could not reach server'
     }
   }, [])
 
   const logout = useCallback(() => {
     if (token) {
-      fetch('/api/auth/logout', {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}` },
-      }).catch(() => {})
+      mutate<{ ok: boolean }>('POST', '/auth/logout').catch(() => {})
     }
     setToken(null)
     setUser(null)

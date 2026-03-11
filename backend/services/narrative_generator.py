@@ -13,6 +13,7 @@ from typing import Optional
 
 from core.store import get_prescanned
 from core.review_store import get_review_queue
+from core.risk_utils import risk_tier_short as _risk_tier, risk_tier_description as _risk_tier_description
 
 
 # ── Signal metadata: human-readable names, regulatory citations, OIG context ─
@@ -262,31 +263,8 @@ def _fmt_number(n: float) -> str:
     return f"{n:,.1f}"
 
 
-def _risk_tier(score: float) -> str:
-    if score >= 50:
-        return "HIGH"
-    elif score >= 10:
-        return "ELEVATED"
-    else:
-        return "FLAGGED"
 
-
-def _risk_tier_description(score: float) -> str:
-    if score >= 50:
-        return (
-            "warrants immediate investigation and potential referral to the "
-            "Medicaid Fraud Control Unit (MFCU)"
-        )
-    elif score >= 25:
-        return (
-            "warrants enhanced scrutiny and detailed claims-level audit"
-        )
-    elif score >= 10:
-        return (
-            "warrants routine monitoring and periodic review"
-        )
-    else:
-        return "is below the standard investigation threshold"
+# _risk_tier and _risk_tier_description are imported from core.risk_utils
 
 
 def _review_status_label(status: str) -> str:

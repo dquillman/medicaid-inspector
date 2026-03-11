@@ -26,14 +26,13 @@ async def medicare_compare(npi: str):
     Returns both datasets plus computed discrepancy indicators.
     """
     from services.medicare_lookup import get_medicare_utilization
-    from core.store import get_prescanned
+    from core.store import get_provider_by_npi
 
     # Get Medicare data
     medicare = await get_medicare_utilization(npi)
 
     # Get Medicaid data from prescan cache
-    providers = get_prescanned()
-    medicaid_entry = next((p for p in providers if p.get("npi") == npi), None)
+    medicaid_entry = get_provider_by_npi(npi)
 
     if not medicaid_entry:
         raise HTTPException(status_code=404, detail="Provider not found in Medicaid data")

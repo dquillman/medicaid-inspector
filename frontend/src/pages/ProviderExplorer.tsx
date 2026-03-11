@@ -1,14 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { api } from '../lib/api'
+import { api, mutate, get } from '../lib/api'
+import { fmt } from '../lib/format'
 import RiskScoreBadge from '../components/RiskScoreBadge'
-
-function fmt(v: number) {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v}`
-}
+import { useClickOutside } from '../hooks/useClickOutside'
 
 type SortDir = 'asc' | 'desc'
 
@@ -288,6 +284,7 @@ function ColHeader({
   sortDir,
   onSort,
   openFilter,
+  onOpenFilterChange,
   activeFilter,
   filters,
   onFiltersChange,
@@ -298,19 +295,14 @@ function ColHeader({
   sortDir: SortDir
   onSort: (key: string) => void
   openFilter: string | null
+  onOpenFilterChange: (key: string | null) => void
   activeFilter: boolean
   filters: ColFilters
   onFiltersChange: (f: ColFilters) => void
   facets: any
 }) {
   const btnRef = useRef<HTMLButtonElement>(null!)
-  const [open, setOpen] = useState(false)
-
-  // sync with parent open state
-  useEffect(() => {
-    setOpen(openFilter === col.key)
-  }, [openFilter, col.key])
-
+  const isOpen = openFilter === col.key
   const isSorted = sortBy === col.key
 
   return (
@@ -330,7 +322,7 @@ function ColHeader({
           <>
             <button
               ref={btnRef}
-              onClick={e => { e.stopPropagation(); setOpen(o => !o) }}
+              onClick={e => { e.stopPropagation(); onOpenFilterChange(isOpen ? null : col.key) }}
               title="Filter"
               className={`ml-0.5 text-xs transition-colors ${activeFilter ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
             >
@@ -338,8 +330,8 @@ function ColHeader({
             </button>
             <FilterDropdown
               colKey={col.key}
-              isOpen={open}
-              onClose={() => setOpen(false)}
+              isOpen={isOpen}
+              onClose={() => onOpenFilterChange(null)}
               filters={filters}
               onFiltersChange={onFiltersChange}
               facets={facets}
@@ -481,29 +473,15 @@ export default function ProviderExplorer() {
 
   const { data: savedSearches, refetch: refetchSaved } = useQuery({
     queryKey: ['saved-searches'],
-    queryFn: async () => {
-      const resp = await fetch('/api/saved-searches')
-      if (!resp.ok) return { searches: [] }
-      return resp.json()
-    },
+    queryFn: () => get<{ searches: any[] }>('/saved-searches').catch(() => ({ searches: [] })),
     staleTime: 10_000,
   })
 
-  useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (savedSearchRef.current && !savedSearchRef.current.contains(e.target as Node)) setSavedSearchOpen(false)
-    }
-    document.addEventListener('mousedown', handler)
-    return () => document.removeEventListener('mousedown', handler)
-  }, [])
+  useClickOutside(savedSearchRef, useCallback(() => setSavedSearchOpen(false), []))
 
   const handleSaveSearch = async () => {
     if (!savedSearchName.trim()) return
-    await fetch('/api/saved-searches', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: savedSearchName.trim(), filters: { ...filters, search } }),
-    })
+    await mutate<{ ok: boolean }>('POST', '/saved-searches', { name: savedSearchName.trim(), filters: { ...filters, search } })
     setSavedSearchName('')
     refetchSaved()
   }
@@ -525,7 +503,7 @@ export default function ProviderExplorer() {
   }
 
   const handleDeleteSearch = async (id: string) => {
-    await fetch(`/api/saved-searches/${id}`, { method: 'DELETE' })
+    await mutate<{ ok: boolean }>('DELETE', `/saved-searches/${id}`)
     refetchSaved()
   }
 
@@ -651,6 +629,7 @@ export default function ProviderExplorer() {
                   sortDir={sortDir}
                   onSort={handleSort}
                   openFilter={openFilter}
+                  onOpenFilterChange={setOpenFilter}
                   activeFilter={colHasFilter(col.key, filters)}
                   filters={filters}
                   onFiltersChange={handleFiltersChange}

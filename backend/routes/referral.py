@@ -3,13 +3,17 @@ Referral Packet endpoint — generates a comprehensive HTML fraud investigation
 referral packet suitable for printing or PDF conversion.
 """
 import html as _html
+import logging
 from datetime import datetime as _dt
 
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import HTMLResponse
 
-from core.store import get_prescanned
+from core.store import get_prescanned, get_provider_by_npi
+from core.risk_utils import classify_risk
 from routes.auth import require_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/providers", tags=["referral"], dependencies=[Depends(require_user)])
 
@@ -28,12 +32,13 @@ def _fmt(v: float) -> str:
 @router.get("/{npi}/referral-packet", response_class=HTMLResponse)
 async def generate_referral_packet(npi: str):
     """Generate a comprehensive HTML fraud investigation referral packet for a provider."""
-    import httpx as _httpx
     from core.review_store import get_review_item
     from core.oig_store import is_excluded as oig_is_excluded
+    from data.nppes_client import get_provider
+    from services.hcpcs_lookup import fetch_hcpcs_descriptions
 
     # ── Fetch provider from scan cache ───────────────────────────────────────
-    cached = next((p for p in get_prescanned() if p["npi"] == npi), None)
+    cached = get_provider_by_npi(npi)
     if not cached:
         raise HTTPException(404, f"Provider {npi} not found in scan cache — run a scan first")
 
@@ -41,41 +46,9 @@ async def generate_referral_packet(npi: str):
     nppes = cached.get("nppes") or {}
     if not nppes:
         try:
-            async with _httpx.AsyncClient(timeout=8) as client:
-                r = await client.get(f"https://npiregistry.cms.hhs.gov/api/?number={npi}&version=2.1")
-                data = r.json()
-                if data.get("results"):
-                    result = data["results"][0]
-                    addr_list = result.get("addresses") or []
-                    address = {}
-                    for a in addr_list:
-                        if a.get("address_purpose") == "LOCATION":
-                            address = {
-                                "line1": a.get("address_1", ""),
-                                "line2": a.get("address_2", ""),
-                                "city": a.get("city", ""),
-                                "state": a.get("state", ""),
-                                "zip": a.get("postal_code", "")[:5],
-                            }
-                            break
-                    tax_list = result.get("taxonomies") or []
-                    taxonomy = {}
-                    for t in tax_list:
-                        if t.get("primary"):
-                            taxonomy = {"code": t.get("code", ""), "description": t.get("desc", "")}
-                            break
-                    basic = result.get("basic") or {}
-                    name = basic.get("organization_name") or f"{basic.get('first_name', '')} {basic.get('last_name', '')}".strip()
-                    nppes = {
-                        "name": name,
-                        "entity_type": result.get("enumeration_type", ""),
-                        "address": address,
-                        "taxonomy": taxonomy,
-                        "status": basic.get("status", ""),
-                        "enumeration_date": basic.get("enumeration_date", ""),
-                    }
+            nppes = await get_provider(npi)
         except Exception:
-            pass
+            logger.warning("Failed to fetch NPPES data for NPI %s in referral packet", npi)
 
     addr = nppes.get("address") or {}
     tax = nppes.get("taxonomy") or {}
@@ -88,14 +61,7 @@ async def generate_referral_packet(npi: str):
     signals = cached.get("signal_results") or []
     flagged = [s for s in signals if s.get("flagged")]
 
-    if risk_score >= 75:
-        risk_label, risk_color = "CRITICAL — Immediate Referral Recommended", "#991b1b"
-    elif risk_score >= 50:
-        risk_label, risk_color = "HIGH RISK — Investigation Required", "#9a3412"
-    elif risk_score >= 25:
-        risk_label, risk_color = "ELEVATED — Further Review Warranted", "#854d0e"
-    else:
-        risk_label, risk_color = "LOW RISK", "#166534"
+    risk_label, risk_color = classify_risk(risk_score)
 
     # ── Billing stats ────────────────────────────────────────────────────────
     tp = cached.get("total_paid") or 0
@@ -111,23 +77,7 @@ async def generate_referral_packet(npi: str):
     # ── HCPCS data ───────────────────────────────────────────────────────────
     hcpcs_list = cached.get("hcpcs") or []
     codes = [h.get("hcpcs_code", "") for h in hcpcs_list if h.get("hcpcs_code")][:15]
-    hcpcs_descriptions: dict[str, str] = {}
-    try:
-        async with _httpx.AsyncClient(timeout=5) as client:
-            for code in codes:
-                try:
-                    url = f"https://clinicaltables.nlm.nih.gov/api/hcpcs/v3/search?terms={code}&maxList=10"
-                    r = await client.get(url)
-                    d = r.json()
-                    if d[3]:
-                        for item in d[3]:
-                            if len(item) >= 2 and str(item[0]).upper() == code.upper():
-                                hcpcs_descriptions[code] = item[1]
-                                break
-                except Exception:
-                    pass
-    except Exception:
-        pass
+    hcpcs_descriptions = await fetch_hcpcs_descriptions(codes)
 
     total_hcpcs_paid = sum(h.get("total_paid", 0) for h in hcpcs_list) or 1
     hcpcs_rows = ""
@@ -165,6 +115,7 @@ async def generate_referral_packet(npi: str):
                 '</div>'
             )
     except Exception:
+        logger.warning("OIG exclusion check failed for NPI %s", npi, exc_info=True)
         oig_html = (
             '<div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:12px 16px;margin:16px 0">'
             '<p style="color:#6b7280;margin:0">OIG exclusion check unavailable</p>'

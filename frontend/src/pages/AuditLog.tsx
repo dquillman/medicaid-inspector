@@ -72,7 +72,7 @@ export default function AuditLog() {
       action_type: actionFilter || undefined,
       entity_type: entityFilter || undefined,
     }),
-    refetchInterval: 10_000,
+    refetchInterval: 60_000,
   })
 
   const { data: stats } = useQuery({

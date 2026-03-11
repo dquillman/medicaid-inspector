@@ -314,9 +314,8 @@ def predict_fraud_probability(npi: str) -> Optional[dict]:
         return _predictions[npi]
 
     # Try to score on the fly
-    from core.store import get_prescanned
-    providers = get_prescanned()
-    pdata = next((p for p in providers if p.get("npi") == npi), None)
+    from core.store import get_provider_by_npi
+    pdata = get_provider_by_npi(npi)
     if not pdata:
         return {"error": f"NPI {npi} not found in scanned providers."}
 

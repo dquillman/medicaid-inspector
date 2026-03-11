@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { ComposableMap, Geographies, Geography } from 'react-simple-maps'
 import { scaleSequential } from 'd3-scale'
 import { interpolateReds } from 'd3-scale-chromatic'
+import { fmtM } from '../lib/format'
 
 const GEO_URL = 'https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json'
 
@@ -15,13 +16,6 @@ interface StateData {
 interface Props {
   data: StateData[]
   onStateClick?: (state: string) => void
-}
-
-function fmtM(v: number) {
-  if (v >= 1_000_000_000) return `$${(v / 1_000_000_000).toFixed(1)}B`
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v}`
 }
 
 // FIPS → state abbreviation mapping (subset, enough for heatmap)

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import RiskScoreBadge from '../components/RiskScoreBadge'
+import { fmt } from '../lib/format'
 
 const SIGNALS = [
   { key: '',                          label: 'All' },
@@ -24,12 +25,6 @@ const SIGNALS = [
   { key: 'new_provider_explosion',    label: 'New Provider Explosion' },
   { key: 'geographic_impossibility',  label: 'Geographic Impossibility' },
 ]
-
-function fmt(v: number) {
-  if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`
-  if (v >= 1_000) return `$${(v / 1_000).toFixed(0)}K`
-  return `$${v}`
-}
 
 function exportCsv(rows: any[]) {
   if (!rows.length) return

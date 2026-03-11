@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useAuth } from '../lib/auth'
+import { get, mutate } from '../lib/api'
 
 interface UserRecord {
   username: string
@@ -43,14 +44,10 @@ export default function UserManagement() {
 
   const fetchUsers = useCallback(async () => {
     try {
-      const resp = await fetch('/api/auth/users', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!resp.ok) throw new Error('Failed to load users')
-      const data = await resp.json()
+      const data = await get<{ users: UserRecord[] }>('/auth/users')
       setUsers(data.users || [])
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to load users')
     } finally {
       setLoading(false)
     }
@@ -64,21 +61,12 @@ export default function UserManagement() {
     setSuccess('')
     setCreating(true)
     try {
-      const resp = await fetch('/api/auth/users', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          username: newUsername,
-          password: newPassword,
-          role: newRole,
-          display_name: newDisplayName || newUsername,
-        }),
+      await mutate<{ ok: boolean }>('POST', '/auth/users', {
+        username: newUsername,
+        password: newPassword,
+        role: newRole,
+        display_name: newDisplayName || newUsername,
       })
-      const data = await resp.json()
-      if (!resp.ok) throw new Error(data.detail || 'Failed to create user')
       setSuccess(`User "${newUsername}" created successfully`)
       setShowCreate(false)
       setNewUsername('')
@@ -86,8 +74,8 @@ export default function UserManagement() {
       setNewRole('viewer')
       setNewDisplayName('')
       fetchUsers()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to create user')
     } finally {
       setCreating(false)
     }
@@ -97,21 +85,12 @@ export default function UserManagement() {
     setError('')
     setSuccess('')
     try {
-      const resp = await fetch(`/api/auth/users/${username}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ role }),
-      })
-      const data = await resp.json()
-      if (!resp.ok) throw new Error(data.detail || 'Failed to update user')
+      await mutate<{ ok: boolean }>('PATCH', `/auth/users/${username}`, { role })
       setSuccess(`Updated ${username}'s role to ${ROLE_LABELS[role]}`)
       setEditingUser(null)
       fetchUsers()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to update user')
     }
   }
 
@@ -120,16 +99,11 @@ export default function UserManagement() {
     setError('')
     setSuccess('')
     try {
-      const resp = await fetch(`/api/auth/users/${username}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      const data = await resp.json()
-      if (!resp.ok) throw new Error(data.detail || 'Failed to delete user')
+      await mutate<{ ok: boolean }>('DELETE', `/auth/users/${username}`)
       setSuccess(`User "${username}" deleted`)
       fetchUsers()
-    } catch (e: any) {
-      setError(e.message)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to delete user')
     }
   }
 
