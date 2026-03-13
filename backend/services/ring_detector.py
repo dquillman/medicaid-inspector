@@ -1,14 +1,15 @@
 """
 Fraud Ring Detection — identifies clusters of providers linked by shared
-attributes (address, phone/fax, billing NPI, overlapping beneficiaries).
+attributes (address, phone/fax, overlapping HCPCS codes).
 Uses union-find (disjoint set) for connected-component discovery.
+
+Performance: runs entirely from in-memory prescan cache — no Parquet queries.
 """
 import hashlib
 import logging
 from collections import defaultdict
 
 from core.store import get_prescanned
-from data.duckdb_client import query_async, get_parquet_path
 
 log = logging.getLogger(__name__)
 
@@ -55,10 +56,11 @@ async def detect_rings() -> list[dict]:
         return []
 
     uf = UnionFind()
-    # Track which edges exist (for the detail endpoint)
-    edges: list[dict] = []  # {source, target, type, detail}
+    edges: list[dict] = []
 
     npi_info: dict[str, dict] = {}
+    npi_hcpcs: dict[str, set[str]] = {}  # NPI -> set of HCPCS codes
+
     for p in providers:
         npi = p["npi"]
         nppes = p.get("nppes") or {}
@@ -78,6 +80,9 @@ async def detect_rings() -> list[dict]:
             "fax": _normalize(nppes.get("fax")),
         }
         uf.find(npi)
+        # Collect HCPCS codes for this provider
+        hcpcs_list = p.get("hcpcs") or []
+        npi_hcpcs[npi] = {h.get("hcpcs_code", "") for h in hcpcs_list if h.get("hcpcs_code")}
 
     # ── Link by shared address ────────────────────────────────────────────
     addr_groups: dict[str, list[str]] = defaultdict(list)
@@ -110,49 +115,27 @@ async def detect_rings() -> list[dict]:
                 uf.union(npis[0], npis[i])
                 edges.append({"source": npis[0], "target": npis[i], "type": label, "detail": key})
 
-    # ── Link by shared billing NPI (from Parquet) ─────────────────────────
-    try:
-        parquet = get_parquet_path()
-        npi_set = set(npi_info.keys())
-        sql = f"""
-            SELECT billing_npi, servicing_npi
-            FROM '{parquet}'
-            WHERE billing_npi <> servicing_npi
-            GROUP BY billing_npi, servicing_npi
-        """
-        rows = await query_async(sql)
-        for r in rows:
-            b, s = str(r[0]), str(r[1])
-            if b in npi_set and s in npi_set:
-                uf.union(b, s)
-                edges.append({"source": b, "target": s, "type": "shared_billing_npi", "detail": b})
-    except Exception as e:
-        log.warning(f"Billing NPI linkage skipped: {e}")
+    # ── Link by high HCPCS code overlap (proxy for shared billing patterns) ──
+    # Build inverted index: HCPCS code -> list of NPIs
+    code_to_npis: dict[str, list[str]] = defaultdict(list)
+    for npi, codes in npi_hcpcs.items():
+        for code in codes:
+            code_to_npis[code].append(npi)
 
-    # ── Link by overlapping beneficiaries ─────────────────────────────────
-    try:
-        parquet = get_parquet_path()
-        sql = f"""
-            WITH bene AS (
-                SELECT billing_npi AS npi, beneficiary_id
-                FROM '{parquet}'
-                GROUP BY billing_npi, beneficiary_id
-            )
-            SELECT a.npi AS npi_a, b.npi AS npi_b, COUNT(*) AS shared_benes
-            FROM bene a
-            JOIN bene b ON a.beneficiary_id = b.beneficiary_id AND a.npi < b.npi
-            GROUP BY a.npi, b.npi
-            HAVING shared_benes >= 5
-        """
-        rows = await query_async(sql)
-        npi_set = set(npi_info.keys())
-        for r in rows:
-            a, b = str(r[0]), str(r[1])
-            if a in npi_set and b in npi_set:
-                uf.union(a, b)
-                edges.append({"source": a, "target": b, "type": "shared_beneficiaries", "detail": f"{r[2]} shared"})
-    except Exception as e:
-        log.warning(f"Beneficiary linkage skipped: {e}")
+    # Find NPI pairs that share many codes (>= 5 shared HCPCS codes)
+    pair_overlap: dict[tuple[str, str], int] = defaultdict(int)
+    for code, npis in code_to_npis.items():
+        if len(npis) < 2 or len(npis) > 200:  # Skip very common codes
+            continue
+        for i in range(len(npis)):
+            for j in range(i + 1, min(len(npis), i + 50)):  # Cap comparisons
+                pair = (min(npis[i], npis[j]), max(npis[i], npis[j]))
+                pair_overlap[pair] += 1
+
+    for (a, b), overlap in pair_overlap.items():
+        if overlap >= 5:
+            uf.union(a, b)
+            edges.append({"source": a, "target": b, "type": "shared_hcpcs_codes", "detail": f"{overlap} shared codes"})
 
     # ── Collect components ────────────────────────────────────────────────
     components: dict[str, list[str]] = defaultdict(list)

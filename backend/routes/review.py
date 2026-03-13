@@ -36,6 +36,13 @@ class UpdateReviewBody(BaseModel):
         pass
 
 
+class AddReviewBody(BaseModel):
+    npi: str
+    status: str = "pending"
+    notes: str = ""
+    assigned_to: Optional[str] = None
+
+
 class BulkUpdateBody(BaseModel):
     npis: list[str]
     status: str
@@ -111,6 +118,58 @@ async def export_review_csv():
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=review_queue_export.csv"},
     )
+
+
+@router.post("/add")
+async def add_single_review(body: AddReviewBody):
+    """Add a single provider to the review queue (e.g. from watchlist). Returns the created/existing item."""
+    from core.review_store import get_review_item
+    from core.store import get_provider_by_npi
+
+    # If already in review queue, just update with the new info
+    existing = get_review_item(body.npi)
+    if existing:
+        update_data: dict = {}
+        if body.status and body.status != "pending":
+            update_data["status"] = body.status
+        if body.notes:
+            update_data["notes"] = body.notes
+        if body.assigned_to:
+            update_data["assigned_to"] = body.assigned_to
+        if update_data:
+            updated = update_review_item(body.npi, **update_data)
+            if updated:
+                enriched = _enrich_items([updated])
+                return {"item": enriched[0], "already_existed": True}
+        enriched = _enrich_items([existing])
+        return {"item": enriched[0], "already_existed": True}
+
+    # Build a provider dict for add_to_review_queue
+    provider_data: dict = {"npi": body.npi, "risk_score": 0, "flags": [], "total_paid": 0, "total_claims": 0}
+    p = get_provider_by_npi(body.npi)
+    if p:
+        provider_data["risk_score"] = p.get("risk_score", 0)
+        provider_data["flags"] = p.get("flags", [])
+        provider_data["total_paid"] = p.get("total_paid", 0)
+        provider_data["total_claims"] = p.get("total_claims", 0)
+
+    added = add_to_review_queue([provider_data])
+    if added == 0:
+        raise HTTPException(409, f"Could not add {body.npi} to review queue")
+
+    # Apply initial status/notes/assigned_to if provided
+    item = get_review_item(body.npi)
+    if item and (body.status != "pending" or body.notes or body.assigned_to):
+        update_review_item(
+            body.npi,
+            status=body.status if body.status != "pending" else None,
+            notes=body.notes or None,
+            assigned_to=body.assigned_to if body.assigned_to else ...,
+        )
+        item = get_review_item(body.npi)
+
+    enriched = _enrich_items([item])
+    return {"item": enriched[0], "already_existed": False}
 
 
 @router.post("/bulk-update")

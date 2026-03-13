@@ -28,6 +28,7 @@ import BeneficiaryFraud from './pages/BeneficiaryFraud'
 import PharmacyDME from './pages/PharmacyDME'
 import UserManagement from './pages/UserManagement'
 import Landing from './pages/Landing'
+import BillingCodeSearch from './pages/BillingCodeSearch'
 import Login from './pages/Login'
 import NotificationBell from './components/NotificationBell'
 import { mutate } from './lib/api'
@@ -45,6 +46,7 @@ const NAV = [
 const ANALYTICS_NAV = [
   { to: '/rings',              label: 'Fraud Rings'       },
   { to: '/hotspots',           label: 'Fraud Hotspots'    },
+  { to: '/billing-codes',       label: 'Billing Codes'     },
   { to: '/claim-patterns',     label: 'Claim Patterns'    },
   { to: '/beneficiary-fraud',  label: 'Beneficiary Fraud' },
   { to: '/pharmacy-dme',       label: 'Pharmacy & DME'    },
@@ -479,6 +481,7 @@ export default function App() {
             <Route path="/rings"            element={<FraudRings />} />
             <Route path="/news"             element={<NewsAlerts />} />
             <Route path="/ml-model"         element={<MLModel />} />
+            <Route path="/billing-codes"   element={<BillingCodeSearch />} />
             <Route path="/claim-patterns"  element={<ClaimPatterns />} />
             <Route path="/beneficiary-fraud" element={<BeneficiaryFraud />} />
             <Route path="/pharmacy-dme"    element={<PharmacyDME />} />

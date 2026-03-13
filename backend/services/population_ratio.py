@@ -5,8 +5,26 @@ Flags geographic areas with suspiciously high provider density relative to
 Medicaid enrollment, and identifies providers billing beyond physical capacity.
 """
 
+import time as _time
 from collections import defaultdict
+from typing import Any
+
 from core.store import get_prescanned
+
+# ── In-memory cache (TTL 10 minutes) ─────────────────────────────────────────
+_cache: dict[str, tuple[float, Any]] = {}
+_CACHE_TTL = 600
+
+
+def _cache_get(key: str) -> Any | None:
+    entry = _cache.get(key)
+    if entry and (_time.time() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _cache_set(key: str, value: Any) -> None:
+    _cache[key] = (_time.time(), value)
 
 # ── State Medicaid enrollment estimates (2024, rounded) ────────────────────
 # Source: CMS Medicaid enrollment data, approximate figures in thousands
@@ -90,6 +108,10 @@ def compute_provider_ratios() -> dict:
     Group providers by state, compute provider-to-population ratios,
     flag states where ratio > 2x national average.
     """
+    cached = _cache_get("provider_ratios")
+    if cached is not None:
+        return cached
+
     providers = get_prescanned()
     if not providers:
         return {
@@ -146,12 +168,14 @@ def compute_provider_ratios() -> dict:
     # Sort by ratio descending
     state_rows.sort(key=lambda x: x["providers_per_100k"], reverse=True)
 
-    return {
+    result = {
         "states": state_rows,
         "national_avg_per_100k": round(national_avg, 2),
         "total_providers": total_matched_providers,
         "total_enrollment": total_matched_enrollment,
     }
+    _cache_set("provider_ratios", result)
+    return result
 
 
 def compute_zip_ratios(state: str) -> dict:
@@ -161,8 +185,13 @@ def compute_zip_ratios(state: str) -> dict:
     total billing as density indicators. Flags ZIP prefixes with disproportionately
     high provider counts relative to the state average.
     """
-    providers = get_prescanned()
     state = state.upper()
+    cache_key = f"zip_ratios_{state}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    providers = get_prescanned()
 
     # Filter to just this state
     state_providers = [
@@ -207,12 +236,14 @@ def compute_zip_ratios(state: str) -> dict:
 
     zip_rows.sort(key=lambda x: x["provider_count"], reverse=True)
 
-    return {
+    result = {
         "state": state,
         "zips": zip_rows,
         "state_avg_per_zip": round(state_avg, 2),
         "enrollment": STATE_MEDICAID_ENROLLMENT.get(state, 0),
     }
+    _cache_set(cache_key, result)
+    return result
 
 
 def compute_billing_capacity() -> list[dict]:
@@ -224,6 +255,10 @@ def compute_billing_capacity() -> list[dict]:
 
     Returns list of over-capacity providers sorted by overage percentage.
     """
+    cached = _cache_get("billing_capacity")
+    if cached is not None:
+        return cached
+
     providers = get_prescanned()
     if not providers:
         return []
@@ -280,4 +315,5 @@ def compute_billing_capacity() -> list[dict]:
     # Sort by overage percentage descending
     overcapacity.sort(key=lambda x: x["overage_pct"], reverse=True)
 
+    _cache_set("billing_capacity", overcapacity)
     return overcapacity

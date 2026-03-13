@@ -244,14 +244,31 @@ export const api = {
 
   reviewCounts: () => get<ReviewCounts>('/review/counts'),
 
-  exportProvider: (npi: string) => {
+  exportProvider: async (npi: string) => {
+    const res = await fetch(`${BASE}/providers/${npi}/export`, { headers: { ...authHeaders() } })
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = `/api/providers/${npi}/export`
+    a.href = url
     a.download = `provider_${npi}_fraud_package.tar.gz`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   },
+
+  referralPacket: async (npi: string) => {
+    const res = await fetch(`${BASE}/providers/${npi}/referral-packet`, { headers: { ...authHeaders() } })
+    if (!res.ok) throw new Error(`Referral packet failed: ${res.status}`)
+    const html = await res.text()
+    const blob = new Blob([html], { type: 'text/html' })
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+  },
+
+  addToReview: (data: { npi: string; status?: string; notes?: string; assigned_to?: string }) =>
+    mutate<{ item: ReviewItem; already_existed: boolean }>('POST', '/review/add', data),
 
   reviewBackfill: () =>
     mutate<{ status: string; added: number }>('POST', '/review/backfill'),
@@ -641,7 +658,7 @@ export const api = {
   removeFromWatchlist: (npi: string) =>
     mutate<{ ok: boolean }>('DELETE', `/watchlist/${npi}`),
 
-  updateWatchlist: (npi: string, data: { notes?: string; alert_threshold?: number; active?: boolean; reason?: string }) =>
+  updateWatchlist: (npi: string, data: { notes?: string; alert_threshold?: number; active?: boolean; reason?: string; reviewing?: boolean }) =>
     mutate<WatchlistEntry>('PATCH', `/watchlist/${npi}`, data),
 
   // Specialty Benchmarking
@@ -717,6 +734,15 @@ export const api = {
   licenseFlags: () => get<LicenseFlagsResponse>('/license/flags'),
 
   // Beneficiary Fraud Detection
+  beneficiaryFraudAll: (limit = 100) =>
+    get<{
+      summary: BeneficiaryFraudSummary
+      shopping: BeneficiaryFraudResult
+      utilization: BeneficiaryFraudResult
+      geographic: BeneficiaryFraudResult
+      excessive: BeneficiaryFraudResult
+    }>('/beneficiary-fraud/all', { limit }),
+
   beneficiaryFraudSummary: () =>
     get<BeneficiaryFraudSummary>('/beneficiary-fraud/summary'),
 
@@ -750,6 +776,11 @@ export const api = {
     get<DMEProviderDetail>(`/dme/provider/${npi}`),
 
   // Claim-Level Fraud Patterns
+  claimPatternAll: (limit = 100) =>
+    get<{ unbundling: unknown[]; duplicates: unknown[]; pos: unknown[]; modifiers: unknown[]; impossible: unknown[] }>(
+      '/claim-patterns/all', { limit },
+    ),
+
   claimPatternSummary: () => get<ClaimPatternSummary>('/claim-patterns/summary'),
 
   claimPatternUnbundling: (limit = 100) =>

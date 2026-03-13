@@ -8,6 +8,13 @@ from routes.auth import require_user
 router = APIRouter(prefix="/api/claim-patterns", tags=["claim-patterns"], dependencies=[Depends(require_user)])
 
 
+@router.get("/all")
+async def claim_patterns_all(limit: int = 100):
+    """Return all 5 pattern analyses in a single response."""
+    from services.claim_patterns import _run_all_analyses
+    return await _run_all_analyses(limit=limit)
+
+
 @router.get("/summary")
 async def claim_patterns_summary():
     """Counts of each pattern type detected across all providers."""

@@ -15,10 +15,21 @@ from services.beneficiary_analyzer import (
     detect_geographic_anomalies,
     detect_excessive_services,
     provider_beneficiary_fraud,
+    _run_all_beneficiary_analyses,
 )
 
 router = APIRouter(prefix="/api/beneficiary-fraud", tags=["beneficiary-fraud"], dependencies=[Depends(require_user)])
 log = logging.getLogger(__name__)
+
+
+@router.get("/all")
+async def get_all(limit: int = 100):
+    """Return all beneficiary fraud analyses in a single response."""
+    try:
+        return await _run_all_beneficiary_analyses(limit=limit)
+    except Exception as e:
+        log.error("Beneficiary fraud all endpoint failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/summary")

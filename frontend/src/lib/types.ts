@@ -621,6 +621,7 @@ export interface WatchlistEntry {
   state?: string
   city?: string
   in_alert: boolean
+  reviewing?: boolean
 }
 
 export interface WatchlistResponse {

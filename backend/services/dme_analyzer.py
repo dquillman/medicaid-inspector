@@ -1,176 +1,105 @@
 """
 DME (Durable Medical Equipment) Fraud Analyzer.
 
-Detects DME-related fraud patterns using HCPCS E/K/L codes in Medicaid claims.
+Detects DME-related fraud patterns using HCPCS E/K/L codes from the
+in-memory prescan cache.
 
 Signals:
   - High-cost DME concentration (wheelchairs, oxygen, prosthetics)
   - Unusual DME volume vs. peer average
   - DME without supporting E&M visit codes
   - Rental vs. purchase anomalies
+
+Performance: all analyses run from the in-memory prescan cache — no Parquet
+queries needed.
 """
 import logging
-from data.duckdb_client import query_async, get_parquet_path
+import statistics
+import time as _time
+from typing import Any
+
+from core.store import get_prescanned, get_provider_by_npi
+
+# ── In-memory result cache (TTL 10 minutes) ──────────────────────────────────
+_cache: dict[str, tuple[float, Any]] = {}
+_CACHE_TTL = 600
+
+
+def _cache_get(key: str) -> Any | None:
+    entry = _cache.get(key)
+    if entry and (_time.time() - entry[0]) < _CACHE_TTL:
+        return entry[1]
+    return None
+
+
+def _cache_set(key: str, value: Any) -> None:
+    _cache[key] = (_time.time(), value)
 
 log = logging.getLogger(__name__)
 
 # ── Reference data ───────────────────────────────────────────────────────────
-# HCPCS E-codes: DME
-# HCPCS K-codes: DME (CMS temporary codes)
-# HCPCS L-codes: Orthotics / Prosthetics
 DME_PREFIXES = ("E", "K", "L")
 
-# High-cost DME items (common OIG audit targets)
 HIGH_COST_DME = {
-    "E1390",  # Oxygen concentrator
-    "E0431",  # Portable gaseous oxygen system
-    "E0260",  # Hospital bed semi-electric
-    "E0601",  # CPAP device
-    "E1161",  # Manual wheelchair
-    "E1235",  # Power wheelchair
-    "E1238",  # Power wheelchair heavy duty
-    "E0470",  # RAD — respiratory assist device (BiPAP)
-    "E0471",  # RAD with backup
-    "K0823",  # Power wheelchair group 2
-    "K0856",  # Power wheelchair group 3
-    "K0861",  # Power wheelchair group 2, sling
-    "K0869",  # Power add-on
-    "L5301",  # Below knee prosthesis
-    "L5321",  # Above knee prosthesis
-    "L1843",  # Knee orthosis
-    "L3000",  # Foot insert
+    "E1390", "E0431", "E0260", "E0601", "E1161", "E1235", "E1238",
+    "E0470", "E0471", "K0823", "K0856", "K0861", "K0869",
+    "L5301", "L5321", "L1843", "L3000",
 }
 
-# Codes that are typically rented (RR modifier), not purchased
 TYPICALLY_RENTED = {
-    "E1390",  # Oxygen concentrator
-    "E0260",  # Hospital bed
-    "E0601",  # CPAP
-    "E0470",  # BiPAP
-    "E0471",  # BiPAP with backup
-    "E1161",  # Manual wheelchair (sometimes)
-    "K0823",  # Power wheelchair
+    "E1390", "E0260", "E0601", "E0470", "E0471", "E1161", "K0823",
 }
 
-# E&M (Evaluation & Management) codes — needed to support DME orders
-EM_PREFIXES = ("992", "993", "994", "995")  # 99201-99499 range
+EM_PREFIXES = ("992", "993", "994", "995")
 
 
-def _src() -> str:
-    return f"read_parquet('{get_parquet_path()}')"
+def _is_dme_code(code: str) -> bool:
+    return code.upper().startswith(DME_PREFIXES)
 
 
-async def _check_columns() -> dict:
-    """Check which columns exist."""
-    sql = f"""
-        SELECT column_name
-        FROM (DESCRIBE SELECT * FROM {_src()} LIMIT 0)
-    """
-    rows = await query_async(sql)
-    cols = {r["column_name"].upper() for r in rows}
-    return {
-        "has_hcpcs": "HCPCS_CODE" in cols,
-        "columns": cols,
-    }
+def _is_em_code(code: str) -> bool:
+    return any(code.startswith(p) for p in EM_PREFIXES)
 
 
 async def analyze_provider(npi: str) -> dict:
     """Full DME analysis for a single provider."""
-    col_info = await _check_columns()
-    if not col_info["has_hcpcs"]:
-        return {
-            "npi": npi,
-            "available": False,
-            "note": "HCPCS_CODE column not found in dataset",
-            "signals": [],
-        }
+    p = get_provider_by_npi(npi)
+    if not p:
+        return {"npi": npi, "available": False, "note": "Provider not found", "signals": []}
 
-    src = _src()
+    hcpcs_list = p.get("hcpcs") or []
+    total_paid = p.get("total_paid") or 0
 
-    # Get provider's DME codes
-    dme_sql = f"""
-        SELECT
-            HCPCS_CODE AS code,
-            SUM(TOTAL_PAID) AS total_paid,
-            SUM(TOTAL_CLAIMS) AS total_claims,
-            SUM(TOTAL_UNIQUE_BENEFICIARIES) AS total_benes
-        FROM {src}
-        WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
-          AND (UPPER(HCPCS_CODE) LIKE 'E%'
-               OR UPPER(HCPCS_CODE) LIKE 'K%'
-               OR UPPER(HCPCS_CODE) LIKE 'L%')
-        GROUP BY HCPCS_CODE
-        ORDER BY total_paid DESC
-    """
+    dme_rows = [h for h in hcpcs_list if _is_dme_code(h.get("hcpcs_code", ""))]
+    em_rows = [h for h in hcpcs_list if _is_em_code(h.get("hcpcs_code", ""))]
 
-    # Get provider totals
-    total_sql = f"""
-        SELECT
-            SUM(TOTAL_PAID) AS total_paid,
-            SUM(TOTAL_CLAIMS) AS total_claims,
-            SUM(TOTAL_UNIQUE_BENEFICIARIES) AS total_benes,
-            COUNT(DISTINCT HCPCS_CODE) AS distinct_codes
-        FROM {src}
-        WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
-    """
+    dme_total_paid = sum(h.get("total_paid", 0) or 0 for h in dme_rows)
+    dme_pct = (dme_total_paid / total_paid * 100) if total_paid > 0 else 0
+    em_claims = sum(h.get("total_claims", 0) or 0 for h in em_rows)
+    dme_claims = sum(h.get("total_claims", 0) or 0 for h in dme_rows)
 
-    # Check for E&M codes (supporting documentation for DME)
-    em_sql = f"""
-        SELECT
-            COUNT(DISTINCT HCPCS_CODE) AS em_code_count,
-            SUM(TOTAL_CLAIMS) AS em_claims,
-            SUM(TOTAL_PAID) AS em_paid
-        FROM {src}
-        WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
-          AND (HCPCS_CODE LIKE '992%'
-               OR HCPCS_CODE LIKE '993%'
-               OR HCPCS_CODE LIKE '994%'
-               OR HCPCS_CODE LIKE '995%')
-    """
-
-    # Get peer stats for DME volume
-    peer_sql = f"""
-        WITH dme_providers AS (
-            SELECT
-                BILLING_PROVIDER_NPI_NUM AS npi,
-                SUM(CASE WHEN UPPER(HCPCS_CODE) LIKE 'E%'
-                         OR UPPER(HCPCS_CODE) LIKE 'K%'
-                         OR UPPER(HCPCS_CODE) LIKE 'L%'
-                    THEN TOTAL_PAID ELSE 0 END) AS dme_paid
-            FROM {src}
-            GROUP BY BILLING_PROVIDER_NPI_NUM
-            HAVING dme_paid > 0
+    # Compute peer stats for DME volume
+    all_providers = get_prescanned()
+    dme_paid_values = []
+    for pp in all_providers:
+        pp_dme = sum(
+            h.get("total_paid", 0) or 0
+            for h in (pp.get("hcpcs") or [])
+            if _is_dme_code(h.get("hcpcs_code", ""))
         )
-        SELECT
-            AVG(dme_paid) AS avg_dme_paid,
-            MEDIAN(dme_paid) AS median_dme_paid,
-            STDDEV(dme_paid) AS std_dme_paid,
-            COUNT(*) AS peer_count
-        FROM dme_providers
-    """
+        if pp_dme > 0:
+            dme_paid_values.append(pp_dme)
 
-    import asyncio
-    dme_rows, total_rows, em_rows, peer_rows = await asyncio.gather(
-        query_async(dme_sql),
-        query_async(total_sql),
-        query_async(em_sql),
-        query_async(peer_sql),
-    )
-
-    total = total_rows[0] if total_rows else {}
-    total_paid = total.get("total_paid", 0) or 0
-    em = em_rows[0] if em_rows else {}
-    peer = peer_rows[0] if peer_rows else {}
+    avg_peer = statistics.mean(dme_paid_values) if dme_paid_values else 0
+    std_peer = statistics.stdev(dme_paid_values) if len(dme_paid_values) > 1 else 1
+    median_peer = statistics.median(dme_paid_values) if dme_paid_values else 0
 
     signals = []
-    dme_total_paid = sum(r.get("total_paid", 0) or 0 for r in dme_rows)
-    dme_pct = (dme_total_paid / total_paid * 100) if total_paid > 0 else 0
 
     # Signal 1: High-cost DME concentration
     high_cost_paid = sum(
-        r.get("total_paid", 0) or 0
-        for r in dme_rows
-        if r.get("code", "").upper() in HIGH_COST_DME
+        h.get("total_paid", 0) or 0 for h in dme_rows
+        if h.get("hcpcs_code", "").upper() in HIGH_COST_DME
     )
     high_cost_pct = (high_cost_paid / total_paid * 100) if total_paid > 0 else 0
     if high_cost_pct > 25:
@@ -182,16 +111,11 @@ async def analyze_provider(npi: str) -> dict:
             "detail": {
                 "high_cost_paid": round(high_cost_paid, 2),
                 "pct": round(high_cost_pct, 1),
-                "codes": [
-                    r["code"] for r in dme_rows
-                    if r.get("code", "").upper() in HIGH_COST_DME
-                ],
+                "codes": [h["hcpcs_code"] for h in dme_rows if h.get("hcpcs_code", "").upper() in HIGH_COST_DME],
             },
         })
 
     # Signal 2: Unusual DME volume vs peers
-    avg_peer = peer.get("avg_dme_paid", 0) or 0
-    std_peer = peer.get("std_dme_paid", 0) or 1
     if avg_peer > 0 and dme_total_paid > 0:
         z_score = (dme_total_paid - avg_peer) / max(std_peer, 1)
         if z_score > 2:
@@ -204,16 +128,14 @@ async def analyze_provider(npi: str) -> dict:
                 "detail": {
                     "provider_dme_paid": round(dme_total_paid, 2),
                     "peer_avg": round(avg_peer, 2),
-                    "peer_median": round(peer.get("median_dme_paid", 0) or 0, 2),
+                    "peer_median": round(median_peer, 2),
                     "z_score": round(z_score, 2),
                     "multiple": round(multiple, 1),
-                    "peer_count": peer.get("peer_count", 0),
+                    "peer_count": len(dme_paid_values),
                 },
             })
 
     # Signal 3: DME without supporting E&M codes
-    em_claims = em.get("em_claims", 0) or 0
-    dme_claims = sum(r.get("total_claims", 0) or 0 for r in dme_rows)
     if dme_claims > 10 and em_claims == 0:
         signals.append({
             "signal": "dme_without_em",
@@ -241,14 +163,11 @@ async def analyze_provider(npi: str) -> dict:
                 },
             })
 
-    # Signal 4: Rental vs. purchase — providers billing high-cost rental items
-    rental_items_billed = [
-        r for r in dme_rows
-        if r.get("code", "").upper() in TYPICALLY_RENTED
-    ]
-    rental_paid = sum(r.get("total_paid", 0) or 0 for r in rental_items_billed)
+    # Signal 4: Rental item concentration
+    rental_items = [h for h in dme_rows if h.get("hcpcs_code", "").upper() in TYPICALLY_RENTED]
+    rental_paid = sum(h.get("total_paid", 0) or 0 for h in rental_items)
     rental_pct = (rental_paid / total_paid * 100) if total_paid > 0 else 0
-    if rental_pct > 30 and len(rental_items_billed) >= 2:
+    if rental_pct > 30 and len(rental_items) >= 2:
         signals.append({
             "signal": "rental_item_concentration",
             "score": min(rental_pct / 60, 1.0),
@@ -257,7 +176,7 @@ async def analyze_provider(npi: str) -> dict:
             "detail": {
                 "rental_paid": round(rental_paid, 2),
                 "pct": round(rental_pct, 1),
-                "codes": [r["code"] for r in rental_items_billed],
+                "codes": [h["hcpcs_code"] for h in rental_items],
                 "note": "High concentration of rental items may indicate purchase-vs-rent abuse",
             },
         })
@@ -276,18 +195,18 @@ async def analyze_provider(npi: str) -> dict:
         "em_claims": em_claims,
         "top_dme_codes": [
             {
-                "code": r["code"],
-                "total_paid": round(r.get("total_paid", 0) or 0, 2),
-                "total_claims": r.get("total_claims", 0) or 0,
-                "is_high_cost": r["code"].upper() in HIGH_COST_DME,
-                "is_rental_type": r["code"].upper() in TYPICALLY_RENTED,
+                "code": h.get("hcpcs_code", ""),
+                "total_paid": round(h.get("total_paid", 0) or 0, 2),
+                "total_claims": h.get("total_claims", 0) or 0,
+                "is_high_cost": h.get("hcpcs_code", "").upper() in HIGH_COST_DME,
+                "is_rental_type": h.get("hcpcs_code", "").upper() in TYPICALLY_RENTED,
             }
-            for r in dme_rows[:15]
+            for h in dme_rows[:15]
         ],
         "peer_comparison": {
             "avg_dme_paid": round(avg_peer, 2),
-            "median_dme_paid": round(peer.get("median_dme_paid", 0) or 0, 2),
-            "peer_count": peer.get("peer_count", 0),
+            "median_dme_paid": round(median_peer, 2),
+            "peer_count": len(dme_paid_values),
         },
         "signals": signals,
         "composite_risk": round(composite, 1),
@@ -296,138 +215,147 @@ async def analyze_provider(npi: str) -> dict:
 
 async def get_high_risk_providers(limit: int = 50) -> dict:
     """Find providers with the highest DME fraud risk indicators."""
-    col_info = await _check_columns()
-    if not col_info["has_hcpcs"]:
-        return {
-            "available": False,
-            "note": "HCPCS_CODE column not found in dataset",
-            "providers": [],
-            "total": 0,
-        }
+    cached = _cache_get(f"dme_high_risk:{limit}")
+    if cached is not None:
+        return cached
+    providers = get_prescanned()
+    if not providers:
+        return {"available": True, "providers": [], "total": 0, "kpis": _empty_kpis()}
 
-    src = _src()
+    # Single pass: compute DME stats for all providers
+    all_dme_paid = []
+    provider_data = []
 
-    sql = f"""
-        WITH dme_providers AS (
-            SELECT
-                BILLING_PROVIDER_NPI_NUM AS npi,
-                SUM(CASE WHEN UPPER(HCPCS_CODE) LIKE 'E%'
-                         OR UPPER(HCPCS_CODE) LIKE 'K%'
-                         OR UPPER(HCPCS_CODE) LIKE 'L%'
-                    THEN TOTAL_PAID ELSE 0 END) AS dme_paid,
-                SUM(TOTAL_PAID) AS total_paid,
-                SUM(CASE WHEN UPPER(HCPCS_CODE) LIKE 'E%'
-                         OR UPPER(HCPCS_CODE) LIKE 'K%'
-                         OR UPPER(HCPCS_CODE) LIKE 'L%'
-                    THEN TOTAL_CLAIMS ELSE 0 END) AS dme_claims,
-                SUM(TOTAL_CLAIMS) AS total_claims,
-                SUM(TOTAL_UNIQUE_BENEFICIARIES) AS total_benes,
-                COUNT(DISTINCT CASE WHEN UPPER(HCPCS_CODE) LIKE 'E%'
-                                     OR UPPER(HCPCS_CODE) LIKE 'K%'
-                                     OR UPPER(HCPCS_CODE) LIKE 'L%'
-                               THEN HCPCS_CODE END) AS dme_code_count,
-                SUM(CASE WHEN UPPER(HCPCS_CODE) IN ({_in_list(HIGH_COST_DME)})
-                    THEN TOTAL_PAID ELSE 0 END) AS high_cost_paid,
-                SUM(CASE WHEN HCPCS_CODE LIKE '992%'
-                         OR HCPCS_CODE LIKE '993%'
-                         OR HCPCS_CODE LIKE '994%'
-                         OR HCPCS_CODE LIKE '995%'
-                    THEN TOTAL_CLAIMS ELSE 0 END) AS em_claims,
-                SUM(CASE WHEN UPPER(HCPCS_CODE) IN ({_in_list(TYPICALLY_RENTED)})
-                    THEN TOTAL_PAID ELSE 0 END) AS rental_paid
-            FROM {src}
-            GROUP BY BILLING_PROVIDER_NPI_NUM
-            HAVING dme_paid > 0
-        ),
-        peer_stats AS (
-            SELECT
-                AVG(dme_paid) AS avg_dme,
-                STDDEV(dme_paid) AS std_dme
-            FROM dme_providers
-        )
-        SELECT dp.*,
-            ROUND(dp.dme_paid / NULLIF(dp.total_paid, 0) * 100, 1) AS dme_pct,
-            ROUND(dp.high_cost_paid / NULLIF(dp.total_paid, 0) * 100, 1) AS high_cost_pct,
-            ROUND(dp.rental_paid / NULLIF(dp.total_paid, 0) * 100, 1) AS rental_pct,
-            ROUND((dp.dme_paid - ps.avg_dme) / NULLIF(ps.std_dme, 0), 2) AS z_score
-        FROM dme_providers dp
-        CROSS JOIN peer_stats ps
-        WHERE dp.dme_paid / NULLIF(dp.total_paid, 0) > 0.1
-        ORDER BY dp.dme_paid DESC
-        LIMIT {limit}
-    """
-    rows = await query_async(sql)
+    for p in providers:
+        npi = p["npi"]
+        total_paid = p.get("total_paid") or 0
+        hcpcs_list = p.get("hcpcs") or []
 
-    from core.store import get_prescanned
-    cache = get_prescanned()
-    cache_map = {p["npi"]: p for p in cache} if cache else {}
+        dme_paid = 0
+        dme_claims = 0
+        dme_code_count = 0
+        high_cost_paid = 0
+        em_claims = 0
+        rental_paid = 0
 
-    providers = []
-    for r in rows:
-        npi = r["npi"]
-        cached = cache_map.get(npi, {})
+        for h in hcpcs_list:
+            code = h.get("hcpcs_code", "").upper()
+            paid = h.get("total_paid", 0) or 0
+            claims = h.get("total_claims", 0) or 0
+
+            if code.startswith(DME_PREFIXES):
+                dme_paid += paid
+                dme_claims += claims
+                dme_code_count += 1
+                if code in HIGH_COST_DME:
+                    high_cost_paid += paid
+                if code in TYPICALLY_RENTED:
+                    rental_paid += paid
+            if _is_em_code(code):
+                em_claims += claims
+
+        if dme_paid > 0:
+            all_dme_paid.append(dme_paid)
+
+        if dme_paid <= 0 or total_paid <= 0:
+            continue
+
+        dme_pct = dme_paid / total_paid * 100
+        if dme_pct < 10:
+            continue
+
+        provider_data.append({
+            "npi": npi,
+            "provider_name": p.get("provider_name", ""),
+            "state": p.get("state", ""),
+            "total_paid": total_paid,
+            "dme_paid": dme_paid,
+            "dme_pct": dme_pct,
+            "dme_code_count": dme_code_count,
+            "high_cost_paid": high_cost_paid,
+            "dme_claims": dme_claims,
+            "em_claims": em_claims,
+            "rental_paid": rental_paid,
+            "total_benes": p.get("total_beneficiaries") or 0,
+            "risk_score": p.get("risk_score", 0),
+        })
+
+    # Compute peer stats
+    avg_dme = statistics.mean(all_dme_paid) if all_dme_paid else 0
+    std_dme = statistics.stdev(all_dme_paid) if len(all_dme_paid) > 1 else 1
+
+    result = []
+    for r in provider_data:
+        high_cost_pct = (r["high_cost_paid"] / r["total_paid"] * 100) if r["total_paid"] > 0 else 0
+        rental_pct = (r["rental_paid"] / r["total_paid"] * 100) if r["total_paid"] > 0 else 0
+        z_score = (r["dme_paid"] - avg_dme) / max(std_dme, 1) if avg_dme > 0 else 0
+
         flags = []
-
-        if (r.get("high_cost_pct") or 0) > 25:
+        if high_cost_pct > 25:
             flags.append("High-cost DME concentration")
-        if (r.get("z_score") or 0) > 2:
+        if z_score > 2:
             flags.append("Unusual DME volume")
-        dme_claims = r.get("dme_claims", 0) or 0
-        em_claims = r.get("em_claims", 0) or 0
-        if dme_claims > 10 and em_claims == 0:
+        if r["dme_claims"] > 10 and r["em_claims"] == 0:
             flags.append("DME without E&M visits")
-        elif dme_claims > 10 and em_claims > 0 and dme_claims / em_claims > 5:
+        elif r["dme_claims"] > 10 and r["em_claims"] > 0 and r["dme_claims"] / r["em_claims"] > 5:
             flags.append("DME/E&M ratio imbalance")
-        if (r.get("rental_pct") or 0) > 30:
+        if rental_pct > 30:
             flags.append("Rental item concentration")
 
         risk = 0
         if flags:
-            risk = min(len(flags) * 25 + (r.get("dme_pct", 0) or 0) * 0.5, 100)
+            risk = min(len(flags) * 25 + r["dme_pct"] * 0.5, 100)
 
-        providers.append({
-            "npi": npi,
-            "provider_name": cached.get("provider_name", ""),
-            "state": cached.get("state", ""),
-            "total_paid": round(r.get("total_paid", 0) or 0, 2),
-            "dme_paid": round(r.get("dme_paid", 0) or 0, 2),
-            "dme_pct": r.get("dme_pct", 0) or 0,
-            "dme_code_count": r.get("dme_code_count", 0) or 0,
-            "high_cost_pct": r.get("high_cost_pct", 0) or 0,
-            "dme_claims": dme_claims,
-            "em_claims": em_claims,
-            "rental_pct": r.get("rental_pct", 0) or 0,
-            "z_score": r.get("z_score", 0) or 0,
-            "total_benes": r.get("total_benes", 0) or 0,
+        result.append({
+            "npi": r["npi"],
+            "provider_name": r["provider_name"],
+            "state": r["state"],
+            "total_paid": round(r["total_paid"], 2),
+            "dme_paid": round(r["dme_paid"], 2),
+            "dme_pct": round(r["dme_pct"], 1),
+            "dme_code_count": r["dme_code_count"],
+            "high_cost_pct": round(high_cost_pct, 1),
+            "dme_claims": r["dme_claims"],
+            "em_claims": r["em_claims"],
+            "rental_pct": round(rental_pct, 1),
+            "z_score": round(z_score, 2),
+            "total_benes": r["total_benes"],
             "flags": flags,
             "flag_count": len(flags),
             "dme_risk": round(risk, 1),
-            "risk_score": cached.get("risk_score", 0),
+            "risk_score": r["risk_score"],
         })
 
-    providers.sort(key=lambda p: p["dme_risk"], reverse=True)
+    result.sort(key=lambda x: x["dme_risk"], reverse=True)
+    result = result[:limit]
 
-    return {
+    response = {
         "available": True,
-        "providers": providers,
-        "total": len(providers),
+        "providers": result,
+        "total": len(result),
         "kpis": {
-            "total_dme_providers": len(providers),
-            "total_dme_billing": round(sum(p["dme_paid"] for p in providers), 2),
+            "total_dme_providers": len(result),
+            "total_dme_billing": round(sum(r["dme_paid"] for r in result), 2),
             "avg_dme_pct": round(
-                sum(p["dme_pct"] for p in providers) / max(len(providers), 1), 1
+                sum(r["dme_pct"] for r in result) / max(len(result), 1), 1
             ),
-            "flagged_count": sum(1 for p in providers if p["flag_count"] > 0),
-            "high_cost_count": sum(
-                1 for p in providers if p["high_cost_pct"] > 25
-            ),
+            "flagged_count": sum(1 for r in result if r["flag_count"] > 0),
+            "high_cost_count": sum(1 for r in result if r["high_cost_pct"] > 25),
             "no_em_count": sum(
-                1 for p in providers if p["dme_claims"] > 10 and p["em_claims"] == 0
+                1 for r in result if r["dme_claims"] > 10 and r["em_claims"] == 0
             ),
         },
     }
+    _cache_set(f"dme_high_risk:{limit}", response)
+    return response
 
 
-def _in_list(codes: set) -> str:
-    """Format a set of codes for SQL IN clause."""
-    return ", ".join(f"'{c}'" for c in sorted(codes))
+def _empty_kpis() -> dict:
+    return {
+        "total_dme_providers": 0,
+        "total_dme_billing": 0,
+        "avg_dme_pct": 0,
+        "flagged_count": 0,
+        "high_cost_count": 0,
+        "no_em_count": 0,
+    }

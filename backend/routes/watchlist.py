@@ -13,7 +13,7 @@ from core.watchlist_store import (
     update_entry,
     is_watched,
 )
-from core.store import get_prescanned
+from core.store import get_prescanned, get_provider_by_npi
 from routes.auth import require_user
 
 router = APIRouter(prefix="/api/watchlist", tags=["watchlist"], dependencies=[Depends(require_user)])
@@ -31,28 +31,25 @@ class UpdateWatchlistBody(BaseModel):
     alert_threshold: Optional[float] = None
     active: Optional[bool] = None
     reason: Optional[str] = None
+    reviewing: Optional[bool] = None
 
 
 def _enrich_with_scan_data(entry: dict) -> dict:
     """Cross-reference watchlist entry with prescan cache for current risk score and details."""
-    providers = get_prescanned()
     enriched = dict(entry)
-    for p in providers:
-        if p.get("npi") == entry["npi"]:
-            enriched["risk_score"] = p.get("risk_score", 0)
-            enriched["total_paid"] = p.get("total_paid", 0)
-            enriched["total_claims"] = p.get("total_claims", 0)
-            enriched["flag_count"] = len([f for f in p.get("flags", []) if f.get("flagged")])
-            # Fill in name/specialty from scan data if not set
-            if not enriched.get("name"):
-                enriched["name"] = p.get("provider_name", "")
-            if not enriched.get("specialty"):
-                enriched["specialty"] = p.get("specialty", "")
-            enriched["state"] = p.get("state", "")
-            enriched["city"] = p.get("city", "")
-            break
+    p = get_provider_by_npi(entry["npi"])
+    if p:
+        enriched["risk_score"] = p.get("risk_score", 0)
+        enriched["total_paid"] = p.get("total_paid", 0)
+        enriched["total_claims"] = p.get("total_claims", 0)
+        enriched["flag_count"] = len([f for f in p.get("flags", []) if f.get("flagged")])
+        if not enriched.get("name"):
+            enriched["name"] = p.get("provider_name", "")
+        if not enriched.get("specialty"):
+            enriched["specialty"] = p.get("specialty", "")
+        enriched["state"] = p.get("state", "")
+        enriched["city"] = p.get("city", "")
     else:
-        # Provider not in scan cache
         enriched.setdefault("risk_score", None)
         enriched.setdefault("total_paid", None)
         enriched.setdefault("total_claims", None)
@@ -79,12 +76,10 @@ async def add_provider(body: AddToWatchlistBody):
     # Try to get name/specialty from prescan cache
     name = ""
     specialty = ""
-    providers = get_prescanned()
-    for p in providers:
-        if p.get("npi") == body.npi:
-            name = p.get("provider_name", "")
-            specialty = p.get("specialty", "")
-            break
+    p = get_provider_by_npi(body.npi)
+    if p:
+        name = p.get("provider_name", "")
+        specialty = p.get("specialty", "")
 
     entry = add_to_watchlist(
         npi=body.npi,

@@ -25,7 +25,13 @@ def load_review_from_disk() -> None:
     try:
         if not _QUEUE_FILE.exists():
             return
-        raw = json.loads(_QUEUE_FILE.read_text(encoding="utf-8"))
+        text = _QUEUE_FILE.read_text(encoding="utf-8").strip()
+        if not text:
+            # File is empty — treat as fresh/empty queue
+            _review_items = {}
+            print("[review_store] review_queue.json is empty — starting with empty queue")
+            return
+        raw = json.loads(text)
         _review_items = {item["npi"]: item for item in raw.get("items", [])}
         print(f"[review_store] Loaded {len(_review_items)} review items from disk")
     except Exception as e:

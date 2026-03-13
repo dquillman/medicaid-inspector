@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -10,21 +10,6 @@ interface SeverityCounts {
   CRITICAL: number
   HIGH: number
   MEDIUM: number
-}
-
-interface PatternSummaryCategory {
-  count: number
-  total_paid: number
-  severity_counts: SeverityCounts
-}
-
-interface PatternSummary {
-  unbundling: PatternSummaryCategory
-  duplicates: PatternSummaryCategory
-  pos_violations: PatternSummaryCategory
-  modifier_abuse: PatternSummaryCategory
-  impossible_days: PatternSummaryCategory
-  total_patterns: number
 }
 
 interface UnbundlingPattern {
@@ -124,14 +109,23 @@ function NpiLink({ npi }: { npi: string }) {
   )
 }
 
+function severityCounts(items: { severity: string }[]): SeverityCounts {
+  const counts: SeverityCounts = { CRITICAL: 0, HIGH: 0, MEDIUM: 0 }
+  for (const item of items) {
+    const s = item.severity as keyof SeverityCounts
+    if (s in counts) counts[s]++
+  }
+  return counts
+}
+
 // ── Tab definitions ─────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'unbundling', label: 'Unbundling', icon: 'U' },
-  { id: 'duplicates', label: 'Duplicates', icon: 'D' },
-  { id: 'pos', label: 'Place of Service', icon: 'P' },
-  { id: 'modifiers', label: 'Modifiers', icon: 'M' },
-  { id: 'impossible', label: 'Impossible Days', icon: 'I' },
+  { id: 'unbundling', label: 'Unbundling' },
+  { id: 'duplicates', label: 'Duplicates' },
+  { id: 'pos', label: 'Place of Service' },
+  { id: 'modifiers', label: 'Modifiers' },
+  { id: 'impossible', label: 'Impossible Days' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -145,7 +139,7 @@ function KpiCard({
   severity_counts,
   active,
   onClick,
-}: PatternSummaryCategory & { title: string; active: boolean; onClick: () => void }) {
+}: { title: string; count: number; total_paid: number; severity_counts: SeverityCounts; active: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
@@ -172,15 +166,8 @@ function KpiCard({
 
 // ── Tab content components ──────────────────────────────────────────────────
 
-function UnbundlingTab() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['claim-patterns', 'unbundling'],
-    queryFn: () => api.claimPatternUnbundling(),
-  })
-  if (isLoading) return <div className="text-gray-400 py-8 text-center">Loading unbundling patterns...</div>
-  const patterns = (data as any)?.patterns as UnbundlingPattern[] ?? []
+function UnbundlingTab({ patterns }: { patterns: UnbundlingPattern[] }) {
   if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No unbundling patterns detected</div>
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -221,15 +208,8 @@ function UnbundlingTab() {
   )
 }
 
-function DuplicatesTab() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['claim-patterns', 'duplicates'],
-    queryFn: () => api.claimPatternDuplicates(),
-  })
-  if (isLoading) return <div className="text-gray-400 py-8 text-center">Loading duplicate patterns...</div>
-  const patterns = (data as any)?.patterns as DuplicatePattern[] ?? []
+function DuplicatesTab({ patterns }: { patterns: DuplicatePattern[] }) {
   if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No duplicate patterns detected</div>
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -268,15 +248,8 @@ function DuplicatesTab() {
   )
 }
 
-function PosTab() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['claim-patterns', 'pos'],
-    queryFn: () => api.claimPatternPos(),
-  })
-  if (isLoading) return <div className="text-gray-400 py-8 text-center">Loading place-of-service patterns...</div>
-  const patterns = (data as any)?.patterns as PosViolation[] ?? []
+function PosTab({ patterns }: { patterns: PosViolation[] }) {
   if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No place-of-service violations detected</div>
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -315,15 +288,8 @@ function PosTab() {
   )
 }
 
-function ModifiersTab() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['claim-patterns', 'modifiers'],
-    queryFn: () => api.claimPatternModifiers(),
-  })
-  if (isLoading) return <div className="text-gray-400 py-8 text-center">Loading modifier patterns...</div>
-  const patterns = (data as any)?.patterns as ModifierAbuse[] ?? []
+function ModifiersTab({ patterns }: { patterns: ModifierAbuse[] }) {
   if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No modifier abuse patterns detected</div>
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -366,15 +332,8 @@ function ModifiersTab() {
   )
 }
 
-function ImpossibleTab() {
-  const { data, isLoading } = useQuery({
-    queryKey: ['claim-patterns', 'impossible'],
-    queryFn: () => api.claimPatternImpossible(),
-  })
-  if (isLoading) return <div className="text-gray-400 py-8 text-center">Loading impossible day patterns...</div>
-  const patterns = (data as any)?.patterns as ImpossibleDay[] ?? []
+function ImpossibleTab({ patterns }: { patterns: ImpossibleDay[] }) {
   if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No impossible day patterns detected</div>
-
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -424,12 +383,30 @@ function ImpossibleTab() {
 export default function ClaimPatterns() {
   const [tab, setTab] = useState<TabId>('unbundling')
 
-  const { data: summary, isLoading: summaryLoading } = useQuery({
-    queryKey: ['claim-patterns', 'summary'],
-    queryFn: () => api.claimPatternSummary(),
+  // Single query fetches all 5 analyses at once
+  const { data, isLoading } = useQuery({
+    queryKey: ['claim-patterns-all'],
+    queryFn: () => api.claimPatternAll(),
+    staleTime: 300_000,
   })
 
-  const s = summary as PatternSummary | undefined
+  const unbData = (data?.unbundling ?? []) as UnbundlingPattern[]
+  const dupData = (data?.duplicates ?? []) as DuplicatePattern[]
+  const posData = (data?.pos ?? []) as PosViolation[]
+  const modData = (data?.modifiers ?? []) as ModifierAbuse[]
+  const impData = (data?.impossible ?? []) as ImpossibleDay[]
+
+  const summary = useMemo(() => {
+    if (!data) return null
+    return {
+      unbundling: { count: unbData.length, total_paid: unbData.reduce((s, r) => s + (r.component_paid || 0), 0), severity_counts: severityCounts(unbData) },
+      duplicates: { count: dupData.length, total_paid: dupData.reduce((s, r) => s + (r.duplicate_paid || 0), 0), severity_counts: severityCounts(dupData) },
+      pos: { count: posData.length, total_paid: posData.reduce((s, r) => s + (r.surgical_paid || 0), 0), severity_counts: severityCounts(posData) },
+      modifiers: { count: modData.length, total_paid: modData.reduce((s, r) => s + (r.total_paid || 0), 0), severity_counts: severityCounts(modData) },
+      impossible: { count: impData.length, total_paid: impData.reduce((s, r) => s + (r.impossible_paid || 0), 0), severity_counts: severityCounts(impData) },
+      total: unbData.length + dupData.length + posData.length + modData.length + impData.length,
+    }
+  }, [data, unbData, dupData, posData, modData, impData])
 
   return (
     <div className="space-y-6">
@@ -441,49 +418,34 @@ export default function ClaimPatterns() {
         </p>
       </div>
 
+      {isLoading && (
+        <div className="bg-gray-800/80 rounded-xl border border-gray-700 p-5">
+          <div className="flex items-center gap-3">
+            <svg className="w-5 h-5 animate-spin text-blue-400" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            <span className="text-sm text-gray-300">Analyzing claim patterns across all providers...</span>
+          </div>
+        </div>
+      )}
+
       {/* KPI Cards */}
-      {summaryLoading ? (
-        <div className="text-gray-400 text-center py-4">Loading summary...</div>
-      ) : s ? (
+      {summary && (
         <>
           <div className="flex items-center gap-3 mb-2">
             <span className="text-sm text-gray-400">Total patterns detected:</span>
-            <span className="text-lg font-bold text-white">{s.total_patterns.toLocaleString()}</span>
+            <span className="text-lg font-bold text-white">{summary.total.toLocaleString()}</span>
           </div>
           <div className="grid grid-cols-5 gap-4">
-            <KpiCard
-              title="Unbundling"
-              active={tab === 'unbundling'}
-              onClick={() => setTab('unbundling')}
-              {...s.unbundling}
-            />
-            <KpiCard
-              title="Duplicates"
-              active={tab === 'duplicates'}
-              onClick={() => setTab('duplicates')}
-              {...s.duplicates}
-            />
-            <KpiCard
-              title="Place of Service"
-              active={tab === 'pos'}
-              onClick={() => setTab('pos')}
-              {...s.pos_violations}
-            />
-            <KpiCard
-              title="Modifier Abuse"
-              active={tab === 'modifiers'}
-              onClick={() => setTab('modifiers')}
-              {...s.modifier_abuse}
-            />
-            <KpiCard
-              title="Impossible Days"
-              active={tab === 'impossible'}
-              onClick={() => setTab('impossible')}
-              {...s.impossible_days}
-            />
+            <KpiCard title="Unbundling" active={tab === 'unbundling'} onClick={() => setTab('unbundling')} {...summary.unbundling} />
+            <KpiCard title="Duplicates" active={tab === 'duplicates'} onClick={() => setTab('duplicates')} {...summary.duplicates} />
+            <KpiCard title="Place of Service" active={tab === 'pos'} onClick={() => setTab('pos')} {...summary.pos} />
+            <KpiCard title="Modifier Abuse" active={tab === 'modifiers'} onClick={() => setTab('modifiers')} {...summary.modifiers} />
+            <KpiCard title="Impossible Days" active={tab === 'impossible'} onClick={() => setTab('impossible')} {...summary.impossible} />
           </div>
         </>
-      ) : null}
+      )}
 
       {/* Tab bar */}
       <div className="flex gap-1 border-b border-gray-700">
@@ -503,13 +465,15 @@ export default function ClaimPatterns() {
       </div>
 
       {/* Tab content */}
-      <div className="bg-gray-900/50 rounded-xl border border-gray-700 p-4">
-        {tab === 'unbundling' && <UnbundlingTab />}
-        {tab === 'duplicates' && <DuplicatesTab />}
-        {tab === 'pos' && <PosTab />}
-        {tab === 'modifiers' && <ModifiersTab />}
-        {tab === 'impossible' && <ImpossibleTab />}
-      </div>
+      {data && (
+        <div className="bg-gray-900/50 rounded-xl border border-gray-700 p-4">
+          {tab === 'unbundling' && <UnbundlingTab patterns={unbData} />}
+          {tab === 'duplicates' && <DuplicatesTab patterns={dupData} />}
+          {tab === 'pos' && <PosTab patterns={posData} />}
+          {tab === 'modifiers' && <ModifiersTab patterns={modData} />}
+          {tab === 'impossible' && <ImpossibleTab patterns={impData} />}
+        </div>
+      )}
     </div>
   )
 }

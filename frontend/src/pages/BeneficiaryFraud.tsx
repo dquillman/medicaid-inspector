@@ -11,11 +11,11 @@ function num(v: number | null | undefined) {
 
 type Tab = 'shopping' | 'utilization' | 'geographic' | 'excessive'
 
-const TABS: { key: Tab; label: string; desc: string }[] = [
-  { key: 'shopping', label: 'Doctor Shopping', desc: 'Providers whose patients likely visit many other providers for the same services' },
-  { key: 'utilization', label: 'High Utilization', desc: 'Providers with claims/revenue per beneficiary far exceeding peers' },
-  { key: 'geographic', label: 'Geographic Anomalies', desc: 'Providers billing from multiple states — possible geographic impossibility' },
-  { key: 'excessive', label: 'Excessive Services', desc: 'Providers with service counts per beneficiary exceeding 90th percentile' },
+const TABS: { key: Tab; label: string; desc: string; countKey: string }[] = [
+  { key: 'shopping', label: 'Doctor Shopping', desc: 'Providers whose patients likely visit many other providers for the same services', countKey: 'doctor_shopping' },
+  { key: 'utilization', label: 'High Utilization', desc: 'Providers with claims/revenue per beneficiary far exceeding peers', countKey: 'high_utilization' },
+  { key: 'geographic', label: 'Geographic Anomalies', desc: 'Providers billing from multiple states — possible geographic impossibility', countKey: 'geographic_anomalies' },
+  { key: 'excessive', label: 'Excessive Services', desc: 'Providers with service counts per beneficiary exceeding 90th percentile', countKey: 'excessive_services' },
 ]
 
 function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -43,26 +43,23 @@ function SortHeader({ label, field, sortBy, sortDir, onSort }: {
   )
 }
 
-function DoctorShoppingTable() {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['bene-fraud-shopping'],
-    queryFn: () => api.beneficiaryFraudDoctorShopping(),
-  })
-  const [sortBy, setSortBy] = useState('shopping_score')
+function useSortable(defaultField: string) {
+  const [sortBy, setSortBy] = useState(defaultField)
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-
   const onSort = (f: string) => {
     if (sortBy === f) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
     else { setSortBy(f); setSortDir('desc') }
   }
-
-  if (isLoading) return <div className="text-gray-400 py-8 text-center">Loading doctor shopping data...</div>
-  if (error) return <div className="text-red-400 py-8 text-center">Error: {(error as Error).message}</div>
-
-  const rows = [...(data?.flagged || [])].sort((a: any, b: any) => {
+  const sort = (rows: any[]) => [...rows].sort((a, b) => {
     const av = a[sortBy] ?? 0, bv = b[sortBy] ?? 0
     return sortDir === 'asc' ? av - bv : bv - av
   })
+  return { sortBy, sortDir, onSort, sort }
+}
+
+function DoctorShoppingTable({ data }: { data: any }) {
+  const { sortBy, sortDir, onSort, sort } = useSortable('shopping_score')
+  const rows = sort(data?.flagged || [])
 
   return (
     <div className="overflow-x-auto">
@@ -101,26 +98,9 @@ function DoctorShoppingTable() {
   )
 }
 
-function HighUtilizationTable() {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['bene-fraud-utilization'],
-    queryFn: () => api.beneficiaryFraudHighUtilization(),
-  })
-  const [sortBy, setSortBy] = useState('cpb_z_score')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-
-  const onSort = (f: string) => {
-    if (sortBy === f) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortBy(f); setSortDir('desc') }
-  }
-
-  if (isLoading) return <div className="text-gray-400 py-8 text-center">Loading high utilization data...</div>
-  if (error) return <div className="text-red-400 py-8 text-center">Error: {(error as Error).message}</div>
-
-  const rows = [...(data?.flagged || [])].sort((a: any, b: any) => {
-    const av = a[sortBy] ?? 0, bv = b[sortBy] ?? 0
-    return sortDir === 'asc' ? av - bv : bv - av
-  })
+function HighUtilizationTable({ data }: { data: any }) {
+  const { sortBy, sortDir, onSort, sort } = useSortable('cpb_z_score')
+  const rows = sort(data?.flagged || [])
 
   return (
     <div className="overflow-x-auto">
@@ -169,30 +149,14 @@ function HighUtilizationTable() {
   )
 }
 
-function GeographicTable() {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['bene-fraud-geographic'],
-    queryFn: () => api.beneficiaryFraudGeographic(),
-  })
-  const [sortBy, setSortBy] = useState('geo_risk_score')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-
-  const onSort = (f: string) => {
-    if (sortBy === f) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortBy(f); setSortDir('desc') }
-  }
-
-  if (isLoading) return <div className="text-gray-400 py-8 text-center">Loading geographic anomaly data...</div>
-  if (error) return <div className="text-red-400 py-8 text-center">Error: {(error as Error).message}</div>
+function GeographicTable({ data }: { data: any }) {
+  const { sortBy, sortDir, onSort, sort } = useSortable('geo_risk_score')
 
   if (data?.note && (data?.flagged?.length ?? 0) === 0) {
     return <div className="text-gray-500 py-8 text-center">{data.note}</div>
   }
 
-  const rows = [...(data?.flagged || [])].sort((a: any, b: any) => {
-    const av = a[sortBy] ?? 0, bv = b[sortBy] ?? 0
-    return sortDir === 'asc' ? av - bv : bv - av
-  })
+  const rows = sort(data?.flagged || [])
 
   return (
     <div className="overflow-x-auto">
@@ -237,26 +201,9 @@ function GeographicTable() {
   )
 }
 
-function ExcessiveServicesTable() {
-  const { data, isLoading, error } = useQuery({
-    queryKey: ['bene-fraud-excessive'],
-    queryFn: () => api.beneficiaryFraudExcessive(),
-  })
-  const [sortBy, setSortBy] = useState('svc_per_bene')
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc')
-
-  const onSort = (f: string) => {
-    if (sortBy === f) setSortDir(d => d === 'asc' ? 'desc' : 'asc')
-    else { setSortBy(f); setSortDir('desc') }
-  }
-
-  if (isLoading) return <div className="text-gray-400 py-8 text-center">Loading excessive services data...</div>
-  if (error) return <div className="text-red-400 py-8 text-center">Error: {(error as Error).message}</div>
-
-  const rows = [...(data?.flagged || [])].sort((a: any, b: any) => {
-    const av = a[sortBy] ?? 0, bv = b[sortBy] ?? 0
-    return sortDir === 'asc' ? av - bv : bv - av
-  })
+function ExcessiveServicesTable({ data }: { data: any }) {
+  const { sortBy, sortDir, onSort, sort } = useSortable('svc_per_bene')
+  const rows = sort(data?.flagged || [])
 
   return (
     <div className="overflow-x-auto">
@@ -304,12 +251,29 @@ function ExcessiveServicesTable() {
 export default function BeneficiaryFraud() {
   const [tab, setTab] = useState<Tab>('shopping')
 
-  const { data: summary, isLoading: summaryLoading } = useQuery({
-    queryKey: ['bene-fraud-summary'],
-    queryFn: () => api.beneficiaryFraudSummary(),
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['bene-fraud-all'],
+    queryFn: () => api.beneficiaryFraudAll(),
   })
 
+  const summary = data?.summary
   const counts: Record<string, number> = summary?.flagged_counts || {}
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64 text-gray-400">
+        Loading beneficiary fraud analysis...
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-64 text-red-400">
+        Error: {(error as Error).message}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
@@ -325,31 +289,31 @@ export default function BeneficiaryFraud() {
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
         <KpiCard
           label="Providers Analyzed"
-          value={summaryLoading ? '...' : num(summary?.total_providers_analyzed)}
+          value={num(summary?.total_providers_analyzed)}
         />
         <KpiCard
           label="Doctor Shopping"
-          value={summaryLoading ? '...' : counts.doctor_shopping ?? 0}
+          value={counts.doctor_shopping ?? 0}
           sub="provider-level flags"
         />
         <KpiCard
           label="High Utilization"
-          value={summaryLoading ? '...' : counts.high_utilization ?? 0}
+          value={counts.high_utilization ?? 0}
           sub="above P90 thresholds"
         />
         <KpiCard
           label="Geographic Anomalies"
-          value={summaryLoading ? '...' : counts.geographic_anomalies ?? 0}
+          value={counts.geographic_anomalies ?? 0}
           sub="multi-state billing"
         />
         <KpiCard
           label="Excessive Services"
-          value={summaryLoading ? '...' : counts.excessive_services ?? 0}
+          value={counts.excessive_services ?? 0}
           sub="svc/bene outliers"
         />
         <KpiCard
           label="Total Billing"
-          value={summaryLoading ? '...' : fmt(summary?.total_paid)}
+          value={fmt(summary?.total_paid)}
         />
       </div>
 
@@ -374,9 +338,9 @@ export default function BeneficiaryFraud() {
               }`}
             >
               {t.label}
-              {counts[t.key === 'shopping' ? 'doctor_shopping' : t.key === 'utilization' ? 'high_utilization' : t.key === 'geographic' ? 'geographic_anomalies' : 'excessive_services'] > 0 && (
+              {(counts[t.countKey] ?? 0) > 0 && (
                 <span className="ml-1.5 px-1.5 py-0.5 bg-red-900/50 text-red-400 text-xs rounded-full">
-                  {counts[t.key === 'shopping' ? 'doctor_shopping' : t.key === 'utilization' ? 'high_utilization' : t.key === 'geographic' ? 'geographic_anomalies' : 'excessive_services']}
+                  {counts[t.countKey]}
                 </span>
               )}
             </button>
@@ -390,10 +354,10 @@ export default function BeneficiaryFraud() {
 
         {/* Tab content */}
         <div className="p-0">
-          {tab === 'shopping' && <DoctorShoppingTable />}
-          {tab === 'utilization' && <HighUtilizationTable />}
-          {tab === 'geographic' && <GeographicTable />}
-          {tab === 'excessive' && <ExcessiveServicesTable />}
+          {tab === 'shopping' && <DoctorShoppingTable data={data?.shopping} />}
+          {tab === 'utilization' && <HighUtilizationTable data={data?.utilization} />}
+          {tab === 'geographic' && <GeographicTable data={data?.geographic} />}
+          {tab === 'excessive' && <ExcessiveServicesTable data={data?.excessive} />}
         </div>
       </div>
     </div>

@@ -327,6 +327,34 @@ function StatusTab({
   )
 }
 
+type SortField = 'npi' | 'provider_name' | 'state' | 'risk_score' | 'flags' | 'total_paid' | 'status' | 'updated_at'
+type SortDir = 'asc' | 'desc'
+
+function SortHeader({ label, field, sortField, sortDir, onSort }: {
+  label: string
+  field: SortField
+  sortField: SortField
+  sortDir: SortDir
+  onSort: (f: SortField) => void
+}) {
+  const active = sortField === field
+  return (
+    <th
+      className="px-4 py-3 cursor-pointer hover:text-gray-300 select-none transition-colors"
+      onClick={() => onSort(field)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active ? (
+          <span className="text-blue-400">{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>
+        ) : (
+          <span className="text-gray-700">\u25BC</span>
+        )}
+      </span>
+    </th>
+  )
+}
+
 export default function ReviewQueue() {
   const queryClient = useQueryClient()
   const [searchParams] = useSearchParams()
@@ -334,7 +362,19 @@ export default function ReviewQueue() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(statusParam ?? 'all')
   const [page, setPage] = useState(1)
   const [selectedNpis, setSelectedNpis] = useState<Set<string>>(new Set())
+  const [npiSearch, setNpiSearch] = useState('')
+  const [sortField, setSortField] = useState<SortField>('risk_score')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
   const LIMIT = 50
+
+  const handleSort = (field: SortField) => {
+    if (sortField === field) {
+      setSortDir(d => d === 'asc' ? 'desc' : 'asc')
+    } else {
+      setSortField(field)
+      setSortDir(field === 'risk_score' || field === 'total_paid' || field === 'flags' || field === 'updated_at' ? 'desc' : 'asc')
+    }
+  }
 
   const { data: countsData } = useQuery({
     queryKey: ['review-counts'],
@@ -342,17 +382,6 @@ export default function ReviewQueue() {
     refetchInterval: 10000,
   })
 
-  // Auto-backfill once if queue is empty but prescan cache has data
-  const hasBackfilled = useRef(false)
-  useEffect(() => {
-    if (!hasBackfilled.current && countsData && countsData.total === 0) {
-      hasBackfilled.current = true
-      api.reviewBackfill().then(() => {
-        queryClient.invalidateQueries({ queryKey: ['review-counts'] })
-        queryClient.invalidateQueries({ queryKey: ['review-queue'] })
-      })
-    }
-  }, [countsData, queryClient])
 
   const counts: ReviewCounts = countsData ?? {
     pending: 0, assigned: 0, investigating: 0, confirmed_fraud: 0, referred: 0, dismissed: 0, total: 0,
@@ -463,9 +492,32 @@ export default function ReviewQueue() {
     URL.revokeObjectURL(url)
   }
 
-  const items      = data?.items ?? []
-  const total      = data?.total ?? 0
-  const totalPages = Math.ceil(total / LIMIT)
+  const rawItems   = data?.items ?? []
+
+  // NPI search filter (client-side on current page data)
+  const searchFiltered = npiSearch.trim()
+    ? rawItems.filter(i => i.npi.includes(npiSearch.trim()))
+    : rawItems
+
+  // Client-side sort
+  const sortedItems = [...searchFiltered].sort((a, b) => {
+    let cmp = 0
+    switch (sortField) {
+      case 'npi':           cmp = a.npi.localeCompare(b.npi); break
+      case 'provider_name': cmp = (a.provider_name || '').localeCompare(b.provider_name || ''); break
+      case 'state':         cmp = (a.state || '').localeCompare(b.state || ''); break
+      case 'risk_score':    cmp = a.risk_score - b.risk_score; break
+      case 'flags':         cmp = a.flags.length - b.flags.length; break
+      case 'total_paid':    cmp = a.total_paid - b.total_paid; break
+      case 'status':        cmp = a.status.localeCompare(b.status); break
+      case 'updated_at':    cmp = (a.updated_at || 0) - (b.updated_at || 0); break
+    }
+    return sortDir === 'asc' ? cmp : -cmp
+  })
+
+  const items      = sortedItems
+  const total      = npiSearch.trim() ? searchFiltered.length : (data?.total ?? 0)
+  const totalPages = npiSearch.trim() ? 1 : Math.ceil((data?.total ?? 0) / LIMIT)
   const allOnPageSelected = items.length > 0 && items.every(i => selectedNpis.has(i.npi))
 
   const tabs: { key: StatusFilter; label: string; count: number }[] = [
@@ -495,6 +547,26 @@ export default function ReviewQueue() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <div className="relative">
+            <input
+              type="text"
+              value={npiSearch}
+              onChange={e => { setNpiSearch(e.target.value); setPage(1) }}
+              placeholder="Search NPI..."
+              className="w-44 px-3 py-2 pl-8 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:border-blue-500 focus:outline-none font-mono"
+            />
+            <svg className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+            {npiSearch && (
+              <button
+                onClick={() => setNpiSearch('')}
+                className="absolute right-2 top-2 text-gray-500 hover:text-gray-300 text-sm"
+              >
+                x
+              </button>
+            )}
+          </div>
           <button
             onClick={() => window.open('/api/review/export/csv', '_blank')}
             className="px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600"
@@ -599,16 +671,16 @@ export default function ReviewQueue() {
                     title="Select all on page"
                   />
                 </th>
-                <th className="px-4 py-3">NPI</th>
-                <th className="px-4 py-3">Name</th>
-                <th className="px-4 py-3">St</th>
-                <th className="px-4 py-3">Risk</th>
-                <th className="px-4 py-3">Signals</th>
-                <th className="px-4 py-3">Total Paid</th>
-                <th className="px-4 py-3">Status</th>
+                <SortHeader label="NPI" field="npi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Name" field="provider_name" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortHeader label="St" field="state" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Risk" field="risk_score" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Signals" field="flags" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Total Paid" field="total_paid" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Status" field="status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-3">Assigned To</th>
                 <th className="px-4 py-3">Notes</th>
-                <th className="px-4 py-3">Last Updated</th>
+                <SortHeader label="Last Updated" field="updated_at" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <th className="px-4 py-3">Audit</th>
               </tr>
             </thead>

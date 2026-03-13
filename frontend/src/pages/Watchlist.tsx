@@ -164,6 +164,18 @@ export default function Watchlist() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
   })
 
+  const sendToReviewMutation = useMutation({
+    mutationFn: async (entry: WatchlistEntry) => {
+      await api.addToReview({ npi: entry.npi, notes: entry.notes || undefined })
+      await api.updateWatchlist(entry.npi, { reviewing: true })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['watchlist'] })
+      queryClient.invalidateQueries({ queryKey: ['review-queue'] })
+      queryClient.invalidateQueries({ queryKey: ['review-counts'] })
+    },
+  })
+
   const items = data?.items ?? []
   const filtered = items.filter(item => {
     if (filter === 'active') return item.active
@@ -280,7 +292,11 @@ export default function Watchlist() {
                   </td>
                   <td className="px-4 py-3 text-right text-gray-400">{entry.alert_threshold}</td>
                   <td className="px-4 py-3">
-                    {entry.in_alert ? (
+                    {entry.reviewing ? (
+                      <span className="px-2 py-0.5 bg-purple-900/50 border border-purple-700 rounded-full text-purple-400 text-xs font-medium">
+                        Reviewing
+                      </span>
+                    ) : entry.in_alert ? (
                       <span className="px-2 py-0.5 bg-red-900/50 border border-red-700 rounded-full text-red-400 text-xs font-medium">
                         ALERT
                       </span>
@@ -305,6 +321,20 @@ export default function Watchlist() {
                   </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      {entry.reviewing ? (
+                        <span className="px-2 py-1 text-xs text-purple-400 bg-purple-900/30 rounded" title="Already in review queue">
+                          In Review
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => sendToReviewMutation.mutate(entry)}
+                          disabled={sendToReviewMutation.isPending}
+                          className="px-2 py-1 text-xs text-purple-400 hover:text-purple-300 bg-gray-800 hover:bg-purple-900/30 rounded transition-colors disabled:opacity-50"
+                          title="Add to review queue"
+                        >
+                          Review
+                        </button>
+                      )}
                       <button
                         onClick={() => toggleActiveMutation.mutate({ npi: entry.npi, active: !entry.active })}
                         className="px-2 py-1 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded transition-colors"

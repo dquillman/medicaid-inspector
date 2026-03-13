@@ -70,6 +70,7 @@ from routes import evidence as evidence_routes
 from routes import mfcu_referral
 from routes import backup as backup_routes
 from routes import phi_admin
+from routes import billing_codes
 from core.metrics import record_request, get_metrics, get_prometheus_text
 from core.phi_middleware import PHIAccessMiddleware
 from core.phi_logger import load_phi_log_from_disk, log_phi_access, PHI_PATH_PATTERNS
@@ -78,7 +79,7 @@ from core.referral_workflow import load_referrals_from_disk
 from core.notification_store import load_notifications_from_disk
 from core.saved_search_store import load_saved_searches_from_disk
 from core.news_store import load_news_from_disk
-from core.review_store import load_review_from_disk, add_to_review_queue
+from core.review_store import load_review_from_disk
 from core.oig_store import load_oig_from_disk, download_oig_list
 from core.enrollment_store import load_or_fetch_enrollment
 from core.alert_store import load_rules_from_disk
@@ -378,9 +379,6 @@ async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: b
 
         flagged_results = [r for r in results if r["risk_score"] > settings.RISK_THRESHOLD]
         flagged = len(flagged_results)
-        if flagged_results:
-            added = add_to_review_queue(flagged_results)
-            log.info("Added %d new items to review queue", added)
 
         # Background: enrich ALL scanned providers with NPPES name/state/city
         from services.nppes_enricher import enrich_batch_with_nppes
@@ -478,13 +476,6 @@ async def lifespan(app: FastAPI):
         set_prescan_status(0, msg)
         log.info(msg)
 
-        # Backfill review queue from existing cache (catches providers scanned
-        # before the review queue feature existed, and applies new threshold)
-        flagged = [p for p in get_prescanned() if p.get("risk_score", 0) > settings.RISK_THRESHOLD]
-        if flagged:
-            added = add_to_review_queue(flagged)
-            log.info("Backfilled review queue with %d providers from prescan cache", added)
-
         # Enrich any providers that are missing NPPES data (name/state/city)
         # Also re-enrich providers missing enumeration_date (added after initial enrichment)
         missing_nppes = [
@@ -571,6 +562,7 @@ app.include_router(retention_routes.router)
 app.include_router(evidence_routes.router)
 app.include_router(mfcu_referral.router)
 app.include_router(backup_routes.router)
+app.include_router(billing_codes.router)
 app.include_router(phi_admin.router)
 app.add_middleware(PHIAccessMiddleware)
 
@@ -737,12 +729,9 @@ async def rescore_cached_providers():
 
     set_prescanned(rescored)
 
-    # Rebuild review queue with updated scores
-    from core.review_store import add_to_review_queue, get_review_queue, update_review_item
     flagged = [p for p in rescored if p["risk_score"] > settings.RISK_THRESHOLD]
-    added = add_to_review_queue(flagged)
 
-    log.info("Rescore complete: %d providers, %d flagged, %d new review items", len(rescored), len(flagged), added)
+    log.info("Rescore complete: %d providers, %d flagged", len(rescored), len(flagged))
     return {
         "rescored": len(rescored),
         "flagged": len(flagged),
@@ -993,11 +982,6 @@ async def _run_smart_scan(state_filter: Optional[str]):
             # Save results after every batch so progress survives interruptions
             set_prescanned(results)
             set_scan_progress(len(results), n_candidates, state_filter, batch_i + 1)
-
-            # Update review queue incrementally too
-            batch_flagged = [r for r in results[-len(batch):] if r["risk_score"] > settings.RISK_THRESHOLD]
-            if batch_flagged:
-                add_to_review_queue(batch_flagged)
 
             # Enrich this batch with NPPES in the background (name/state/city for providers list)
             from services.nppes_enricher import enrich_batch_with_nppes

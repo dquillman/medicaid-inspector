@@ -80,6 +80,7 @@ def update_entry(
     alert_threshold: Optional[float] = None,
     active: Optional[bool] = None,
     reason: Optional[str] = None,
+    reviewing: Optional[bool] = None,
 ) -> Optional[dict]:
     """Update fields on a watchlist entry. Returns updated entry or None."""
     entry = _watchlist_items.get(npi)
@@ -93,6 +94,8 @@ def update_entry(
         entry["active"] = active
     if reason is not None:
         entry["reason"] = reason
+    if reviewing is not None:
+        entry["reviewing"] = reviewing
     save_watchlist_to_disk()
     return entry
 

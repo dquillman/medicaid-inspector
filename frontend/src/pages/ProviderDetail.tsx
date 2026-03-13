@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
@@ -14,6 +14,23 @@ import SpecialtyBenchmark from '../components/SpecialtyBenchmark'
 import TemporalAnalysisSection from '../components/TemporalAnalysisSection'
 import type { ClusterProvider, OpenPaymentsData, SamExclusion, RelatedProvider, MedicareComparison, LicenseVerification } from '../lib/types'
 
+
+/** Fires once when the element scrolls into the viewport (200px margin). */
+function useInView() {
+  const ref = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(false)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    const obs = new IntersectionObserver(
+      ([e]) => { if (e.isIntersecting) { setVisible(true); obs.disconnect() } },
+      { rootMargin: '200px' },
+    )
+    obs.observe(el)
+    return () => obs.disconnect()
+  }, [])
+  return { ref, visible }
+}
 
 function fmtPct(v: number | null | undefined) {
   if (v == null) return '—'
@@ -168,6 +185,8 @@ export default function ProviderDetail() {
   const { npi } = useParams<{ npi: string }>()
   const queryClient = useQueryClient()
   const [watchlistMsg, setWatchlistMsg] = useState('')
+  const [exportStatus, setExportStatus] = useState<'idle' | 'loading' | 'error'>('idle')
+  const [exportError, setExportError] = useState('')
 
   // TODO: Consider batch /api/providers/{npi}/full-profile endpoint
   // ── Primary query (loads first) ─────────────────────────────────────────
@@ -230,13 +249,6 @@ export default function ProviderDetail() {
     staleTime: 300_000,
   })
 
-  const { data: relatedData } = useQuery({
-    queryKey: ['related-providers', npi],
-    queryFn: () => api.relatedProviders(npi!),
-    enabled: detailReady,
-    staleTime: 300_000,
-  })
-
   const { data: providerNewsData } = useQuery({
     queryKey: ['provider-news', npi],
     queryFn: () => api.providerNews(npi!),
@@ -244,32 +256,43 @@ export default function ProviderDetail() {
     staleTime: 300_000,
   })
 
-  // ── Slow external API queries (fire after detail, cached 10 min) ──────
+  // ── Lazy-loaded sections (only fetch when scrolled into view) ─────────
+  const relatedInView = useInView()
+  const complianceInView = useInView()
+  const medicareInView = useInView()
+
+  const { data: relatedData } = useQuery({
+    queryKey: ['related-providers', npi],
+    queryFn: () => api.relatedProviders(npi!),
+    enabled: detailReady && relatedInView.visible,
+    staleTime: 300_000,
+  })
+
   const { data: openPaymentsData } = useQuery<OpenPaymentsData>({
     queryKey: ['open-payments', npi],
     queryFn: () => api.openPayments(npi!),
-    enabled: detailReady,
+    enabled: detailReady && complianceInView.visible,
     staleTime: 600_000,
   })
 
   const { data: samData } = useQuery<SamExclusion>({
     queryKey: ['sam-exclusion', npi],
     queryFn: () => api.samExclusion(npi!),
-    enabled: detailReady,
-    staleTime: 600_000,
-  })
-
-  const { data: medicareData } = useQuery<MedicareComparison>({
-    queryKey: ['medicare-compare', npi],
-    queryFn: () => api.medicareCompare(npi!),
-    enabled: detailReady,
+    enabled: detailReady && complianceInView.visible,
     staleTime: 600_000,
   })
 
   const { data: licenseData } = useQuery<LicenseVerification>({
     queryKey: ['license', npi],
     queryFn: () => api.providerLicense(npi!),
-    enabled: detailReady,
+    enabled: detailReady && complianceInView.visible,
+    staleTime: 600_000,
+  })
+
+  const { data: medicareData } = useQuery<MedicareComparison>({
+    queryKey: ['medicare-compare', npi],
+    queryFn: () => api.medicareCompare(npi!),
+    enabled: detailReady && medicareInView.visible,
     staleTime: 600_000,
   })
 
@@ -408,19 +431,30 @@ export default function ProviderDetail() {
             </div>
           </div>
           <button
-            onClick={() => window.open(`/api/providers/${npi}/referral-packet`, '_blank')}
-            className="px-4 py-2 bg-red-700 hover:bg-red-600 border border-red-500 hover:border-red-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-red-900/30"
+            onClick={async () => {
+              setExportStatus('loading'); setExportError('')
+              try { await api.referralPacket(npi!); setExportStatus('idle') }
+              catch (e) { setExportStatus('error'); setExportError(e instanceof Error ? e.message : 'Failed') }
+            }}
+            disabled={exportStatus === 'loading'}
+            className="px-4 py-2 bg-red-700 hover:bg-red-600 border border-red-500 hover:border-red-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-red-900/30 disabled:opacity-50"
             title="Generate a comprehensive HTML referral packet for this provider"
           >
-            <span>&#128196;</span> Generate Referral Packet
+            <span>&#128196;</span> {exportStatus === 'loading' ? 'Generating...' : 'Generate Referral Packet'}
           </button>
           <button
-            onClick={() => api.exportProvider(npi!)}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2"
+            onClick={async () => {
+              setExportStatus('loading'); setExportError('')
+              try { await api.exportProvider(npi!); setExportStatus('idle') }
+              catch (e) { setExportStatus('error'); setExportError(e instanceof Error ? e.message : 'Failed') }
+            }}
+            disabled={exportStatus === 'loading'}
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2 disabled:opacity-50"
             title="Download all fraud evidence for this provider as a .tar.gz archive"
           >
-            <span>&#8659;</span> Export Fraud Package
+            <span>&#8659;</span> {exportStatus === 'loading' ? 'Exporting...' : 'Export Fraud Package'}
           </button>
+          {exportError && <p className="text-xs text-red-400">{exportError}</p>}
           {watchlistStatus?.watched ? (
             <button
               onClick={() => removeFromWatchlistMutation.mutate()}
@@ -623,7 +657,7 @@ export default function ProviderDetail() {
       )}
 
       {/* Open Payments + SAM.gov Exclusion Cards */}
-      <div className="grid grid-cols-2 gap-5">
+      <div ref={complianceInView.ref} className="grid grid-cols-2 gap-5">
         {/* CMS Open Payments Card */}
         <div className={`card ${
           openPaymentsData?.total_amount && openPaymentsData.total_amount >= 100_000
@@ -927,6 +961,7 @@ export default function ProviderDetail() {
       </div>
 
       {/* Related Providers Auto-Discovery */}
+      <div ref={relatedInView.ref} />
       {relatedData && relatedData.related_providers.length > 0 && (
         <div className="card border-indigo-800/50">
           <div className="flex items-start justify-between mb-4">
@@ -1039,6 +1074,7 @@ export default function ProviderDetail() {
       <TemporalAnalysisSection npi={npi!} />
 
       {/* Medicare Cross-Reference */}
+      <div ref={medicareInView.ref} />
       <MedicareCrossReference data={medicareData} />
 
       {/* News & Legal Alerts */}
