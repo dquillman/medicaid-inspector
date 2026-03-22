@@ -4,6 +4,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { ReviewItem, ReviewCounts, AuditEntry } from '../lib/types'
 import { fmt } from '../lib/format'
+import EmptyState from '../components/EmptyState'
 
 type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
 
@@ -653,11 +654,11 @@ export default function ReviewQueue() {
         {isLoading ? (
           <div className="p-8 text-center text-gray-500 text-sm">Loading…</div>
         ) : items.length === 0 ? (
-          <div className="p-8 text-center text-gray-500 text-sm">
-            {counts.total === 0
-              ? 'No flagged providers yet — run a scan to populate the queue.'
-              : 'No items match this filter.'}
-          </div>
+          <EmptyState
+            variant="no-results"
+            title="No items in this queue"
+            description="Providers flagged for review will appear here."
+          />
         ) : (
           <table className="w-full text-left">
             <thead>
