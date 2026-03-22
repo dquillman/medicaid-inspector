@@ -31,6 +31,7 @@ import Landing from './pages/Landing'
 import BillingCodeSearch from './pages/BillingCodeSearch'
 import Login from './pages/Login'
 import NotificationBell from './components/NotificationBell'
+import CommandPalette from './components/CommandPalette'
 import KeyboardShortcuts from './components/KeyboardShortcuts'
 import { mutate } from './lib/api'
 
@@ -498,6 +499,8 @@ export default function App() {
             Powered by Medicaid Inspector &middot; Data sourced from CMS/HHS &middot; For authorized use only
           </p>
         </footer>
+
+        <CommandPalette />
         <KeyboardShortcuts />
       </div>
       )}
