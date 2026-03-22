@@ -4,6 +4,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import StateHeatmap from '../components/StateHeatmap'
+import { SkeletonKPI, SkeletonChart } from '../components/Skeleton'
 import type { PrescanStatus } from '../lib/types'
 
 const SIGNAL_LABELS: Record<string, string> = {
@@ -100,70 +101,91 @@ export default function Overview() {
 
       {/* Threat-level KPI cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* Confirmed Fraud — dominant dark red panel */}
-        <div
-          className="bg-red-950 border-2 border-red-700 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
-          style={{ animation: confirmedFraud > 0 ? 'threat-pulse-bg 3s ease-in-out infinite' : undefined }}
-          onClick={() => navigate('/review?status=confirmed_fraud')}
-        >
-          <p className="text-red-500 text-xs font-bold uppercase tracking-widest mb-2">CONFIRMED FRAUD CASES</p>
-          <p className={`text-5xl font-black text-red-400 ${sumLoading ? 'animate-pulse' : ''}`}>
-            {sumLoading ? '...' : confirmedFraud.toLocaleString()}
-          </p>
-          <p className="text-red-700 text-xs mt-2 uppercase tracking-wider">Requires Immediate Action</p>
-        </div>
+        {sumLoading ? (
+          <>
+            <SkeletonKPI />
+            <SkeletonKPI />
+            <SkeletonKPI />
+          </>
+        ) : (
+          <>
+            {/* Confirmed Fraud — dominant dark red panel */}
+            <div
+              className="bg-red-950 border-2 border-red-700 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
+              style={{ animation: confirmedFraud > 0 ? 'threat-pulse-bg 3s ease-in-out infinite' : undefined }}
+              onClick={() => navigate('/review?status=confirmed_fraud')}
+            >
+              <p className="text-red-500 text-xs font-bold uppercase tracking-widest mb-2">CONFIRMED FRAUD CASES</p>
+              <p className="text-5xl font-black text-red-400">
+                {confirmedFraud.toLocaleString()}
+              </p>
+              <p className="text-red-700 text-xs mt-2 uppercase tracking-wider">Requires Immediate Action</p>
+            </div>
 
-        {/* High Risk — alarming */}
-        <div
-          className="bg-red-950/40 border-2 border-red-800/60 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
-          onClick={() => navigate('/providers?risk_min=50')}
-        >
-          <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2">HIGH RISK PROVIDERS</p>
-          <p className={`text-5xl font-black text-red-400 ${sumLoading ? 'animate-pulse' : ''}`}>
-            {sumLoading ? '...' : (summary?.high_risk_providers ?? 0).toLocaleString()}
-          </p>
-          <p className="text-red-800 text-xs mt-2 uppercase tracking-wider">Score &ge; 50</p>
-        </div>
+            {/* High Risk — alarming */}
+            <div
+              className="bg-red-950/40 border-2 border-red-800/60 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
+              onClick={() => navigate('/providers?risk_min=50')}
+            >
+              <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2">HIGH RISK PROVIDERS</p>
+              <p className="text-5xl font-black text-red-400">
+                {(summary?.high_risk_providers ?? 0).toLocaleString()}
+              </p>
+              <p className="text-red-800 text-xs mt-2 uppercase tracking-wider">Score &ge; 50</p>
+            </div>
 
-        {/* Flagged for Review — warning */}
-        <div
-          className="bg-yellow-950/30 border-2 border-yellow-800/50 rounded-xl p-5 text-center cursor-pointer hover:border-yellow-500 transition-colors"
-          onClick={() => navigate('/providers?risk_min=10.1')}
-        >
-          <p className="text-yellow-500 text-xs font-bold uppercase tracking-widest mb-2">FLAGGED FOR REVIEW</p>
-          <p className={`text-4xl font-extrabold text-yellow-400 ${sumLoading ? 'animate-pulse' : ''}`}>
-            {sumLoading ? '...' : (summary?.flagged_providers ?? 0).toLocaleString()}
-          </p>
-          <p className="text-yellow-800 text-xs mt-2 uppercase tracking-wider">Score &gt; 10</p>
-        </div>
+            {/* Flagged for Review — warning */}
+            <div
+              className="bg-yellow-950/30 border-2 border-yellow-800/50 rounded-xl p-5 text-center cursor-pointer hover:border-yellow-500 transition-colors"
+              onClick={() => navigate('/providers?risk_min=10.1')}
+            >
+              <p className="text-yellow-500 text-xs font-bold uppercase tracking-widest mb-2">FLAGGED FOR REVIEW</p>
+              <p className="text-4xl font-extrabold text-yellow-400">
+                {(summary?.flagged_providers ?? 0).toLocaleString()}
+              </p>
+              <p className="text-yellow-800 text-xs mt-2 uppercase tracking-wider">Score &gt; 10</p>
+            </div>
+          </>
+        )}
       </div>
 
       {/* Secondary KPI row — de-emphasized */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-        <div className="card py-3">
-          <p className="text-gray-600 text-xs uppercase tracking-wider">Total Spend</p>
-          <p className={`text-2xl font-bold mt-1 text-blue-400 ${sumLoading ? 'animate-pulse' : ''}`}>
-            {sumLoading ? '...' : summary ? fmt(summary.total_paid) : '---'}
-          </p>
-        </div>
-        <div className="card py-3">
-          <p className="text-gray-600 text-xs uppercase tracking-wider">Providers Scanned</p>
-          <p className={`text-2xl font-bold mt-1 text-purple-400 ${sumLoading ? 'animate-pulse' : ''}`}>
-            {sumLoading ? '...' : summary ? summary.total_providers.toLocaleString() : '---'}
-          </p>
-        </div>
-        <div className="card py-3">
-          <p className="text-gray-600 text-xs uppercase tracking-wider">Total Claims</p>
-          <p className={`text-2xl font-bold mt-1 text-gray-400 ${sumLoading ? 'animate-pulse' : ''}`}>
-            {sumLoading ? '...' : summary ? summary.total_claims.toLocaleString() : '---'}
-          </p>
-        </div>
-        <div className="card py-3">
-          <p className="text-gray-600 text-xs uppercase tracking-wider">Avg Risk Score</p>
-          <p className={`text-2xl font-bold mt-1 text-gray-400 ${sumLoading ? 'animate-pulse' : ''}`}>
-            {sumLoading ? '...' : summary ? summary.avg_risk_score.toFixed(1) : '---'}
-          </p>
-        </div>
+        {sumLoading ? (
+          <>
+            <SkeletonKPI />
+            <SkeletonKPI />
+            <SkeletonKPI />
+            <SkeletonKPI />
+          </>
+        ) : (
+          <>
+            <div className="card py-3">
+              <p className="text-gray-600 text-xs uppercase tracking-wider">Total Spend</p>
+              <p className="text-2xl font-bold mt-1 text-blue-400">
+                {summary ? fmt(summary.total_paid) : '---'}
+              </p>
+            </div>
+            <div className="card py-3">
+              <p className="text-gray-600 text-xs uppercase tracking-wider">Providers Scanned</p>
+              <p className="text-2xl font-bold mt-1 text-purple-400">
+                {summary ? summary.total_providers.toLocaleString() : '---'}
+              </p>
+            </div>
+            <div className="card py-3">
+              <p className="text-gray-600 text-xs uppercase tracking-wider">Total Claims</p>
+              <p className="text-2xl font-bold mt-1 text-gray-400">
+                {summary ? summary.total_claims.toLocaleString() : '---'}
+              </p>
+            </div>
+            <div className="card py-3">
+              <p className="text-gray-600 text-xs uppercase tracking-wider">Avg Risk Score</p>
+              <p className="text-2xl font-bold mt-1 text-gray-400">
+                {summary ? summary.avg_risk_score.toFixed(1) : '---'}
+              </p>
+            </div>
+          </>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -174,9 +196,7 @@ export default function Overview() {
             {heatmap ? (
               <StateHeatmap data={heatmap.by_state} onStateClick={(st) => navigate(`/providers?state=${st}`)} />
             ) : (
-              <div className="h-full flex items-center justify-center text-gray-600 text-sm">
-                Loading map…
-              </div>
+              <SkeletonChart />
             )}
           </div>
           <p className="text-xs text-gray-600 mt-2">Color intensity = flagged provider count. State data from NPPES.</p>
