@@ -1,11 +1,14 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, mutate, get } from '../lib/api'
 import { fmt } from '../lib/format'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 import BulkActionBar from '../components/BulkActionBar'
+import Sparkline from '../components/Sparkline'
+import EmptyState from '../components/EmptyState'
 import { useClickOutside } from '../hooks/useClickOutside'
+import { SkeletonTable } from '../components/Skeleton'
 
 type SortDir = 'asc' | 'desc'
 
@@ -252,6 +255,7 @@ interface ColDef {
   key: string
   label: string
   filterable?: boolean
+  sortable?: boolean
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -277,6 +281,7 @@ const COLUMNS: ColDef[] = [
   { key: 'total_beneficiaries', label: 'Beneficiaries' },
   { key: 'active_months',       label: 'Mo. Active',   filterable: true },
   { key: 'review_status',       label: 'Review' },
+  { key: 'trend',                label: 'Trend',    sortable: false },
 ]
 
 function ColHeader({
@@ -309,6 +314,7 @@ function ColHeader({
   const btnRef = useRef<HTMLButtonElement>(null!)
   const isOpen = openFilter === col.key
   const isSorted = sortBy === col.key
+  const canSort = col.sortable !== false
 
   const stickyClasses = isSticky
     ? 'sticky left-0 z-10 bg-gray-900 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]'
@@ -317,16 +323,20 @@ function ColHeader({
   return (
     <th className={`px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider select-none relative ${stickyClasses}`}>
       <div className="flex items-center gap-1">
-        <button
-          className="flex items-center gap-0.5 hover:text-gray-300 transition-colors"
-          onClick={() => onSort(col.key)}
-        >
-          {col.label}
-          {isSorted
-            ? <span className="text-blue-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>
-            : <span className="text-gray-700 ml-0.5">⇅</span>
-          }
-        </button>
+        {canSort ? (
+          <button
+            className="flex items-center gap-0.5 hover:text-gray-300 transition-colors"
+            onClick={() => onSort(col.key)}
+          >
+            {col.label}
+            {isSorted
+              ? <span className="text-blue-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>
+              : <span className="text-gray-700 ml-0.5">⇅</span>
+            }
+          </button>
+        ) : (
+          <span>{col.label}</span>
+        )}
         {col.filterable && (
           <>
             <button
@@ -485,6 +495,29 @@ export default function ProviderExplorer() {
   const total      = data?.total ?? 0
   const totalPages = total > 0 ? Math.ceil(total / LIMIT) : 1
   const anyFilter  = !!search || hasFilter(filters)
+
+  // Fetch sparkline timeline data for visible providers
+  const trendQueries = useQueries({
+    queries: providers.map(p => ({
+      queryKey: ['sparkline', p.npi],
+      queryFn: () => api.providerTimeline(p.npi),
+      staleTime: 5 * 60 * 1000,
+      enabled: providers.length > 0,
+    }))
+  })
+
+  const trendDataKey = trendQueries.map(q => q.dataUpdatedAt).join(',')
+  const trendData = useMemo(() => {
+    const lookup: Record<string, number[]> = {}
+    providers.forEach((p, i) => {
+      const q = trendQueries[i]
+      if (q?.data?.timeline) {
+        lookup[p.npi] = q.data.timeline.map(r => r.total_paid)
+      }
+    })
+    return lookup
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providers, trendDataKey])
 
   // Keyboard navigation: j/k to move, Enter to open
   useEffect(() => {
@@ -741,8 +774,8 @@ export default function ProviderExplorer() {
           <tbody className="divide-y divide-gray-800">
             {isLoading && (
               <tr>
-                <td colSpan={COLUMNS.length + 2} className="px-4 py-8 text-center text-gray-500">
-                  Loading providers...
+                <td colSpan={COLUMNS.length + 2} className="p-0">
+                  <SkeletonTable rows={10} columns={COLUMNS.length + 2} />
                 </td>
               </tr>
             )}
@@ -821,6 +854,13 @@ export default function ProviderExplorer() {
                       : <span className="text-gray-700 text-xs">--</span>
                     }
                   </td>
+                  <td className="px-3 py-2.5">
+                    {trendData[p.npi] ? (
+                      <Sparkline data={trendData[p.npi]} />
+                    ) : trendQueries[idx]?.isLoading ? (
+                      <div className="w-[80px] h-[24px] bg-gray-800 rounded animate-pulse" />
+                    ) : null}
+                  </td>
                   <td className="px-1 py-2.5 relative w-20">
                     <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
                       <button
@@ -851,8 +891,13 @@ export default function ProviderExplorer() {
             })}
             {!isLoading && providers.length === 0 && !error && (
               <tr>
-                <td colSpan={COLUMNS.length + 2} className="px-4 py-8 text-center text-gray-500">
-                  No results. Try adjusting your filters.
+                <td colSpan={COLUMNS.length + 2}>
+                  <EmptyState
+                    variant="no-results"
+                    title="No providers found"
+                    description="Try adjusting your search or filters."
+                    action={{ label: "Clear all filters", onClick: handleClearAll }}
+                  />
                 </td>
               </tr>
             )}
