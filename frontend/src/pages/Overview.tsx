@@ -1,9 +1,11 @@
+import { useState, useCallback, type DragEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import StateHeatmap from '../components/StateHeatmap'
+import DraggableWidget from '../components/DraggableWidget'
 import type { PrescanStatus } from '../lib/types'
 
 const SIGNAL_LABELS: Record<string, string> = {
@@ -26,8 +28,48 @@ const SIGNAL_LABELS: Record<string, string> = {
   geographic_impossibility: 'Geographic Impossibility',
 }
 
+const WIDGET_STORAGE_KEY = 'mfi_widget_order'
+const DEFAULT_ORDER = ['kpis', 'secondary-kpis', 'chart-grid', 'movers']
+
+function loadWidgetOrder(): string[] {
+  try {
+    const stored = localStorage.getItem(WIDGET_STORAGE_KEY)
+    if (!stored) return DEFAULT_ORDER
+    const parsed = JSON.parse(stored) as unknown
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === DEFAULT_ORDER.length &&
+      DEFAULT_ORDER.every((id) => parsed.includes(id))
+    ) {
+      return parsed as string[]
+    }
+  } catch { /* ignore */ }
+  return DEFAULT_ORDER
+}
+
 export default function Overview() {
   const navigate = useNavigate()
+  const [widgetOrder, setWidgetOrder] = useState<string[]>(loadWidgetOrder)
+
+  const handleDrop = useCallback(
+    (e: DragEvent<HTMLDivElement>, dropIndex: number) => {
+      const dragIndex = parseInt(e.dataTransfer.getData('text/plain'), 10)
+      if (isNaN(dragIndex) || dragIndex === dropIndex) return
+      setWidgetOrder((prev) => {
+        const next = [...prev]
+        const [removed] = next.splice(dragIndex, 1)
+        next.splice(dropIndex, 0, removed)
+        localStorage.setItem(WIDGET_STORAGE_KEY, JSON.stringify(next))
+        return next
+      })
+    },
+    [],
+  )
+
+  const resetLayout = useCallback(() => {
+    setWidgetOrder(DEFAULT_ORDER)
+    localStorage.removeItem(WIDGET_STORAGE_KEY)
+  }, [])
 
   // Adaptive polling: poll fast (5s) during active scan, slow (30s) when idle
   const { data: scanStatus } = useQuery<PrescanStatus>({
@@ -77,30 +119,10 @@ export default function Overview() {
   }))
   const barHeight = Math.max(400, barData.length * 32)
 
-  return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white uppercase tracking-wide flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" className="w-6 h-6 shrink-0">
-            <path d="M32 4 L56 14 L56 34 C56 48 44 58 32 62 C20 58 8 48 8 34 L8 14 Z" fill="#1e3a5f"/>
-            <path d="M32 7 L53 16 L53 34 C53 46.5 42.5 56 32 59.5 C21.5 56 11 46.5 11 34 L11 16 Z" fill="none" stroke="#3b82f6" strokeWidth="1.5"/>
-            <circle cx="28" cy="28" r="11" fill="none" stroke="#60a5fa" strokeWidth="4"/>
-            <circle cx="28" cy="28" r="7" fill="#1e3a5f"/>
-            <text x="28" y="33" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="11" fill="#f59e0b">$</text>
-            <line x1="36" y1="36" x2="45" y2="45" stroke="#60a5fa" strokeWidth="4.5" strokeLinecap="round"/>
-            <circle cx="46" cy="18" r="6" fill="#ef4444"/>
-            <text x="46" y="22" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="9" fill="white">!</text>
-          </svg>
-          Threat Dashboard
-        </h1>
-        <p className="text-gray-500 text-xs mt-1 uppercase tracking-wider">
-          Medicaid Provider-Level Claims Analysis · 2018--2024 · 220M+ Records
-        </p>
-      </div>
-
-      {/* Threat-level KPI cards */}
+  // Widget content map — each widget ID maps to its JSX
+  const widgetContent: Record<string, ReactNode> = {
+    kpis: (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {/* Confirmed Fraud — dominant dark red panel */}
         <div
           className="bg-red-950 border-2 border-red-700 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
           style={{ animation: confirmedFraud > 0 ? 'threat-pulse-bg 3s ease-in-out infinite' : undefined }}
@@ -112,8 +134,6 @@ export default function Overview() {
           </p>
           <p className="text-red-700 text-xs mt-2 uppercase tracking-wider">Requires Immediate Action</p>
         </div>
-
-        {/* High Risk — alarming */}
         <div
           className="bg-red-950/40 border-2 border-red-800/60 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
           onClick={() => navigate('/providers?risk_min=50')}
@@ -124,8 +144,6 @@ export default function Overview() {
           </p>
           <p className="text-red-800 text-xs mt-2 uppercase tracking-wider">Score &ge; 50</p>
         </div>
-
-        {/* Flagged for Review — warning */}
         <div
           className="bg-yellow-950/30 border-2 border-yellow-800/50 rounded-xl p-5 text-center cursor-pointer hover:border-yellow-500 transition-colors"
           onClick={() => navigate('/providers?risk_min=10.1')}
@@ -137,8 +155,9 @@ export default function Overview() {
           <p className="text-yellow-800 text-xs mt-2 uppercase tracking-wider">Score &gt; 10</p>
         </div>
       </div>
+    ),
 
-      {/* Secondary KPI row — de-emphasized */}
+    'secondary-kpis': (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         <div className="card py-3">
           <p className="text-gray-600 text-xs uppercase tracking-wider">Total Spend</p>
@@ -165,9 +184,10 @@ export default function Overview() {
           </p>
         </div>
       </div>
+    ),
 
+    'chart-grid': (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* State heatmap */}
         <div className="card">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Flagged Providers by State</h2>
           <div className="h-[28rem]">
@@ -175,14 +195,12 @@ export default function Overview() {
               <StateHeatmap data={heatmap.by_state} onStateClick={(st) => navigate(`/providers?state=${st}`)} />
             ) : (
               <div className="h-full flex items-center justify-center text-gray-600 text-sm">
-                Loading map…
+                Loading map...
               </div>
             )}
           </div>
           <p className="text-xs text-gray-600 mt-2">Color intensity = flagged provider count. State data from NPPES.</p>
         </div>
-
-        {/* Fraud signals bar chart */}
         <div className="card">
           <h2 className="text-sm font-semibold text-gray-300 mb-3">Top Fraud Signals (provider count)</h2>
           {barData.length > 0 ? (
@@ -203,7 +221,7 @@ export default function Overview() {
                   fill="#ef4444"
                   radius={[0, 4, 4, 0]}
                   cursor="pointer"
-                  onClick={(_data: any, index: number) => {
+                  onClick={(_data: unknown, index: number) => {
                     const sig = barData[index]?.signal
                     if (sig) navigate(`/anomalies?signal=${sig}`)
                   }}
@@ -212,87 +230,132 @@ export default function Overview() {
             </ResponsiveContainer>
           ) : (
             <div className="h-60 flex items-center justify-center text-gray-600 text-sm">
-              Scan some providers to see fraud signals…
+              Scan some providers to see fraud signals...
             </div>
           )}
         </div>
       </div>
+    ),
 
-      {/* Biggest Score Movers */}
-      {moversData && (moversData.rising.length > 0 || moversData.falling.length > 0) && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Rising Risk */}
-          <div className="card border-red-900/40">
-            <h2 className="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
-              <span className="text-lg">{'\u2191'}</span> Rising Risk Scores
-            </h2>
-            {moversData.rising.length > 0 ? (
-              <div className="space-y-2">
-                {moversData.rising.map((m: any) => (
-                  <div
-                    key={m.npi}
-                    className="flex items-center justify-between px-3 py-2 bg-red-950/30 border border-red-900/30 rounded-lg cursor-pointer hover:border-red-700 transition-colors"
-                    onClick={() => navigate(`/providers/${m.npi}`)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-200 truncate">{m.provider_name || m.npi}</p>
-                      <p className="text-xs text-gray-500 font-mono">{m.npi}</p>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0 ml-3">
-                      <span className="text-xs text-gray-500">{m.previous_score.toFixed(0)}</span>
-                      <span className="text-red-400 text-xs font-bold">{'\u2192'}</span>
-                      <span className={`text-sm font-bold ${m.current_score >= 50 ? 'text-red-400' : 'text-yellow-400'}`}>
-                        {m.current_score.toFixed(0)}
-                      </span>
-                      <span className="text-xs font-bold text-red-400 bg-red-950 px-1.5 py-0.5 rounded">
-                        +{m.delta.toFixed(1)}
-                      </span>
-                    </div>
+    movers: moversData && (moversData.rising.length > 0 || moversData.falling.length > 0) ? (
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <div className="card border-red-900/40">
+          <h2 className="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
+            <span className="text-lg">{'\u2191'}</span> Rising Risk Scores
+          </h2>
+          {moversData.rising.length > 0 ? (
+            <div className="space-y-2">
+              {moversData.rising.map((m: Record<string, number | string>) => (
+                <div
+                  key={String(m.npi)}
+                  className="flex items-center justify-between px-3 py-2 bg-red-950/30 border border-red-900/30 rounded-lg cursor-pointer hover:border-red-700 transition-colors"
+                  onClick={() => navigate(`/providers/${m.npi}`)}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-200 truncate">{String(m.provider_name || m.npi)}</p>
+                    <p className="text-xs text-gray-500 font-mono">{String(m.npi)}</p>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-600">No rising scores detected.</p>
-            )}
-          </div>
-
-          {/* Falling Risk */}
-          <div className="card border-green-900/40">
-            <h2 className="text-sm font-semibold text-green-400 mb-3 flex items-center gap-2">
-              <span className="text-lg">{'\u2193'}</span> Falling Risk Scores
-            </h2>
-            {moversData.falling.length > 0 ? (
-              <div className="space-y-2">
-                {moversData.falling.map((m: any) => (
-                  <div
-                    key={m.npi}
-                    className="flex items-center justify-between px-3 py-2 bg-green-950/30 border border-green-900/30 rounded-lg cursor-pointer hover:border-green-700 transition-colors"
-                    onClick={() => navigate(`/providers/${m.npi}`)}
-                  >
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm text-gray-200 truncate">{m.provider_name || m.npi}</p>
-                      <p className="text-xs text-gray-500 font-mono">{m.npi}</p>
-                    </div>
-                    <div className="flex items-center gap-3 shrink-0 ml-3">
-                      <span className="text-xs text-gray-500">{m.previous_score.toFixed(0)}</span>
-                      <span className="text-green-400 text-xs font-bold">{'\u2192'}</span>
-                      <span className="text-sm font-bold text-green-400">
-                        {m.current_score.toFixed(0)}
-                      </span>
-                      <span className="text-xs font-bold text-green-400 bg-green-950 px-1.5 py-0.5 rounded">
-                        {m.delta.toFixed(1)}
-                      </span>
-                    </div>
+                  <div className="flex items-center gap-3 shrink-0 ml-3">
+                    <span className="text-xs text-gray-500">{Number(m.previous_score).toFixed(0)}</span>
+                    <span className="text-red-400 text-xs font-bold">{'\u2192'}</span>
+                    <span className={`text-sm font-bold ${Number(m.current_score) >= 50 ? 'text-red-400' : 'text-yellow-400'}`}>
+                      {Number(m.current_score).toFixed(0)}
+                    </span>
+                    <span className="text-xs font-bold text-red-400 bg-red-950 px-1.5 py-0.5 rounded">
+                      +{Number(m.delta).toFixed(1)}
+                    </span>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-600">No falling scores detected.</p>
-            )}
-          </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-600">No rising scores detected.</p>
+          )}
         </div>
-      )}
+        <div className="card border-green-900/40">
+          <h2 className="text-sm font-semibold text-green-400 mb-3 flex items-center gap-2">
+            <span className="text-lg">{'\u2193'}</span> Falling Risk Scores
+          </h2>
+          {moversData.falling.length > 0 ? (
+            <div className="space-y-2">
+              {moversData.falling.map((m: Record<string, number | string>) => (
+                <div
+                  key={String(m.npi)}
+                  className="flex items-center justify-between px-3 py-2 bg-green-950/30 border border-green-900/30 rounded-lg cursor-pointer hover:border-green-700 transition-colors"
+                  onClick={() => navigate(`/providers/${m.npi}`)}
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-gray-200 truncate">{String(m.provider_name || m.npi)}</p>
+                    <p className="text-xs text-gray-500 font-mono">{String(m.npi)}</p>
+                  </div>
+                  <div className="flex items-center gap-3 shrink-0 ml-3">
+                    <span className="text-xs text-gray-500">{Number(m.previous_score).toFixed(0)}</span>
+                    <span className="text-green-400 text-xs font-bold">{'\u2192'}</span>
+                    <span className="text-sm font-bold text-green-400">
+                      {Number(m.current_score).toFixed(0)}
+                    </span>
+                    <span className="text-xs font-bold text-green-400 bg-green-950 px-1.5 py-0.5 rounded">
+                      {Number(m.delta).toFixed(1)}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-gray-600">No falling scores detected.</p>
+          )}
+        </div>
+      </div>
+    ) : null,
+  }
 
+  const isDefaultOrder = widgetOrder.every((id, i) => id === DEFAULT_ORDER[i])
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-white uppercase tracking-wide flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" className="w-6 h-6 shrink-0">
+              <path d="M32 4 L56 14 L56 34 C56 48 44 58 32 62 C20 58 8 48 8 34 L8 14 Z" fill="#1e3a5f"/>
+              <path d="M32 7 L53 16 L53 34 C53 46.5 42.5 56 32 59.5 C21.5 56 11 46.5 11 34 L11 16 Z" fill="none" stroke="#3b82f6" strokeWidth="1.5"/>
+              <circle cx="28" cy="28" r="11" fill="none" stroke="#60a5fa" strokeWidth="4"/>
+              <circle cx="28" cy="28" r="7" fill="#1e3a5f"/>
+              <text x="28" y="33" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="11" fill="#f59e0b">$</text>
+              <line x1="36" y1="36" x2="45" y2="45" stroke="#60a5fa" strokeWidth="4.5" strokeLinecap="round"/>
+              <circle cx="46" cy="18" r="6" fill="#ef4444"/>
+              <text x="46" y="22" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="9" fill="white">!</text>
+            </svg>
+            Threat Dashboard
+          </h1>
+          <p className="text-gray-500 text-xs mt-1 uppercase tracking-wider">
+            Medicaid Provider-Level Claims Analysis · 2018--2024 · 220M+ Records
+          </p>
+        </div>
+        {!isDefaultOrder && (
+          <button
+            onClick={resetLayout}
+            className="btn-ghost text-xs text-gray-500 hover:text-gray-300"
+          >
+            Reset Layout
+          </button>
+        )}
+      </div>
+
+      {widgetOrder.map((id, i) => {
+        const content = widgetContent[id]
+        if (!content) return null
+        return (
+          <DraggableWidget
+            key={id}
+            id={id}
+            index={i}
+            onDrop={handleDrop}
+          >
+            {content}
+          </DraggableWidget>
+        )
+      })}
     </div>
   )
 }
