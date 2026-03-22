@@ -28,6 +28,7 @@ import BeneficiaryFraud from './pages/BeneficiaryFraud'
 import PharmacyDME from './pages/PharmacyDME'
 import UserManagement from './pages/UserManagement'
 import Landing from './pages/Landing'
+import Breadcrumbs from './components/Breadcrumbs'
 import BillingCodeSearch from './pages/BillingCodeSearch'
 import Login from './pages/Login'
 import NotificationBell from './components/NotificationBell'
@@ -457,6 +458,9 @@ export default function App() {
             </div>
           </div>
         )}
+
+        {/* Breadcrumb navigation */}
+        <Breadcrumbs />
 
         {/* Page content */}
         <main className="flex-1 p-4 md:p-6" role="main">
