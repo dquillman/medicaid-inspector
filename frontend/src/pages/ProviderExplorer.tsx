@@ -4,6 +4,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, mutate, get } from '../lib/api'
 import { fmt } from '../lib/format'
 import RiskScoreBadge from '../components/RiskScoreBadge'
+import EmptyState from '../components/EmptyState'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { SkeletonTable } from '../components/Skeleton'
 
@@ -714,8 +715,13 @@ export default function ProviderExplorer() {
             })}
             {!isLoading && providers.length === 0 && !error && (
               <tr>
-                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-gray-500">
-                  No results. Try adjusting your filters.
+                <td colSpan={COLUMNS.length}>
+                  <EmptyState
+                    variant="no-results"
+                    title="No providers found"
+                    description="Try adjusting your search or filters."
+                    action={{ label: "Clear all filters", onClick: handleClearAll }}
+                  />
                 </td>
               </tr>
             )}
