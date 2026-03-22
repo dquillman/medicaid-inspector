@@ -5,6 +5,7 @@ import { api, mutate, get } from '../lib/api'
 import { fmt } from '../lib/format'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 import { useClickOutside } from '../hooks/useClickOutside'
+import { SkeletonTable } from '../components/Skeleton'
 
 type SortDir = 'asc' | 'desc'
 
@@ -641,8 +642,8 @@ export default function ProviderExplorer() {
           <tbody className="divide-y divide-gray-800">
             {isLoading && (
               <tr>
-                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-gray-500">
-                  Loading providers…
+                <td colSpan={COLUMNS.length} className="p-0">
+                  <SkeletonTable rows={10} columns={COLUMNS.length} />
                 </td>
               </tr>
             )}
