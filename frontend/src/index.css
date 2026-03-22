@@ -135,6 +135,16 @@ button, a, input, select, textarea, .card, tr {
   }
 }
 
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.animate-shimmer {
+  background: linear-gradient(90deg, rgb(31,41,55) 25%, rgb(55,65,81) 50%, rgb(31,41,55) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+}
+
 @keyframes threat-pulse-bg {
   0%, 100% {
     opacity: 1;

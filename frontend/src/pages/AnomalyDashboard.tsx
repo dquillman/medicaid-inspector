@@ -3,7 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import RiskScoreBadge from '../components/RiskScoreBadge'
+import EmptyState from '../components/EmptyState'
 import { fmt } from '../lib/format'
+import { SkeletonTable } from '../components/Skeleton'
 
 const SIGNALS = [
   { key: '',                          label: 'All' },
@@ -126,8 +128,8 @@ export default function AnomalyDashboard() {
           <tbody className="divide-y divide-gray-800">
             {isLoading && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
-                  Loading from prescan cache…
+                <td colSpan={6} className="p-0">
+                  <SkeletonTable rows={8} columns={6} />
                 </td>
               </tr>
             )}
@@ -155,8 +157,12 @@ export default function AnomalyDashboard() {
             ))}
             {!isLoading && anomalies.length === 0 && (
               <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-gray-500">
-                  No anomalies found. Prescan may still be running — check back in a minute.
+                <td colSpan={6}>
+                  <EmptyState
+                    variant="no-data"
+                    title="No anomalies detected"
+                    description="Run a scan to detect anomalies in provider billing patterns."
+                  />
                 </td>
               </tr>
             )}
