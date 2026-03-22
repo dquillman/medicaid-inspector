@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, mutate, get } from '../lib/api'
 import { fmt } from '../lib/format'
 import RiskScoreBadge from '../components/RiskScoreBadge'
+import Sparkline from '../components/Sparkline'
 import { useClickOutside } from '../hooks/useClickOutside'
 
 type SortDir = 'asc' | 'desc'
@@ -251,6 +252,7 @@ interface ColDef {
   key: string
   label: string
   filterable?: boolean
+  sortable?: boolean
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -276,6 +278,7 @@ const COLUMNS: ColDef[] = [
   { key: 'total_beneficiaries', label: 'Beneficiaries' },
   { key: 'active_months',       label: 'Mo. Active',   filterable: true },
   { key: 'review_status',       label: 'Review' },
+  { key: 'trend',                label: 'Trend',    sortable: false },
 ]
 
 function ColHeader({
@@ -304,20 +307,25 @@ function ColHeader({
   const btnRef = useRef<HTMLButtonElement>(null!)
   const isOpen = openFilter === col.key
   const isSorted = sortBy === col.key
+  const canSort = col.sortable !== false
 
   return (
     <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider select-none">
       <div className="flex items-center gap-1">
-        <button
-          className="flex items-center gap-0.5 hover:text-gray-300 transition-colors"
-          onClick={() => onSort(col.key)}
-        >
-          {col.label}
-          {isSorted
-            ? <span className="text-blue-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>
-            : <span className="text-gray-700 ml-0.5">⇅</span>
-          }
-        </button>
+        {canSort ? (
+          <button
+            className="flex items-center gap-0.5 hover:text-gray-300 transition-colors"
+            onClick={() => onSort(col.key)}
+          >
+            {col.label}
+            {isSorted
+              ? <span className="text-blue-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>
+              : <span className="text-gray-700 ml-0.5">⇅</span>
+            }
+          </button>
+        ) : (
+          <span>{col.label}</span>
+        )}
         {col.filterable && (
           <>
             <button
@@ -441,6 +449,29 @@ export default function ProviderExplorer() {
   const total      = data?.total ?? 0
   const totalPages = total > 0 ? Math.ceil(total / LIMIT) : 1
   const anyFilter  = !!search || hasFilter(filters)
+
+  // Fetch sparkline timeline data for visible providers
+  const trendQueries = useQueries({
+    queries: providers.map(p => ({
+      queryKey: ['sparkline', p.npi],
+      queryFn: () => api.providerTimeline(p.npi),
+      staleTime: 5 * 60 * 1000,
+      enabled: providers.length > 0,
+    }))
+  })
+
+  const trendDataKey = trendQueries.map(q => q.dataUpdatedAt).join(',')
+  const trendData = useMemo(() => {
+    const lookup: Record<string, number[]> = {}
+    providers.forEach((p, i) => {
+      const q = trendQueries[i]
+      if (q?.data?.timeline) {
+        lookup[p.npi] = q.data.timeline.map(r => r.total_paid)
+      }
+    })
+    return lookup
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providers, trendDataKey])
 
   // Keyboard navigation: j/k to move, Enter to open
   useEffect(() => {
@@ -707,6 +738,13 @@ export default function ProviderExplorer() {
                         </span>
                       : <span className="text-gray-700 text-xs">—</span>
                     }
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {trendData[p.npi] ? (
+                      <Sparkline data={trendData[p.npi]} />
+                    ) : trendQueries[idx]?.isLoading ? (
+                      <div className="w-[80px] h-[24px] bg-gray-800 rounded animate-pulse" />
+                    ) : null}
                   </td>
                 </tr>
               )
