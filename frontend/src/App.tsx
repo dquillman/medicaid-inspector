@@ -32,6 +32,7 @@ import BillingCodeSearch from './pages/BillingCodeSearch'
 import Login from './pages/Login'
 import NotificationBell from './components/NotificationBell'
 import CommandPalette from './components/CommandPalette'
+import KeyboardShortcuts from './components/KeyboardShortcuts'
 import { mutate } from './lib/api'
 
 const NAV = [
@@ -500,6 +501,7 @@ export default function App() {
         </footer>
 
         <CommandPalette />
+        <KeyboardShortcuts />
       </div>
       )}
     </BrowserRouter>
