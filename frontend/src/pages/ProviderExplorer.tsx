@@ -1,10 +1,14 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueries } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, mutate, get } from '../lib/api'
 import { fmt } from '../lib/format'
 import RiskScoreBadge from '../components/RiskScoreBadge'
+import BulkActionBar from '../components/BulkActionBar'
+import Sparkline from '../components/Sparkline'
+import EmptyState from '../components/EmptyState'
 import { useClickOutside } from '../hooks/useClickOutside'
+import { SkeletonTable } from '../components/Skeleton'
 
 type SortDir = 'asc' | 'desc'
 
@@ -251,6 +255,7 @@ interface ColDef {
   key: string
   label: string
   filterable?: boolean
+  sortable?: boolean
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -276,6 +281,7 @@ const COLUMNS: ColDef[] = [
   { key: 'total_beneficiaries', label: 'Beneficiaries' },
   { key: 'active_months',       label: 'Mo. Active',   filterable: true },
   { key: 'review_status',       label: 'Review' },
+  { key: 'trend',                label: 'Trend',    sortable: false },
 ]
 
 function ColHeader({
@@ -289,6 +295,8 @@ function ColHeader({
   filters,
   onFiltersChange,
   facets,
+  isSticky,
+  onResizeStart,
 }: {
   col: ColDef
   sortBy: string
@@ -300,24 +308,35 @@ function ColHeader({
   filters: ColFilters
   onFiltersChange: (f: ColFilters) => void
   facets: any
+  isSticky?: boolean
+  onResizeStart: (e: React.MouseEvent, colKey: string) => void
 }) {
   const btnRef = useRef<HTMLButtonElement>(null!)
   const isOpen = openFilter === col.key
   const isSorted = sortBy === col.key
+  const canSort = col.sortable !== false
+
+  const stickyClasses = isSticky
+    ? 'sticky left-0 z-10 bg-gray-900 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]'
+    : ''
 
   return (
-    <th className="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider select-none">
+    <th className={`px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider select-none relative ${stickyClasses}`}>
       <div className="flex items-center gap-1">
-        <button
-          className="flex items-center gap-0.5 hover:text-gray-300 transition-colors"
-          onClick={() => onSort(col.key)}
-        >
-          {col.label}
-          {isSorted
-            ? <span className="text-blue-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>
-            : <span className="text-gray-700 ml-0.5">⇅</span>
-          }
-        </button>
+        {canSort ? (
+          <button
+            className="flex items-center gap-0.5 hover:text-gray-300 transition-colors"
+            onClick={() => onSort(col.key)}
+          >
+            {col.label}
+            {isSorted
+              ? <span className="text-blue-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>
+              : <span className="text-gray-700 ml-0.5">⇅</span>
+            }
+          </button>
+        ) : (
+          <span>{col.label}</span>
+        )}
         {col.filterable && (
           <>
             <button
@@ -340,6 +359,10 @@ function ColHeader({
           </>
         )}
       </div>
+      <div
+        className="absolute right-0 top-0 w-1 h-full cursor-col-resize hover:bg-blue-500/50"
+        onMouseDown={e => onResizeStart(e, col.key)}
+      />
     </th>
   )
 }
@@ -365,6 +388,37 @@ export default function ProviderExplorer() {
   })
   const [openFilter, setOpenFilter] = useState<string | null>(null)
   const [focusedRow, setFocusedRow] = useState<number>(-1)
+  const [selectedNpis, setSelectedNpis] = useState<Set<string>>(new Set())
+  const [colWidths, setColWidths] = useState<Record<string, number>>({})
+  const resizeRef = useRef<{ colKey: string; startX: number; startWidth: number } | null>(null)
+
+  const handleResizeStart = useCallback((e: React.MouseEvent, colKey: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const th = (e.target as HTMLElement).parentElement
+    const startWidth = th ? th.getBoundingClientRect().width : 120
+    resizeRef.current = { colKey, startX: e.clientX, startWidth }
+
+    const handleMouseMove = (ev: MouseEvent) => {
+      if (!resizeRef.current) return
+      const diff = ev.clientX - resizeRef.current.startX
+      const newWidth = Math.max(60, resizeRef.current.startWidth + diff)
+      setColWidths(prev => ({ ...prev, [resizeRef.current!.colKey]: newWidth }))
+    }
+
+    const handleMouseUp = () => {
+      resizeRef.current = null
+      document.removeEventListener('mousemove', handleMouseMove)
+      document.removeEventListener('mouseup', handleMouseUp)
+    }
+
+    document.addEventListener('mousemove', handleMouseMove)
+    document.addEventListener('mouseup', handleMouseUp)
+  }, [])
+
+  useEffect(() => {
+    setSelectedNpis(new Set())
+  }, [page, filters, search])
 
   // Clear URL params after consuming them so they don't stick on navigation
   useEffect(() => {
@@ -442,6 +496,29 @@ export default function ProviderExplorer() {
   const totalPages = total > 0 ? Math.ceil(total / LIMIT) : 1
   const anyFilter  = !!search || hasFilter(filters)
 
+  // Fetch sparkline timeline data for visible providers
+  const trendQueries = useQueries({
+    queries: providers.map(p => ({
+      queryKey: ['sparkline', p.npi],
+      queryFn: () => api.providerTimeline(p.npi),
+      staleTime: 5 * 60 * 1000,
+      enabled: providers.length > 0,
+    }))
+  })
+
+  const trendDataKey = trendQueries.map(q => q.dataUpdatedAt).join(',')
+  const trendData = useMemo(() => {
+    const lookup: Record<string, number[]> = {}
+    providers.forEach((p, i) => {
+      const q = trendQueries[i]
+      if (q?.data?.timeline) {
+        lookup[p.npi] = q.data.timeline.map(r => r.total_paid)
+      }
+    })
+    return lookup
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providers, trendDataKey])
+
   // Keyboard navigation: j/k to move, Enter to open
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -460,6 +537,42 @@ export default function ProviderExplorer() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [providers, focusedRow, navigate])
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedNpis(prev => {
+      const allOnPage = providers.map(p => p.npi)
+      const allSelected = allOnPage.every(npi => prev.has(npi))
+      if (allSelected) {
+        return new Set()
+      }
+      return new Set(allOnPage)
+    })
+  }, [providers])
+
+  const toggleSelectRow = useCallback((npi: string) => {
+    setSelectedNpis(prev => {
+      const next = new Set(prev)
+      if (next.has(npi)) {
+        next.delete(npi)
+      } else {
+        next.add(npi)
+      }
+      return next
+    })
+  }, [])
+
+  const handleBulkAddToReview = useCallback(async () => {
+    await Promise.all(
+      Array.from(selectedNpis).map(npi =>
+        mutate<{ ok: boolean }>('POST', '/review-queue', { npi, status: 'pending' }).catch(() => {})
+      )
+    )
+    setSelectedNpis(new Set())
+  }, [selectedNpis])
+
+  const handleAddSingleToReview = useCallback(async (npi: string) => {
+    await mutate<{ ok: boolean }>('POST', '/review-queue', { npi, status: 'pending' }).catch(() => {})
+  }, [])
 
   // ── CSV export ────────────────────────────────────────────────────────────
   const handleExportCSV = () => {
@@ -619,8 +732,25 @@ export default function ProviderExplorer() {
       {/* Table */}
       <div className="card p-0 overflow-x-auto">
         <table className="w-full text-sm whitespace-nowrap">
+          <colgroup>
+            <col style={{ width: 40 }} />
+            {COLUMNS.map(col => (
+              <col key={col.key} style={colWidths[col.key] ? { width: colWidths[col.key] } : undefined} />
+            ))}
+            <col style={{ width: 80 }} />
+          </colgroup>
           <thead>
             <tr className="border-b border-gray-800 bg-gray-900/80">
+              <th className="px-3 py-3 text-center w-10">
+                <input
+                  type="checkbox"
+                  className="accent-blue-500"
+                  checked={providers.length > 0 && providers.every(p => selectedNpis.has(p.npi))}
+                  onChange={toggleSelectAll}
+                  onClick={e => e.stopPropagation()}
+                  aria-label="Select all providers on this page"
+                />
+              </th>
               {COLUMNS.map(col => (
                 <ColHeader
                   key={col.key}
@@ -634,21 +764,24 @@ export default function ProviderExplorer() {
                   filters={filters}
                   onFiltersChange={handleFiltersChange}
                   facets={facets}
+                  isSticky={col.key === 'npi'}
+                  onResizeStart={handleResizeStart}
                 />
               ))}
+              <th className="px-3 py-3 w-20" />
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-800">
             {isLoading && (
               <tr>
-                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-gray-500">
-                  Loading providers…
+                <td colSpan={COLUMNS.length + 2} className="p-0">
+                  <SkeletonTable rows={10} columns={COLUMNS.length + 2} />
                 </td>
               </tr>
             )}
             {error && (
               <tr>
-                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-red-400">
+                <td colSpan={COLUMNS.length + 2} className="px-4 py-8 text-center text-red-400">
                   {String(error)}
                 </td>
               </tr>
@@ -660,41 +793,54 @@ export default function ProviderExplorer() {
               const isFocused = focusedRow === idx
               const reviewStatus = (p as any).review_status as string | undefined
               const isHighRisk = p.risk_score >= 50
+              const isSelected = selectedNpis.has(p.npi)
               return (
                 <tr
                   key={p.npi}
-                  className={`cursor-pointer transition-colors ${
-                    isFocused
-                      ? 'bg-blue-900/30 outline outline-1 outline-blue-600'
-                      : isHighRisk
-                        ? 'bg-red-950/30 hover:bg-red-950/50'
-                        : idx % 2 === 1
-                          ? 'bg-gray-900/30 hover:bg-gray-800/50'
-                          : 'hover:bg-gray-800/50'
+                  className={`cursor-pointer transition-colors group relative ${
+                    isSelected
+                      ? 'bg-blue-900/20'
+                      : isFocused
+                        ? 'bg-blue-900/30 outline outline-1 outline-blue-600'
+                        : isHighRisk
+                          ? 'bg-red-950/30 hover:bg-red-950/50'
+                          : idx % 2 === 1
+                            ? 'bg-gray-900/30 hover:bg-gray-800/50'
+                            : 'hover:bg-gray-800/50'
                   }`}
                   onClick={() => navigate(`/providers/${p.npi}`)}
                   onMouseEnter={() => setFocusedRow(idx)}
                 >
-                  <td className="px-3 py-2.5 font-mono-data text-blue-400 text-xs">{p.npi}</td>
+                  <td className="px-3 py-2.5 text-center w-10">
+                    <input
+                      type="checkbox"
+                      className="accent-blue-500"
+                      checked={isSelected}
+                      onChange={() => toggleSelectRow(p.npi)}
+                      onClick={e => e.stopPropagation()}
+                      aria-label={`Select provider ${p.npi}`}
+                    />
+                  </td>
+                  <td className="px-3 py-2.5 font-mono-data text-blue-400 text-xs sticky left-0 z-10 bg-gray-900 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">{p.npi}</td>
                   <td className="px-3 py-2.5 text-gray-300 max-w-[200px] truncate" title={name}>
-                    {name || <span className="text-gray-600 italic">—</span>}
+                    {name || <span className="text-gray-600 italic">--</span>}
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     {(p as any).oig_excluded
                       ? <span className="text-xs px-1.5 py-0.5 rounded font-bold bg-red-900/60 text-red-300 border border-red-700" title={(p as any).oig_detail?.excl_type || 'OIG Excluded'}>EXCLUDED</span>
-                      : <span className="text-gray-700 text-xs">—</span>
+                      : <span className="text-gray-700 text-xs">--</span>
                     }
                   </td>
                   <td className="px-3 py-2.5"><RiskScoreBadge score={p.risk_score} size="sm" /></td>
                   <td className="px-3 py-2.5">
                     {p.flags.length > 0
                       ? <span className="text-red-400 text-xs font-medium">{'\u26A0'} {p.flags.length} flag{p.flags.length !== 1 ? 's' : ''}</span>
-                      : <span className="text-gray-600 text-xs">—</span>
+                      : <span className="text-gray-600 text-xs">--</span>
                     }
                   </td>
-                  <td className="px-3 py-2.5 text-gray-400">{stateVal || <span className="text-gray-600">—</span>}</td>
+                  <td className="px-3 py-2.5 text-gray-400">{stateVal || <span className="text-gray-600">--</span>}</td>
                   <td className="px-3 py-2.5 text-gray-400 max-w-[140px] truncate" title={cityVal}>
-                    {cityVal || <span className="text-gray-600">—</span>}
+                    {cityVal || <span className="text-gray-600">--</span>}
                   </td>
                   <td className="px-3 py-2.5 font-semibold">{fmt(p.total_paid)}</td>
                   <td className="px-3 py-2.5 text-gray-400">{p.total_claims.toLocaleString()}</td>
@@ -705,16 +851,53 @@ export default function ProviderExplorer() {
                       ? <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_COLORS[reviewStatus] ?? 'text-gray-400'}`}>
                           {STATUS_LABELS[reviewStatus] ?? reviewStatus}
                         </span>
-                      : <span className="text-gray-700 text-xs">—</span>
+                      : <span className="text-gray-700 text-xs">--</span>
                     }
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {trendData[p.npi] ? (
+                      <Sparkline data={trendData[p.npi]} />
+                    ) : trendQueries[idx]?.isLoading ? (
+                      <div className="w-[80px] h-[24px] bg-gray-800 rounded animate-pulse" />
+                    ) : null}
+                  </td>
+                  <td className="px-1 py-2.5 relative w-20">
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+                      <button
+                        onClick={e => { e.stopPropagation(); navigate(`/providers/${p.npi}`) }}
+                        className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white"
+                        title="View details"
+                        aria-label={`View provider ${p.npi}`}
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                        </svg>
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); handleAddSingleToReview(p.npi) }}
+                        className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-yellow-400"
+                        title="Add to review queue"
+                        aria-label={`Flag provider ${p.npi}`}
+                      >
+                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2z" />
+                        </svg>
+                      </button>
+                    </div>
                   </td>
                 </tr>
               )
             })}
             {!isLoading && providers.length === 0 && !error && (
               <tr>
-                <td colSpan={COLUMNS.length} className="px-4 py-8 text-center text-gray-500">
-                  No results. Try adjusting your filters.
+                <td colSpan={COLUMNS.length + 2}>
+                  <EmptyState
+                    variant="no-results"
+                    title="No providers found"
+                    description="Try adjusting your search or filters."
+                    action={{ label: "Clear all filters", onClick: handleClearAll }}
+                  />
                 </td>
               </tr>
             )}
@@ -747,6 +930,14 @@ export default function ProviderExplorer() {
           </button>
         </div>
       </div>
+
+      {/* Bulk action bar */}
+      <BulkActionBar
+        selectedNpis={selectedNpis}
+        providers={providers}
+        onClearSelection={() => setSelectedNpis(new Set())}
+        onAddToReviewQueue={handleBulkAddToReview}
+      />
     </div>
   )
 }
