@@ -20,39 +20,54 @@
 
 @layer base {
   body {
-    @apply bg-gray-950 text-gray-100 font-sans;
+    @apply bg-gray-50 text-gray-900 font-sans;
+  }
+  .dark body {
     background: linear-gradient(180deg, #030712 0%, #0a0f1a 50%, #060b14 100%);
     background-attachment: fixed;
+    color: #f3f4f6;
   }
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
   ::-webkit-scrollbar-track {
+    background: #f1f5f9;
+  }
+  .dark ::-webkit-scrollbar-track {
     background: #0a0a0f;
   }
   ::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 3px;
+  }
+  .dark ::-webkit-scrollbar-thumb {
     background: #1e293b;
     border-radius: 3px;
   }
   ::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8;
+  }
+  .dark ::-webkit-scrollbar-thumb:hover {
     background: #334155;
   }
 }
 
 @layer components {
   .card {
-    @apply bg-gray-900 border border-gray-800 rounded-xl p-5;
+    @apply bg-white border border-gray-200 rounded-xl p-5 dark:bg-gray-900 dark:border-gray-800;
   }
   .btn-primary {
     @apply bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors;
   }
   .btn-ghost {
-    @apply text-gray-400 hover:text-gray-100 hover:bg-gray-800 px-3 py-1.5 rounded-lg text-sm transition-colors;
+    @apply text-gray-600 hover:text-gray-900 hover:bg-gray-100 px-3 py-1.5 rounded-lg text-sm transition-colors
+           dark:text-gray-400 dark:hover:text-gray-100 dark:hover:bg-gray-800;
   }
   .input {
-    @apply bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-100
-           placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent;
+    @apply bg-white border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900
+           placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-transparent
+           dark:bg-gray-800 dark:border-gray-700 dark:text-gray-100 dark:placeholder-gray-500;
   }
   .badge-high {
     @apply bg-red-900/60 text-red-300 border border-red-700 text-xs px-2 py-0.5 rounded-full;
@@ -82,7 +97,7 @@
     letter-spacing: 0.05em;
   }
 
-  /* Confirmed fraud row — red left border */
+  /* Confirmed fraud row -- red left border */
   .row-fraud {
     border-left: 4px solid #dc2626;
   }
@@ -133,6 +148,16 @@ button, a, input, select, textarea, .card, tr {
   50% {
     box-shadow: 0 0 8px 2px rgba(239, 68, 68, 0.3);
   }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.animate-shimmer {
+  background: linear-gradient(90deg, rgb(31,41,55) 25%, rgb(55,65,81) 50%, rgb(31,41,55) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
 }
 
 @keyframes threat-pulse-bg {

@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import type { WatchlistEntry } from '../lib/types'
 import { fmt } from '../lib/format'
+import EmptyState from '../components/EmptyState'
 
 function riskColor(score: number | null) {
   if (score == null) return 'text-gray-500'
@@ -247,10 +248,12 @@ export default function Watchlist() {
       {isLoading ? (
         <div className="flex items-center justify-center h-40 text-gray-500">Loading watchlist...</div>
       ) : filtered.length === 0 ? (
-        <div className="card text-center py-12 text-gray-500">
-          {items.length === 0
-            ? 'No providers on watchlist yet. Click "Add Provider" to get started.'
-            : 'No providers match the current filter.'}
+        <div className="card">
+          <EmptyState
+            variant="no-providers"
+            title="Your watchlist is empty"
+            description="Add providers to your watchlist to monitor their risk scores."
+          />
         </div>
       ) : (
         <div className="card p-0 overflow-x-auto">
