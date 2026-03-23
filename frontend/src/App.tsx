@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useClickOutside } from './hooks/useClickOutside'
+import Sidebar, { useSidebarCollapsed } from './components/Sidebar'
 import PageTransition from './components/PageTransition'
 import Overview from './pages/Overview'
 import ProviderExplorer from './pages/ProviderExplorer'
@@ -39,41 +40,6 @@ import KeyboardShortcuts from './components/KeyboardShortcuts'
 import { mutate } from './lib/api'
 import { useTheme } from './lib/theme'
 
-const NAV = [
-  { to: '/',           label: 'Overview'      },
-  { to: '/providers',  label: 'Providers'     },
-  { to: '/anomalies',  label: 'Anomalies'     },
-  { to: '/network',    label: 'Network'       },
-  { to: '/review',     label: 'Review Queue'  },
-  { to: '/watchlist',  label: 'Watchlist'     },
-  { to: '/geographic', label: 'Geographic'    },
-]
-
-const ANALYTICS_NAV = [
-  { to: '/rings',              label: 'Fraud Rings'       },
-  { to: '/hotspots',           label: 'Fraud Hotspots'    },
-  { to: '/billing-codes',       label: 'Billing Codes'     },
-  { to: '/claim-patterns',     label: 'Claim Patterns'    },
-  { to: '/beneficiary-fraud',  label: 'Beneficiary Fraud' },
-  { to: '/pharmacy-dme',       label: 'Pharmacy & DME'    },
-  { to: '/news',               label: 'News & Legal'      },
-  { to: '/demographics',       label: 'Demographics'      },
-  { to: '/trends',             label: 'Trends'            },
-  { to: '/utilization',        label: 'Utilization'       },
-  { to: '/population',         label: 'Population'        },
-  { to: '/density',            label: 'Density Map'       },
-]
-
-const ADMIN_NAV = [
-  { to: '/admin/scan',    label: 'Scan & Data'      },
-  { to: '/alerts',        label: 'Alert Rules'      },
-  { to: '/audit',         label: 'Audit Log'        },
-  { to: '/roi',           label: 'ROI Dashboard'    },
-  { to: '/ownership',     label: 'Ownership'        },
-  { to: '/ml-model',      label: 'ML Model'         },
-  { to: '/users',         label: 'User Management'  },
-]
-
 const SESSION_MAX_AGE_MS = 24 * 60 * 60 * 1000 // 24 hours
 
 interface AuthUser {
@@ -81,55 +47,6 @@ interface AuthUser {
   token: string
   savedAt?: number
 }
-
-function DropdownMenu({ items, label }: { items: typeof ADMIN_NAV; label: string }) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement>(null)
-  const location = useLocation()
-  const isActive = items.some(n => location.pathname.startsWith(n.to))
-
-  useClickOutside(ref, useCallback(() => setOpen(false), []))
-
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen(!open)}
-        className={isActive ? 'btn-primary flex items-center gap-1' : 'btn-ghost flex items-center gap-1'}
-        aria-label={`${label} menu`}
-        aria-expanded={open}
-        aria-haspopup="true"
-      >
-        {label}
-        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-        </svg>
-      </button>
-      {open && (
-        <div className="absolute top-full left-0 mt-1 w-48 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50 py-1 max-h-[70vh] overflow-y-auto" role="menu">
-          {items.map(({ to, label: itemLabel }) => (
-            <NavLink
-              key={to}
-              to={to}
-              onClick={() => setOpen(false)}
-              role="menuitem"
-              className={({ isActive: active }) =>
-                `block px-4 py-2 text-sm transition-colors ${
-                  active
-                    ? 'text-blue-400 bg-gray-700'
-                    : 'text-gray-300 hover:text-white hover:bg-gray-700'
-                }`
-              }
-            >
-              {itemLabel}
-            </NavLink>
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/* ── Settings dropdown (password change) ────────────────────────────────── */
 
 function SettingsDropdown({ userEmail }: { userEmail: string }) {
   const [open, setOpen] = useState(false)
@@ -290,6 +207,8 @@ export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [view, setView] = useState<'landing' | 'login' | 'app'>('landing')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
+  const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed()
+  const sidebarMargin = collapsed ? 'lg:ml-16' : 'lg:ml-56'
   const { theme, toggleTheme } = useTheme()
 
   // Restore session from localStorage (with expiry check)
@@ -301,7 +220,7 @@ export default function App() {
         if (parsed.token && parsed.email) {
           const age = Date.now() - (parsed.savedAt ?? 0)
           if (parsed.savedAt && age > SESSION_MAX_AGE_MS) {
-            // Token expired — clear it
+            // Token expired -- clear it
             localStorage.removeItem('mfi_session')
           } else {
             setUser(parsed)
@@ -334,9 +253,6 @@ export default function App() {
   const handleLogin = (username: string, password: string) =>
     authRequest('/auth/login', username, password, 'Login failed')
 
-  const handleRegister = (username: string, password: string) =>
-    authRequest('/auth/register', username, password, 'Registration failed')
-
   const handleLogout = () => {
     setUser(null)
     localStorage.removeItem('mfi_session')
@@ -355,8 +271,25 @@ export default function App() {
         />
       ) : (
       <div className="min-h-screen flex flex-col" lang="en">
-        {/* Top nav */}
-        <header className="no-print bg-gray-900 border-b-2 border-red-900 px-4 md:px-6 py-3 flex items-center gap-4 md:gap-8">
+        {/* Slim top bar */}
+        <header className="no-print h-12 bg-gray-900 border-b border-gray-800 flex items-center px-4 z-50 fixed top-0 left-0 right-0">
+          {/* Mobile hamburger */}
+          <button
+            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+            className="lg:hidden text-gray-400 hover:text-white transition-colors mr-3"
+            aria-label="Toggle navigation menu"
+            aria-expanded={mobileMenuOpen}
+          >
+            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              {mobileMenuOpen ? (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+              ) : (
+                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
+              )}
+            </svg>
+          </button>
+
+          {/* Logo + title */}
           <div className="flex items-center gap-2.5">
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" className="w-7 h-7 shrink-0" aria-hidden="true">
               <path d="M32 4 L56 14 L56 34 C56 48 44 58 32 62 C20 58 8 48 8 34 L8 14 Z" fill="#1e3a5f"/>
@@ -376,41 +309,8 @@ export default function App() {
             </span>
           </div>
 
-          {/* Mobile hamburger */}
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="lg:hidden text-gray-400 hover:text-white transition-colors ml-auto"
-            aria-label="Toggle navigation menu"
-            aria-expanded={mobileMenuOpen}
-          >
-            <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-              {mobileMenuOpen ? (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-              ) : (
-                <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 6.75h16.5M3.75 12h16.5m-16.5 5.25h16.5" />
-              )}
-            </svg>
-          </button>
-
-          {/* Desktop nav */}
-          <nav className="hidden lg:flex gap-1 items-center" role="navigation" aria-label="Main navigation">
-            {NAV.map(({ to, label }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={to === '/'}
-                className={({ isActive }) =>
-                  isActive ? 'btn-primary' : 'btn-ghost'
-                }
-                aria-label={label}
-              >
-                {label}
-              </NavLink>
-            ))}
-            <DropdownMenu items={ANALYTICS_NAV} label="Analytics" />
-            <DropdownMenu items={ADMIN_NAV} label="Admin" />
-          </nav>
-          <div className="ml-auto hidden lg:flex items-center gap-3 text-xs text-gray-500">
+          {/* Right side controls */}
+          <div className="ml-auto flex items-center gap-3 text-xs text-gray-500">
             <span className="hidden xl:inline">HHS/DOGE Medicaid Dataset</span>
             <span className="px-1.5 py-0.5 bg-gray-800 border border-gray-700 rounded font-mono text-gray-400">
               v{__APP_VERSION__}
@@ -433,7 +333,9 @@ export default function App() {
             </button>
             <div className="flex items-center gap-2 ml-2 pl-2 border-l border-gray-800">
               <NotificationBell />
-              <SettingsDropdown userEmail={user?.email ?? ''} />
+              <span className="hidden md:block">
+                <SettingsDropdown userEmail={user?.email ?? ''} />
+              </span>
               <button
                 onClick={handleLogout}
                 className="text-gray-500 hover:text-red-400 transition-colors"
@@ -448,87 +350,29 @@ export default function App() {
           </div>
         </header>
 
-        {/* Mobile nav drawer */}
-        {mobileMenuOpen && (
-          <div className="lg:hidden bg-gray-900 border-b border-gray-800 px-4 py-3 space-y-2" role="navigation" aria-label="Mobile navigation">
-            <div className="flex flex-wrap gap-1">
-              {NAV.map(({ to, label }) => (
-                <NavLink
-                  key={to}
-                  to={to}
-                  end={to === '/'}
-                  onClick={() => setMobileMenuOpen(false)}
-                  className={({ isActive }) =>
-                    isActive ? 'btn-primary text-sm' : 'btn-ghost text-sm'
-                  }
-                  aria-label={label}
-                >
-                  {label}
-                </NavLink>
-              ))}
-            </div>
-            <div className="border-t border-gray-800 pt-2">
-              <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">Analytics</p>
-              <div className="flex flex-wrap gap-1">
-                {ANALYTICS_NAV.map(({ to, label }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={({ isActive }) =>
-                      `text-xs px-2 py-1 rounded transition-colors ${
-                        isActive ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                      }`
-                    }
-                  >
-                    {label}
-                  </NavLink>
-                ))}
-              </div>
-            </div>
-            <div className="border-t border-gray-800 pt-2">
-              <p className="text-xs text-gray-500 mb-1 uppercase tracking-wider">Admin</p>
-              <div className="flex flex-wrap gap-1">
-                {ADMIN_NAV.map(({ to, label }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className={({ isActive }) =>
-                      `text-xs px-2 py-1 rounded transition-colors ${
-                        isActive ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white hover:bg-gray-800'
-                      }`
-                    }
-                  >
-                    {label}
-                  </NavLink>
-                ))}
-              </div>
-            </div>
-            <div className="border-t border-gray-800 pt-2 flex items-center gap-3">
-              <NotificationBell />
-              <span className="text-xs text-gray-400">{user?.email}</span>
-              <button
-                onClick={handleLogout}
-                className="text-xs text-red-400 hover:text-red-300 ml-auto"
-                aria-label="Sign out"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Sidebar */}
+        <Sidebar
+          mobileOpen={mobileMenuOpen}
+          onMobileClose={() => setMobileMenuOpen(false)}
+          collapsed={collapsed}
+          onToggleCollapse={toggleCollapsed}
+        />
 
         {/* Breadcrumb navigation */}
         <Breadcrumbs />
 
         {/* Page content */}
-        <main className="flex-1 p-4 md:p-6" role="main">
+        <main
+          className={`flex-1 p-4 md:p-6 mt-12 transition-[margin-left] duration-200 ${sidebarMargin}`}
+          role="main"
+        >
           <AnimatedRoutes />
         </main>
 
         {/* Footer */}
-        <footer className="no-print py-4 text-center">
+        <footer
+          className={`no-print py-4 text-center transition-[margin-left] duration-200 ${sidebarMargin}`}
+        >
           <div className="divider mb-4 mx-auto max-w-2xl" />
           <p className="text-[10px] text-gray-600 uppercase tracking-[0.2em] font-medium">
             Powered by Medicaid Inspector &middot; Data sourced from CMS/HHS &middot; For authorized use only
