@@ -28,9 +28,12 @@ import BeneficiaryFraud from './pages/BeneficiaryFraud'
 import PharmacyDME from './pages/PharmacyDME'
 import UserManagement from './pages/UserManagement'
 import Landing from './pages/Landing'
+import Breadcrumbs from './components/Breadcrumbs'
 import BillingCodeSearch from './pages/BillingCodeSearch'
 import Login from './pages/Login'
 import NotificationBell from './components/NotificationBell'
+import CommandPalette from './components/CommandPalette'
+import KeyboardShortcuts from './components/KeyboardShortcuts'
 import { mutate } from './lib/api'
 import { useTheme } from './lib/theme'
 
@@ -474,6 +477,9 @@ export default function App() {
           </div>
         )}
 
+        {/* Breadcrumb navigation */}
+        <Breadcrumbs />
+
         {/* Page content */}
         <main className="flex-1 p-4 md:p-6" role="main">
           <Routes>
@@ -515,6 +521,9 @@ export default function App() {
             Powered by Medicaid Inspector &middot; Data sourced from CMS/HHS &middot; For authorized use only
           </p>
         </footer>
+
+        <CommandPalette />
+        <KeyboardShortcuts />
       </div>
       )}
     </BrowserRouter>
