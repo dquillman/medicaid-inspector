@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
+import { AnimatePresence } from 'framer-motion'
 import { useClickOutside } from './hooks/useClickOutside'
+import PageTransition from './components/PageTransition'
 import Overview from './pages/Overview'
 import ProviderExplorer from './pages/ProviderExplorer'
 import AnomalyDashboard from './pages/AnomalyDashboard'
@@ -244,6 +246,46 @@ function SettingsDropdown({ userEmail }: { userEmail: string }) {
   )
 }
 
+function AnimatedRoutes() {
+  const location = useLocation()
+  return (
+    <AnimatePresence mode="wait">
+      <PageTransition key={location.pathname}>
+        <Routes location={location}>
+          <Route path="/"                  element={<Overview />} />
+          <Route path="/providers"         element={<ProviderExplorer />} />
+          <Route path="/providers/:npi"    element={<ProviderDetail />} />
+          <Route path="/anomalies"         element={<AnomalyDashboard />} />
+          <Route path="/network"           element={<NetworkGraph />} />
+          <Route path="/review"            element={<ReviewQueue />} />
+          <Route path="/watchlist"         element={<Watchlist />} />
+          <Route path="/geographic"        element={<GeographicAnalysis />} />
+          <Route path="/admin/scan"        element={<AdminScan />} />
+          <Route path="/alerts"            element={<AlertRules />} />
+          <Route path="/audit"             element={<AuditLog />} />
+          <Route path="/roi"               element={<ROIDashboard />} />
+          <Route path="/ownership"         element={<OwnershipNetworks />} />
+          <Route path="/demographics"     element={<DemographicRisk />} />
+          <Route path="/hotspots"         element={<FraudHotspots />} />
+          <Route path="/density"          element={<BeneficiaryDensity />} />
+          <Route path="/utilization"      element={<UtilizationAnalysis />} />
+          <Route path="/population"       element={<PopulationRatio />} />
+          <Route path="/trends"           element={<TrendDivergence />} />
+          <Route path="/rings"            element={<FraudRings />} />
+          <Route path="/news"             element={<NewsAlerts />} />
+          <Route path="/ml-model"         element={<MLModel />} />
+          <Route path="/billing-codes"   element={<BillingCodeSearch />} />
+          <Route path="/claim-patterns"  element={<ClaimPatterns />} />
+          <Route path="/beneficiary-fraud" element={<BeneficiaryFraud />} />
+          <Route path="/pharmacy-dme"    element={<PharmacyDME />} />
+          <Route path="/users"            element={<UserManagement />} />
+          <Route path="*"                  element={<Navigate to="/" replace />} />
+        </Routes>
+      </PageTransition>
+    </AnimatePresence>
+  )
+}
+
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null)
   const [view, setView] = useState<'landing' | 'login' | 'app'>('landing')
@@ -482,36 +524,7 @@ export default function App() {
 
         {/* Page content */}
         <main className="flex-1 p-4 md:p-6" role="main">
-          <Routes>
-            <Route path="/"                  element={<Overview />} />
-            <Route path="/providers"         element={<ProviderExplorer />} />
-            <Route path="/providers/:npi"    element={<ProviderDetail />} />
-            <Route path="/anomalies"         element={<AnomalyDashboard />} />
-            <Route path="/network"           element={<NetworkGraph />} />
-            <Route path="/review"            element={<ReviewQueue />} />
-            <Route path="/watchlist"         element={<Watchlist />} />
-            <Route path="/geographic"        element={<GeographicAnalysis />} />
-            <Route path="/admin/scan"        element={<AdminScan />} />
-            <Route path="/alerts"            element={<AlertRules />} />
-            <Route path="/audit"             element={<AuditLog />} />
-            <Route path="/roi"               element={<ROIDashboard />} />
-            <Route path="/ownership"         element={<OwnershipNetworks />} />
-            <Route path="/demographics"     element={<DemographicRisk />} />
-            <Route path="/hotspots"         element={<FraudHotspots />} />
-            <Route path="/density"          element={<BeneficiaryDensity />} />
-            <Route path="/utilization"      element={<UtilizationAnalysis />} />
-            <Route path="/population"       element={<PopulationRatio />} />
-            <Route path="/trends"           element={<TrendDivergence />} />
-            <Route path="/rings"            element={<FraudRings />} />
-            <Route path="/news"             element={<NewsAlerts />} />
-            <Route path="/ml-model"         element={<MLModel />} />
-            <Route path="/billing-codes"   element={<BillingCodeSearch />} />
-            <Route path="/claim-patterns"  element={<ClaimPatterns />} />
-            <Route path="/beneficiary-fraud" element={<BeneficiaryFraud />} />
-            <Route path="/pharmacy-dme"    element={<PharmacyDME />} />
-            <Route path="/users"            element={<UserManagement />} />
-            <Route path="*"                  element={<Navigate to="/" replace />} />
-          </Routes>
+          <AnimatedRoutes />
         </main>
 
         {/* Footer */}
