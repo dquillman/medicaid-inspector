@@ -26,3 +26,6 @@ Thumbs.db
 # Temp files
 *.tmp
 *.tmp.*
+
+# Firebase
+.firebase/
