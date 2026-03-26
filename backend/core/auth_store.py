@@ -108,7 +108,7 @@ _users: dict[str, dict] = {}
 # ── Password hashing ─────────────────────────────────────────────────────────
 
 def _hash_password(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 600_000).hex()
 
 
 # ── Disk persistence ─────────────────────────────────────────────────────────
@@ -290,7 +290,7 @@ def load_sessions_from_disk() -> None:
                 now = time.time()
                 _sessions = {
                     token: sess for token, sess in raw.items()
-                    if now - sess.get("created_at", 0) < 30 * 86400
+                    if now - sess.get("created_at", 0) < 24 * 3600
                 }
                 print(f"[auth_store] Loaded {len(_sessions)} sessions from disk")
     except Exception as e:
@@ -314,7 +314,7 @@ def get_session_user(token: str) -> Optional[dict]:
     if not session:
         return None
     # Sessions valid for 30 days
-    if time.time() - session["created_at"] > 30 * 86400:
+    if time.time() - session["created_at"] > 24 * 3600:
         del _sessions[token]
         save_sessions_to_disk()
         return None

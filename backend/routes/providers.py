@@ -1,12 +1,39 @@
 import io as _io
 import csv as _csv
 import json as _json
+import re as _re
 import tarfile as _tarfile
 import html as _html
 from datetime import datetime as _dt
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from data.duckdb_client import query_async, provider_aggregate_sql, get_parquet_path
+
+
+# ── Input validation helpers (prevent SQL injection in DuckDB queries) ────────
+
+def _validate_npi(npi: str) -> str:
+    """Validate NPI is exactly 10 digits."""
+    npi = npi.strip()
+    if not _re.match(r'^\d{10}$', npi):
+        raise HTTPException(400, f"Invalid NPI '{npi}' — must be exactly 10 digits")
+    return npi
+
+
+def _validate_hcpcs(code: str) -> str:
+    """Validate HCPCS/CPT code is alphanumeric, 1-7 chars."""
+    code = code.strip().upper()
+    if not _re.match(r'^[A-Z0-9]{1,7}$', code):
+        raise HTTPException(400, f"Invalid HCPCS code '{code}' — must be 1-7 alphanumeric characters")
+    return code
+
+
+def _validate_month(month: str) -> str:
+    """Validate month is YYYY-MM format."""
+    month = month.strip()
+    if not _re.match(r'^\d{4}-\d{2}$', month):
+        raise HTTPException(400, f"Invalid month '{month}' — must be YYYY-MM format")
+    return month
 from data.nppes_client import get_provider, search_providers
 from services.risk_scorer import score_provider
 from core.store import get_prescanned, get_provider_by_npi
@@ -923,6 +950,7 @@ async def search_by_name(q: str = Query(..., min_length=2)):
 @router.get("/{npi}")
 async def get_provider_detail(npi: str):
     """Full provider profile: NPPES identity + spending summary + risk score."""
+    npi = _validate_npi(npi)
     import asyncio
 
     # Check prescan cache first — avoids re-querying remote Parquet
@@ -1865,12 +1893,19 @@ async def get_claim_lines(
     limit: int = Query(100, ge=1, le=500),
 ):
     """Granular claim-line drill-down — raw monthly rows from Parquet."""
-    src = f"read_parquet('{get_parquet_path()}')"
-    where = f"(BILLING_PROVIDER_NPI_NUM = '{npi}' OR SERVICING_PROVIDER_NPI_NUM = '{npi}')"
+    npi = _validate_npi(npi)
     if hcpcs_code:
-        where += f" AND HCPCS_CODE = '{hcpcs_code}'"
+        hcpcs_code = _validate_hcpcs(hcpcs_code)
     if month:
-        where += f" AND CLAIM_FROM_MONTH = '{month}'"
+        month = _validate_month(month)
+
+    src = f"read_parquet('{get_parquet_path()}')"
+    where_parts = [f"(BILLING_PROVIDER_NPI_NUM = '{npi}' OR SERVICING_PROVIDER_NPI_NUM = '{npi}')"]
+    if hcpcs_code:
+        where_parts.append(f"HCPCS_CODE = '{hcpcs_code}'")
+    if month:
+        where_parts.append(f"CLAIM_FROM_MONTH = '{month}'")
+    where = " AND ".join(where_parts)
 
     offset = (page - 1) * limit
 
@@ -1899,6 +1934,9 @@ async def get_claim_lines(
 @router.get("/{npi}/hcpcs/{code}/detail")
 async def get_hcpcs_detail(npi: str, code: str):
     """Monthly breakdown for a specific HCPCS code."""
+    npi = _validate_npi(npi)
+    code = _validate_hcpcs(code)
+
     src = f"read_parquet('{get_parquet_path()}')"
     where = f"(BILLING_PROVIDER_NPI_NUM = '{npi}' OR SERVICING_PROVIDER_NPI_NUM = '{npi}') AND HCPCS_CODE = '{code}'"
 
@@ -1946,6 +1984,7 @@ async def get_hcpcs_detail(npi: str, code: str):
 @router.get("/{npi}/yoy-comparison")
 async def yoy_comparison(npi: str):
     """Year-over-year comparison of billing metrics."""
+    npi = _validate_npi(npi)
     src = f"read_parquet('{get_parquet_path()}')"
     sql = f"""
     SELECT
