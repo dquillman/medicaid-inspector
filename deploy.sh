@@ -1,21 +1,19 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
 
-echo "=== Building frontend ==="
-cd frontend
-npm run build
-cd ..
+echo "========================================="
+echo "  Medicaid Inspector — Full Deployment"
+echo "========================================="
 
-echo "=== Deploying to Cloud Run ==="
-gcloud run deploy medicaid-inspector \
-  --source . \
-  --region us-central1 \
-  --allow-unauthenticated \
-  --port 8000 \
-  --memory 2Gi \
-  --timeout 300
+# Deploy backend first (Cloud Run)
+bash deploy-backend.sh
 
-echo "=== Deploying Firebase Hosting ==="
-firebase deploy --only hosting
+# Deploy frontend (Firebase Hosting)
+bash deploy-frontend.sh
 
-echo "=== Done! ==="
+echo ""
+echo "========================================="
+echo "  Deployment complete!"
+echo "  Frontend: https://medicaid-inspector.web.app"
+echo "  Backend:  (see Cloud Run URL above)"
+echo "========================================="
