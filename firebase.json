@@ -6,34 +6,33 @@
       {
         "source": "/api/**",
         "run": {
-          "serviceId": "medicaid-inspector",
-          "region": "us-central1"
-        }
-      },
-      {
-        "source": "/health",
-        "run": {
-          "serviceId": "medicaid-inspector",
-          "region": "us-central1"
-        }
-      },
-      {
-        "source": "/ready",
-        "run": {
-          "serviceId": "medicaid-inspector",
-          "region": "us-central1"
-        }
-      },
-      {
-        "source": "/metrics",
-        "run": {
-          "serviceId": "medicaid-inspector",
+          "serviceId": "medicaid-inspector-api",
           "region": "us-central1"
         }
       },
       {
         "source": "**",
         "destination": "/index.html"
+      }
+    ],
+    "headers": [
+      {
+        "source": "/assets/**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=31536000, immutable"
+          }
+        ]
+      },
+      {
+        "source": "index.html",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
       }
     ]
   }
