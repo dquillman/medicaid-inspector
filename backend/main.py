@@ -504,14 +504,34 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5200", "http://localhost:5173", "http://localhost:3000", "http://localhost:8001"],
+    allow_origins=[
+        "http://localhost:5200",
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "http://localhost:8001",
+        # Production origins (Firebase Hosting)
+        "https://medicaid-inspector.web.app",
+        "https://medicaid-inspector.firebaseapp.com",
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # Rate limiting middleware — must be added after CORS middleware
 app.add_middleware(RateLimitMiddleware)
+
+
+# ── Security headers middleware ──────────────────────────────────────────────
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    return response
 
 # Routers sharing /api/providers prefix with specific sub-paths must come
 # BEFORE the main providers router (which has a /{npi} catch-all).
