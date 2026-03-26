@@ -110,7 +110,7 @@ export type {
   BeneficiaryFraudProviderResult,
 } from './types'
 
-const BASE = '/api'
+const BASE = (import.meta.env.VITE_API_BASE as string) || '/api'
 
 function authHeaders(): Record<string, string> {
   try {
@@ -936,7 +936,7 @@ export const api = {
     formData.append('file', file)
     if (description) formData.append('description', description)
     if (evidenceType) formData.append('evidence_type', evidenceType)
-    return fetch(`/api/cases/${caseId}/evidence`, {
+    return fetch(`${BASE}/cases/${caseId}/evidence`, {
       method: 'POST',
       headers: { ...authHeaders() },
       body: formData,
@@ -948,7 +948,7 @@ export const api = {
 
   downloadEvidence: (caseId: string, evidenceId: string) => {
     const a = document.createElement('a')
-    a.href = `/api/cases/${caseId}/evidence/${evidenceId}/download`
+    a.href = `${BASE}/cases/${caseId}/evidence/${evidenceId}/download`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
