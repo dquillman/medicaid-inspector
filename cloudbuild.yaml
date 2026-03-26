@@ -1,0 +1,44 @@
+steps:
+  # Build and deploy backend to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'medicaid-inspector-api'
+      - '--source'
+      - '.'
+      - '--region'
+      - 'us-central1'
+      - '--memory'
+      - '2Gi'
+      - '--cpu'
+      - '1'
+      - '--max-instances'
+      - '3'
+      - '--concurrency'
+      - '80'
+      - '--timeout'
+      - '300'
+      - '--allow-unauthenticated'
+      - '--port'
+      - '8080'
+
+  # Build frontend
+  - name: 'node:20'
+    dir: 'frontend'
+    entrypoint: npm
+    args: ['ci']
+
+  - name: 'node:20'
+    dir: 'frontend'
+    entrypoint: npm
+    args: ['run', 'build']
+
+  # Deploy frontend to Firebase Hosting
+  - name: 'gcr.io/firebase-tools/firebase'
+    args: ['deploy', '--only', 'hosting']
+
+timeout: '1200s'
+options:
+  logging: CLOUD_LOGGING_ONLY
