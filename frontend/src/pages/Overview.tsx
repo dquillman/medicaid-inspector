@@ -265,7 +265,7 @@ export default function Overview() {
           </h2>
           {moversData.rising.length > 0 ? (
             <div className="space-y-2">
-              {moversData.rising.map((m: Record<string, number | string>) => (
+              {moversData.rising.map((m) => (
                 <div
                   key={String(m.npi)}
                   className="flex items-center justify-between px-3 py-2 bg-red-950/30 border border-red-900/30 rounded-lg cursor-pointer hover:border-red-700 transition-colors"
@@ -298,7 +298,7 @@ export default function Overview() {
           </h2>
           {moversData.falling.length > 0 ? (
             <div className="space-y-2">
-              {moversData.falling.map((m: Record<string, number | string>) => (
+              {moversData.falling.map((m) => (
                 <div
                   key={String(m.npi)}
                   className="flex items-center justify-between px-3 py-2 bg-green-950/30 border border-green-900/30 rounded-lg cursor-pointer hover:border-green-700 transition-colors"

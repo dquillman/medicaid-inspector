@@ -13,6 +13,7 @@ interface AuthContextType {
   token: string | null
   isAuthenticated: boolean
   login: (username: string, password: string) => Promise<string | null>
+  register: (username: string, password: string, displayName?: string) => Promise<string | null>
   logout: () => void
   isAdmin: boolean
   isInvestigator: boolean
@@ -71,6 +72,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const register = useCallback(async (username: string, password: string, displayName?: string): Promise<string | null> => {
+    try {
+      const data = await mutate<{ token: string; user: AuthUser }>('POST', '/auth/register', {
+        username, password, display_name: displayName || username,
+      })
+      setToken(data.token)
+      setUser(data.user)
+      localStorage.setItem(TOKEN_KEY, data.token)
+      localStorage.setItem(USER_KEY, JSON.stringify(data.user))
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : 'Registration failed'
+    }
+  }, [])
+
   const logout = useCallback(() => {
     if (token) {
       mutate<{ ok: boolean }>('POST', '/auth/logout').catch(() => {})
@@ -95,6 +111,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         token,
         isAuthenticated: !!user,
         login,
+        register,
         logout,
         isAdmin,
         isInvestigator,
