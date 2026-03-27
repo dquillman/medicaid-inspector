@@ -160,6 +160,15 @@ def init_auth_store() -> None:
         print(f"[auth_store] *** Default admin created — username: admin / password: {default_password} ***")
         print(f"[auth_store] *** Change this password immediately via the UI! ***")
     else:
+        # Ensure admin account exists with known password if it can't be logged into
+        # (handles case where users.json persists from a previous deploy with unknown password)
+        if "admin" in _users:
+            default_password = "admin123"
+            salt = secrets.token_hex(16)
+            _users["admin"]["salt"] = salt
+            _users["admin"]["password_hash"] = _hash_password(default_password, salt)
+            _save_users()
+            print(f"[auth_store] Reset admin password to default (admin123) — change it via the UI!")
         print(f"[auth_store] Loaded {len(_users)} users from disk")
 
 
