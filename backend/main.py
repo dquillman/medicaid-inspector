@@ -97,336 +97,17 @@ from services.data_discovery import load_dataset_config
 logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
-# Prevents two scan batches from running simultaneously
-# TODO: _scan_running/_auto_mode globals are per-process; broken under multi-worker
-_scan_running = False
-_auto_mode = False
-_smart_scan_mode = False
-
-
-async def _run_scan_batch(batch_size: int, state_filter: Optional[str], force: bool = False):
-    """
-    Scans the next `batch_size` providers from the Parquet file.
-    Appends results to the disk cache and updates scan progress.
-    Runs as a background task — HTTP response is returned immediately.
-    """
-    global _scan_running, _auto_mode
-    _hand_off = False  # True when auto mode passes ownership to next task
-
-    from services.anomaly_detector import (
-        billing_concentration,
-        revenue_per_bene_outlier,
-        claims_per_bene_anomaly,
-        billing_ramp_rate,
-        bust_out_pattern,
-        ghost_billing,
-        total_spend_outlier,
-        billing_consistency,
-        bene_concentration,
-        upcoding_pattern,
-        address_cluster_risk,
-        oig_excluded,
-        compute_address_clusters,
-        specialty_mismatch,
-        corporate_shell_risk,
-        compute_auth_official_clusters,
-        dead_npi_billing,
-        new_provider_explosion,
-        geographic_impossibility,
-    )
-    import statistics as _stats
-    from collections import defaultdict as _dd
-
-    try:
-        _scan_start_time = _time_mod.time()
-
-        # Run data validation at scan startup (first batch only)
-        progress = get_scan_progress()
-        if progress.get("offset", 0) == 0:
-            try:
-                from services.data_validator import run_validation
-                set_prescan_status(1, "Running data quality validation…")
-                await run_validation(sample_limit=2000)
-                log.info("Pre-scan data validation complete")
-            except Exception as val_err:
-                log.warning("Data validation failed (non-fatal): %s", val_err)
-
-        # If caller provides a different state filter, start offset over
-        active_filter = state_filter or progress.get("state_filter")
-        if state_filter and state_filter != progress.get("state_filter") and progress.get("offset", 0) > 0:
-            log.info("State filter changed (%s → %s) — resetting offset", progress.get("state_filter"), state_filter)
-            progress = {"offset": 0, "total_provider_count": None, "state_filter": state_filter, "batches_completed": 0, "last_batch_at": None}
-
-        offset = progress.get("offset", 0)
-        total = progress.get("total_provider_count")
-        batches = progress.get("batches_completed", 0)
-
-        # Build WHERE clause for state filter (parameterized)
-        state_where = ""
-        state_params: tuple = ()
-        if active_filter:
-            state_col = await asyncio.to_thread(detect_state_column)
-            if state_col:
-                state_where = f"{state_col} = ?"
-                state_params = (active_filter,)
-            else:
-                log.warning("State column not found in Parquet — state filter ignored")
-                active_filter = None
-
-        # ── Count total providers (first batch only) ──────────────────────────
-        if total is None:
-            label = f" in {active_filter}" if active_filter else ""
-            set_prescan_status(1, f"Counting total providers{label}…")
-            log.info("Counting distinct providers%s…", label)
-            count_rows = await query_async(count_providers_sql(where=state_where), state_params)
-            total = int(count_rows[0]["total"]) if count_rows else 0
-            log.info("Total providers: %d", total)
-
-        if total == 0:
-            set_prescan_status(0, "No providers found")
-            return
-
-        # ── Step 1: provider aggregates ───────────────────────────────────────
-        set_prescan_status(2, f"Fetching provider aggregates (offset {offset:,} of {total:,})…")
-        log.info("Scan batch: offset=%d, batch_size=%d, state=%s", offset, batch_size, active_filter)
-        agg_rows = await query_async(
-            provider_aggregate_sql(where=state_where, limit=batch_size, offset=offset),
-            state_params,
-        )
-
-        if not agg_rows:
-            set_prescan_status(0, f"Scan complete — all {offset:,} providers checked")
-            set_scan_progress(offset, total, active_filter, batches)
-            log.info("Scan complete at offset %d", offset)
-            return
-
-        # ── Single pass over prescan cache: build already_scanned + peer stats ──
-        already_scanned: set[str] = set()
-        peer_rpb: dict[str, list[float]] = _dd(list)
-        peer_cpb: dict[str, list[float]] = _dd(list)
-        all_spend: list[float] = []
-        for cached in get_prescanned():
-            already_scanned.add(cached["npi"])
-            c_code = cached.get("top_hcpcs") or ""
-            if not c_code:
-                hcpcs_list = cached.get("hcpcs") or []
-                if hcpcs_list:
-                    c_code = hcpcs_list[0].get("hcpcs_code", "")
-            c_rpb = cached.get("revenue_per_beneficiary") or 0.0
-            if c_code and c_rpb > 0:
-                peer_rpb[c_code].append(float(c_rpb))
-            cpb = cached.get("claims_per_beneficiary") or 0
-            if c_code and cpb > 0:
-                peer_cpb[c_code].append(float(cpb))
-            spend = cached.get("total_paid") or 0
-            if spend > 0:
-                all_spend.append(float(spend))
-
-        # ── Incremental loading (#10): skip already-scanned NPIs unless force=True
-        if not force:
-            new_rows = [r for r in agg_rows if r["npi"] not in already_scanned]
-            if new_rows and len(new_rows) < len(agg_rows):
-                skipped = len(agg_rows) - len(new_rows)
-                log.info("Incremental: skipped %d already-scanned providers, %d new", skipped, len(new_rows))
-            if not new_rows:
-                # All providers in this batch already scanned — advance offset and continue
-                new_offset = offset + len(agg_rows)
-                set_scan_progress(new_offset, total, active_filter, batches + 1)
-                log.info("Incremental: entire batch already scanned — advancing offset to %d", new_offset)
-                remaining = total - new_offset
-                set_prescan_status(
-                    0,
-                    f"Idle — {new_offset:,} of {total:,} providers scanned"
-                    + (f" · {remaining:,} remaining" if remaining > 0 else " · Complete"),
-                )
-                if _auto_mode and len(agg_rows) == batch_size:
-                    await asyncio.sleep(0.2)
-                    asyncio.create_task(_run_scan_batch(batch_size, active_filter, force=False))
-                    return
-                return
-            agg_rows = new_rows
-
-        npi_list = [r["npi"] for r in agg_rows]
-        npi_placeholders = ", ".join("?" for _ in npi_list)
-        npi_params = tuple(npi_list)
-
-        # ── Step 2: batch HCPCS ────────────────────────────────────────────────
-        set_prescan_status(2, f"Fetching HCPCS breakdown for {len(npi_list)} providers…")
-        hcpcs_sql = f"""
-        SELECT
-            BILLING_PROVIDER_NPI_NUM    AS npi,
-            HCPCS_CODE                  AS hcpcs_code,
-            SUM(TOTAL_PAID)             AS total_paid,
-            SUM(TOTAL_CLAIMS)           AS total_claims
-        FROM read_parquet('{get_parquet_path()}')
-        WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_placeholders})
-        GROUP BY npi, hcpcs_code
-        ORDER BY npi, total_paid DESC
-        """
-        hcpcs_rows = await query_async(hcpcs_sql, npi_params)
-        hcpcs_by_npi: dict[str, list[dict]] = {}
-        for r in hcpcs_rows:
-            hcpcs_by_npi.setdefault(r["npi"], []).append(r)
-
-        # ── Step 3: batch timelines ────────────────────────────────────────────
-        set_prescan_status(3, f"Fetching monthly timelines for {len(npi_list)} providers…")
-        timeline_sql = f"""
-        SELECT
-            BILLING_PROVIDER_NPI_NUM            AS npi,
-            CLAIM_FROM_MONTH                    AS month,
-            SUM(TOTAL_PAID)                     AS total_paid,
-            SUM(TOTAL_CLAIMS)                   AS total_claims,
-            SUM(TOTAL_UNIQUE_BENEFICIARIES)     AS total_unique_beneficiaries
-        FROM read_parquet('{get_parquet_path()}')
-        WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_placeholders})
-        GROUP BY npi, month
-        ORDER BY npi, month ASC
-        """
-        timeline_rows = await query_async(timeline_sql, npi_params)
-        timeline_by_npi: dict[str, list[dict]] = {}
-        for r in timeline_rows:
-            timeline_by_npi.setdefault(r["npi"], []).append(r)
-
-        # ── Step 4: score in Python ────────────────────────────────────────────
-        set_prescan_status(3, f"Scoring {len(npi_list)} providers…")
-
-        top_hcpcs_by_npi: dict[str, str] = {
-            npi: rows[0]["hcpcs_code"]
-            for npi, rows in hcpcs_by_npi.items() if rows
-        }
-
-        # Add current batch to peer stats (cache-seeded above in single pass)
-        for row in agg_rows:
-            code = top_hcpcs_by_npi.get(row["npi"])
-            rpb = row.get("revenue_per_beneficiary") or 0.0
-            if code and rpb > 0:
-                peer_rpb[code].append(float(rpb))
-            cpb = row.get("claims_per_beneficiary") or 0
-            if code and cpb > 0:
-                peer_cpb[code].append(float(cpb))
-            spend = row.get("total_paid") or 0
-            if spend > 0:
-                all_spend.append(float(spend))
-            # Store top_hcpcs in the result for future batches
-            if code:
-                row["top_hcpcs"] = code
-
-        peer_stats: dict[str, tuple[float, float]] = {}
-        for code, vals in peer_rpb.items():
-            if len(vals) >= 3:
-                m = _stats.mean(vals)
-                s = _stats.stdev(vals) if len(vals) > 1 else 0.0
-                peer_stats[code] = (m, s)
-
-        cpb_stats: dict[str, tuple[float, float]] = {}
-        for code, vals in peer_cpb.items():
-            if len(vals) >= 3:
-                cpb_stats[code] = (_stats.mean(vals), _stats.stdev(vals) if len(vals) > 1 else 0.0)
-
-        spend_mean = _stats.mean(all_spend)  if len(all_spend) >= 3 else 0.0
-        spend_std  = _stats.stdev(all_spend) if len(all_spend) >= 3 else 0.0
-
-        # Pre-compute cluster sizes from prescan cache NPPES data
-        cluster_sizes = compute_address_clusters()
-        auth_clusters = compute_auth_official_clusters()
-
-        results = []
-        for row in agg_rows:
-            npi      = row["npi"]
-            hcpcs    = hcpcs_by_npi.get(npi, [])
-            timeline = timeline_by_npi.get(npi, [])
-
-            s1 = billing_concentration(row, hcpcs)
-            code = top_hcpcs_by_npi.get(npi, "")
-            peer_mean, peer_std = peer_stats.get(code, (0.0, 0.0))
-            s2 = revenue_per_bene_outlier(row, peer_mean, peer_std)
-            cpb_mean, cpb_std = cpb_stats.get(code, (0.0, 0.0))
-            s3 = claims_per_bene_anomaly(row, cpb_mean, cpb_std)
-            s4 = billing_ramp_rate(timeline)
-            s5 = bust_out_pattern(timeline)
-            s6 = ghost_billing(row, timeline)
-            s7 = total_spend_outlier(row, spend_mean, spend_std)
-            s8 = billing_consistency(row, timeline)
-            s9 = bene_concentration(row)
-            s10 = upcoding_pattern(row, hcpcs)
-            s11 = address_cluster_risk(row, cluster_sizes.get(npi, 0))
-            s12 = oig_excluded(npi)
-            s13 = specialty_mismatch(row, hcpcs)
-            s14 = corporate_shell_risk(row, auth_clusters.get(npi, 0))
-            s15 = dead_npi_billing(row)
-            s16 = new_provider_explosion(row)
-            s17 = geographic_impossibility(row)
-
-            signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17]
-            composite = sum(s["score"] * s["weight"] for s in signals)
-            risk_score = round(min(composite, 100.0), 1)
-            flags = [s for s in signals if s["flagged"]]
-
-            results.append({
-                **row,
-                "risk_score": risk_score,
-                "flags": flags,
-                "signal_results": signals,
-                "hcpcs": hcpcs_by_npi.get(npi, []),
-                "timeline": timeline_by_npi.get(npi, []),
-            })
-
-        # ── Persist ────────────────────────────────────────────────────────────
-        append_prescanned(results, save=False)
-        record_batch_snapshots(results)
-        new_offset = offset + len(agg_rows)
-        set_scan_progress(new_offset, total, active_filter, batches + 1)  # saves to disk
-
-        flagged_results = [r for r in results if r["risk_score"] > settings.RISK_THRESHOLD]
-        flagged = len(flagged_results)
-
-        # Background: enrich ALL scanned providers with NPPES name/state/city
-        from services.nppes_enricher import enrich_batch_with_nppes
-        asyncio.create_task(enrich_batch_with_nppes([r["npi"] for r in results]))
-
-        # Record data lineage for this scan batch
-        _batch_claims = sum(r.get("total_claims") or 0 for r in results)
-        _batch_duration = round(_time_mod.time() - _scan_start_time, 2)
-        from services.data_discovery import _extract_date_from_url
-        record_scan_run(
-            dataset_url=get_parquet_path(),
-            dataset_date=_extract_date_from_url(get_parquet_path()),
-            provider_count=len(results),
-            total_claims=int(_batch_claims),
-            scan_type="batch",
-            duration_sec=_batch_duration,
-            state_filter=active_filter,
-            details={"offset": new_offset, "total": total, "flagged": flagged},
-        )
-
-        log.info(
-            "Batch done — %d providers scored (%d flagged), offset now %d/%d",
-            len(results), flagged, new_offset, total,
-        )
-
-        remaining = total - new_offset
-        set_prescan_status(
-            0,
-            f"Idle — {new_offset:,} of {total:,} providers scanned"
-            + (f" · {remaining:,} remaining" if remaining > 0 else " · Complete"),
-        )
-
-        # Auto mode: schedule next batch if still running and more providers remain
-        if _auto_mode and len(agg_rows) == batch_size:
-            _hand_off = True  # tell finally not to release the lock
-            await asyncio.sleep(0.5)
-            asyncio.create_task(_run_scan_batch(batch_size, active_filter, force=force))
-        else:
-            _auto_mode = False
-
-    except Exception as exc:
-        log.error("Scan batch failed: %s", exc, exc_info=True)
-        set_prescan_status(0, f"Error: {exc}")
-        _auto_mode = False
-    finally:
-        if not _hand_off:
-            _scan_running = False
-            release_scan_lock()
+# Scan engine — extracted to services/scan_engine.py
+from services.scan_engine import (
+    run_scan_batch as _run_scan_batch,
+    rescore_cached_providers as _rescore_cached,
+    get_scan_state,
+    is_scan_active,
+    stop_auto_mode,
+    start_batch_scan,
+    start_auto_scan,
+    start_smart_scan,
+)
 
 
 @asynccontextmanager
@@ -609,432 +290,39 @@ class ScanBatchRequest(BaseModel):
 
 @app.post("/api/prescan/scan-batch", dependencies=[Depends(require_user)])
 async def trigger_scan_batch(body: ScanBatchRequest = None):
-    global _scan_running
     if body is None:
         body = ScanBatchRequest()
     body.state_filter = _validate_state_filter(body.state_filter)
-    if _scan_running or is_scan_running():
+    if is_scan_active():
         raise HTTPException(409, "A scan is already in progress")
-    if not acquire_scan_lock():
-        raise HTTPException(409, "A scan is already in progress (another worker)")
-    _scan_running = True
-    task_id = enqueue_task("scan_batch", _run_scan_batch, body.batch_size, body.state_filter or None, body.force)
+    try:
+        task_id = start_batch_scan(body.batch_size, body.state_filter or None, body.force)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
     return {"started": True, "batch_size": body.batch_size, "state_filter": body.state_filter, "force": body.force, "task_id": task_id}
 
 
 @app.post("/api/prescan/auto-start", dependencies=[Depends(require_user)])
 async def auto_start_scan(body: ScanBatchRequest = None):
-    global _scan_running, _auto_mode
     if body is None:
         body = ScanBatchRequest()
     body.state_filter = _validate_state_filter(body.state_filter)
-    _auto_mode = True
-    if _scan_running or is_scan_running():
+    task_id = start_auto_scan(body.batch_size, body.state_filter or None, body.force)
+    if not task_id:
         return {"started": False, "auto_mode": True, "note": "Auto mode enabled — will continue after current batch"}
-    if not acquire_scan_lock():
-        return {"started": False, "auto_mode": True, "note": "Auto mode enabled — another worker is scanning"}
-    _scan_running = True
-    enqueue_task("auto_scan", _run_scan_batch, body.batch_size, body.state_filter or None, body.force)
     return {"started": True, "auto_mode": True, "batch_size": body.batch_size}
 
 
 @app.post("/api/prescan/auto-stop", dependencies=[Depends(require_user)])
 async def auto_stop_scan():
-    global _auto_mode
-    _auto_mode = False
+    stop_auto_mode()
     return {"auto_mode": False, "note": "Auto mode disabled — current batch will finish normally"}
 
 
 @app.post("/api/prescan/rescore", dependencies=[Depends(require_user)])
-async def rescore_cached_providers():
-    """
-    Re-run all fraud signals against every provider already in the prescan cache,
-    using their stored hcpcs + timeline fields — no Parquet queries needed.
-    Updates risk_score / flags / signal_results in-place and saves to disk.
-    """
-    from services.anomaly_detector import (
-        billing_concentration,
-        revenue_per_bene_outlier,
-        claims_per_bene_anomaly,
-        billing_ramp_rate,
-        bust_out_pattern,
-        ghost_billing,
-        total_spend_outlier,
-        billing_consistency,
-        bene_concentration,
-        upcoding_pattern,
-        address_cluster_risk,
-        oig_excluded,
-        compute_address_clusters,
-        specialty_mismatch,
-        corporate_shell_risk,
-        compute_auth_official_clusters,
-        dead_npi_billing,
-        new_provider_explosion,
-        geographic_impossibility,
-    )
-    import statistics as _stats
-    from collections import defaultdict as _dd
-
-    providers = list(get_prescanned())
-    if not providers:
-        return {"rescored": 0, "message": "No cached providers to rescore"}
-
-    # Build per-HCPCS-code peer pools (revenue, claims) and global spend pool
-    peer_rpb: dict[str, list[float]] = _dd(list)
-    peer_cpb: dict[str, list[float]] = _dd(list)
-    all_spend: list[float] = []
-
-    for p in providers:
-        c_code = p.get("top_hcpcs") or ""
-        if not c_code:
-            hl = p.get("hcpcs") or []
-            if hl: c_code = hl[0].get("hcpcs_code", "")
-        rpb   = p.get("revenue_per_beneficiary") or 0.0
-        cpb   = p.get("claims_per_beneficiary") or 0.0
-        spend = p.get("total_paid") or 0.0
-        if c_code and rpb  > 0: peer_rpb[c_code].append(float(rpb))
-        if c_code and cpb  > 0: peer_cpb[c_code].append(float(cpb))
-        if spend > 0: all_spend.append(float(spend))
-
-    peer_stats: dict[str, tuple[float, float]] = {}
-    for code, vals in peer_rpb.items():
-        if len(vals) >= 3:
-            peer_stats[code] = (_stats.mean(vals), _stats.stdev(vals) if len(vals) > 1 else 0.0)
-
-    cpb_stats: dict[str, tuple[float, float]] = {}
-    for code, vals in peer_cpb.items():
-        if len(vals) >= 3:
-            cpb_stats[code] = (_stats.mean(vals), _stats.stdev(vals) if len(vals) > 1 else 0.0)
-
-    spend_mean = _stats.mean(all_spend)  if len(all_spend) >= 3 else 0.0
-    spend_std  = _stats.stdev(all_spend) if len(all_spend) >= 3 else 0.0
-
-    # Pre-compute cluster sizes from NPPES data
-    cluster_sizes = compute_address_clusters()
-    auth_clusters = compute_auth_official_clusters()
-
-    rescored = []
-    for p in providers:
-        hcpcs    = p.get("hcpcs") or []
-        timeline = p.get("timeline") or []
-        npi      = p["npi"]
-
-        s1 = billing_concentration(p, hcpcs)
-        code = p.get("top_hcpcs") or (hcpcs[0].get("hcpcs_code", "") if hcpcs else "")
-        pm, ps = peer_stats.get(code, (0.0, 0.0))
-        s2 = revenue_per_bene_outlier(p, pm, ps)
-        cpb_mean, cpb_std = cpb_stats.get(code, (0.0, 0.0))
-        s3 = claims_per_bene_anomaly(p, cpb_mean, cpb_std)
-        s4 = billing_ramp_rate(timeline)
-        s5 = bust_out_pattern(timeline)
-        s6 = ghost_billing(p, timeline)
-        s7 = total_spend_outlier(p, spend_mean, spend_std)
-        s8 = billing_consistency(p, timeline)
-        s9 = bene_concentration(p)
-        s10 = upcoding_pattern(p, hcpcs)
-        s11 = address_cluster_risk(p, cluster_sizes.get(npi, 0))
-        s12 = oig_excluded(npi)
-        s13 = specialty_mismatch(p, hcpcs)
-        s14 = corporate_shell_risk(p, auth_clusters.get(npi, 0))
-        s15 = dead_npi_billing(p)
-        s16 = new_provider_explosion(p)
-        s17 = geographic_impossibility(p)
-
-        signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17]
-        risk_score = round(min(sum(s["score"] * s["weight"] for s in signals), 100.0), 1)
-        flags = [s for s in signals if s["flagged"]]
-
-        rescored.append({**p, "risk_score": risk_score, "flags": flags, "signal_results": signals})
-
-    set_prescanned(rescored)
-
-    flagged = [p for p in rescored if p["risk_score"] > settings.RISK_THRESHOLD]
-
-    log.info("Rescore complete: %d providers, %d flagged", len(rescored), len(flagged))
-    return {
-        "rescored": len(rescored),
-        "flagged": len(flagged),
-        "new_review_items": added,
-        "peer_stats": {
-            "cpb_mean":            round(cpb_mean, 2),
-            "cpb_threshold_3sig":  round(cpb_mean + 3 * cpb_std, 2),
-            "spend_mean":          round(spend_mean, 2),
-            "spend_threshold_3sig": round(spend_mean + 3 * spend_std, 2),
-        },
-    }
-
-
-async def _run_smart_scan(state_filter: Optional[str]):
-    """
-    Two-phase high-risk-first scan (requires local Parquet data).
-
-    Phase 1 — Pull ALL provider aggregates in one DuckDB query, compute global
-               peer stats, and pre-screen with z-score thresholds to identify
-               candidates (any metric >= 2σ above mean, or total_paid >= $1M).
-
-    Phase 2 — For each candidate batch, fetch HCPCS + timeline, then run all
-               17 fraud signals for a full risk score.  Only candidates are stored
-               in the prescan cache and review queue.
-    """
-    global _scan_running, _auto_mode, _smart_scan_mode
-
-    from services.anomaly_detector import (
-        billing_concentration,
-        revenue_per_bene_outlier,
-        claims_per_bene_anomaly,
-        billing_ramp_rate,
-        bust_out_pattern,
-        ghost_billing,
-        total_spend_outlier,
-        billing_consistency,
-        bene_concentration,
-        upcoding_pattern,
-        address_cluster_risk,
-        oig_excluded,
-        compute_address_clusters,
-        specialty_mismatch,
-        corporate_shell_risk,
-        compute_auth_official_clusters,
-        dead_npi_billing,
-        new_provider_explosion,
-        geographic_impossibility,
-    )
-    import statistics as _stats
-    from collections import defaultdict as _dd
-
-    BATCH = 500  # providers per Phase-2 batch
-
-    try:
-        _auto_mode = False  # smart scan is not auto-chainable
-        _smart_scan_mode = True
-
-        # Build state WHERE clause (parameterized)
-        state_where = ""
-        state_params: tuple = ()
-        if state_filter:
-            state_col = await asyncio.to_thread(detect_state_column)
-            if state_col:
-                state_where = f"{state_col} = ?"
-                state_params = (state_filter,)
-            else:
-                log.warning("State column not found — state filter ignored")
-
-        # ── Phase 1: all provider aggregates ─────────────────────────────────
-        set_prescan_status(1, "Smart scan — loading all provider aggregates…")
-        log.info("Smart scan Phase 1: querying all provider aggregates (state=%s)", state_filter)
-
-        all_rows = await query_async(
-            provider_aggregate_sql(where=state_where, limit=None, offset=0),
-            state_params,
-        )
-
-        if not all_rows:
-            set_prescan_status(0, "Smart scan: no providers found in dataset")
-            return
-
-        N = len(all_rows)
-        log.info("Smart scan Phase 1: %d providers total", N)
-        set_prescan_status(2, f"Smart scan — pre-screening {N:,} providers…")
-
-        # Global peer stats for pre-screening (no HCPCS code grouping yet)
-        all_rpb   = [float(r["revenue_per_beneficiary"] or 0) for r in all_rows if (r.get("revenue_per_beneficiary") or 0) > 0]
-        all_cpb   = [float(r["claims_per_beneficiary"]  or 0) for r in all_rows if (r.get("claims_per_beneficiary")  or 0) > 0]
-        all_spend = [float(r["total_paid"]              or 0) for r in all_rows if (r.get("total_paid")              or 0) > 0]
-
-        rpb_mean   = _stats.mean(all_rpb)   if len(all_rpb)   >= 3 else 0.0
-        rpb_std    = _stats.stdev(all_rpb)  if len(all_rpb)   >= 3 else 0.0
-        cpb_mean   = _stats.mean(all_cpb)   if len(all_cpb)   >= 3 else 0.0
-        cpb_std    = _stats.stdev(all_cpb)  if len(all_cpb)   >= 3 else 0.0
-        spend_mean = _stats.mean(all_spend) if len(all_spend) >= 3 else 0.0
-        spend_std  = _stats.stdev(all_spend)if len(all_spend) >= 3 else 0.0
-
-        # Pre-screen: include providers 2σ+ above mean on any aggregate metric,
-        # or with absolute spend >= $1M (always worth a full look)
-        candidates = []
-        for row in all_rows:
-            rpb   = float(row.get("revenue_per_beneficiary") or 0)
-            cpb   = float(row.get("claims_per_beneficiary")  or 0)
-            spend = float(row.get("total_paid")              or 0)
-            rpb_z   = (rpb   - rpb_mean)   / rpb_std   if rpb_std   > 0 else 0.0
-            cpb_z   = (cpb   - cpb_mean)   / cpb_std   if cpb_std   > 0 else 0.0
-            spend_z = (spend - spend_mean) / spend_std if spend_std > 0 else 0.0
-            if max(rpb_z, cpb_z, spend_z) >= 2.0 or spend >= 1_000_000:
-                candidates.append(row)
-
-        n_candidates = len(candidates)
-        log.info("Smart scan: %d/%d candidates (2σ+ or spend >= $1M)", n_candidates, N)
-        set_prescan_status(2, f"Smart scan — {n_candidates:,} candidates identified out of {N:,} providers")
-        set_scan_progress(0, n_candidates, state_filter, 0)
-
-        if not candidates:
-            set_prescan_status(0, f"Smart scan complete — no high-risk candidates found among {N:,} providers")
-            set_scan_progress(N, N, state_filter, 0)
-            return
-
-        # ── Phase 2: full scoring for candidates ──────────────────────────────
-        results: list[dict] = []
-
-        for batch_i, i in enumerate(range(0, n_candidates, BATCH)):
-            batch = candidates[i : i + BATCH]
-            npi_list = [r["npi"] for r in batch]
-            npi_in   = ", ".join(f"'{n}'" for n in npi_list)
-
-            end = min(i + len(batch), n_candidates)
-            set_prescan_status(3, f"Smart scan — scoring candidates {i+1:,}–{end:,} of {n_candidates:,}…")
-
-            # HCPCS breakdown
-            hcpcs_sql = f"""
-            SELECT BILLING_PROVIDER_NPI_NUM AS npi, HCPCS_CODE AS hcpcs_code,
-                   SUM(TOTAL_PAID) AS total_paid, SUM(TOTAL_CLAIMS) AS total_claims
-            FROM read_parquet('{get_parquet_path()}')
-            WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_in})
-            GROUP BY npi, hcpcs_code ORDER BY npi, total_paid DESC
-            """
-            hcpcs_rows = await query_async(hcpcs_sql)
-            hcpcs_by_npi: dict[str, list[dict]] = {}
-            for r in hcpcs_rows:
-                hcpcs_by_npi.setdefault(r["npi"], []).append(r)
-
-            # Monthly timeline
-            timeline_sql = f"""
-            SELECT BILLING_PROVIDER_NPI_NUM AS npi, CLAIM_FROM_MONTH AS month,
-                   SUM(TOTAL_PAID) AS total_paid, SUM(TOTAL_CLAIMS) AS total_claims,
-                   SUM(TOTAL_UNIQUE_BENEFICIARIES) AS total_unique_beneficiaries
-            FROM read_parquet('{get_parquet_path()}')
-            WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_in})
-            GROUP BY npi, month ORDER BY npi, month ASC
-            """
-            timeline_rows = await query_async(timeline_sql)
-            timeline_by_npi: dict[str, list[dict]] = {}
-            for r in timeline_rows:
-                timeline_by_npi.setdefault(r["npi"], []).append(r)
-
-            # Per-HCPCS-code peer pools for this batch
-            peer_rpb: dict[str, list[float]] = _dd(list)
-            peer_cpb: dict[str, list[float]] = _dd(list)
-
-            top_hcpcs_by_npi: dict[str, str] = {
-                npi: rows[0]["hcpcs_code"]
-                for npi, rows in hcpcs_by_npi.items() if rows
-            }
-            # Seed from already-scored results
-            for prev in results:
-                c = prev.get("top_hcpcs") or ""
-                if c and prev.get("revenue_per_beneficiary", 0) > 0:
-                    peer_rpb[c].append(float(prev["revenue_per_beneficiary"]))
-                if c and prev.get("claims_per_beneficiary", 0) > 0:
-                    peer_cpb[c].append(float(prev["claims_per_beneficiary"]))
-            # Add current batch
-            for row in batch:
-                code = top_hcpcs_by_npi.get(row["npi"])
-                if code:
-                    row["top_hcpcs"] = code
-                    if row.get("revenue_per_beneficiary", 0) > 0:
-                        peer_rpb[code].append(float(row["revenue_per_beneficiary"]))
-                    if row.get("claims_per_beneficiary", 0) > 0:
-                        peer_cpb[code].append(float(row["claims_per_beneficiary"]))
-
-            peer_stats_map: dict[str, tuple[float, float]] = {
-                code: (_stats.mean(vals), _stats.stdev(vals) if len(vals) > 1 else 0.0)
-                for code, vals in peer_rpb.items() if len(vals) >= 3
-            }
-            cpb_stats_map: dict[str, tuple[float, float]] = {
-                code: (_stats.mean(vals), _stats.stdev(vals) if len(vals) > 1 else 0.0)
-                for code, vals in peer_cpb.items() if len(vals) >= 3
-            }
-
-            # Pre-compute cluster sizes from prescan cache NPPES data
-            cluster_sizes = compute_address_clusters()
-            auth_clusters = compute_auth_official_clusters()
-
-            for row in batch:
-                npi      = row["npi"]
-                hcpcs    = hcpcs_by_npi.get(npi, [])
-                timeline = timeline_by_npi.get(npi, [])
-                code     = top_hcpcs_by_npi.get(npi, "")
-
-                s1 = billing_concentration(row, hcpcs)
-                pm, ps = peer_stats_map.get(code, (rpb_mean, rpb_std))
-                s2 = revenue_per_bene_outlier(row, pm, ps)
-                cpb_m, cpb_s = cpb_stats_map.get(code, (cpb_mean, cpb_std))
-                s3 = claims_per_bene_anomaly(row, cpb_m, cpb_s)
-                s4 = billing_ramp_rate(timeline)
-                s5 = bust_out_pattern(timeline)
-                s6 = ghost_billing(row, timeline)
-                s7 = total_spend_outlier(row, spend_mean, spend_std)
-                s8 = billing_consistency(row, timeline)
-                s9 = bene_concentration(row)
-                s10 = upcoding_pattern(row, hcpcs)
-                s11 = address_cluster_risk(row, cluster_sizes.get(npi, 0))
-                s12 = oig_excluded(npi)
-                s13 = specialty_mismatch(row, hcpcs)
-                s14 = corporate_shell_risk(row, auth_clusters.get(npi, 0))
-                s15 = dead_npi_billing(row)
-                s16 = new_provider_explosion(row)
-                s17 = geographic_impossibility(row)
-
-                signals    = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17]
-                risk_score = round(min(sum(s["score"] * s["weight"] for s in signals), 100.0), 1)
-                flags      = [s for s in signals if s["flagged"]]
-
-                results.append({
-                    **row,
-                    "risk_score":    risk_score,
-                    "flags":         flags,
-                    "signal_results": signals,
-                    "hcpcs":         hcpcs,
-                    "timeline":      timeline,
-                })
-
-            # Merge in any NPPES data that enrichment tasks completed since last save,
-            # so set_prescanned doesn't wipe name/state/city from earlier batches.
-            current_by_npi = {p["npi"]: p for p in get_prescanned()}
-            for r in results:
-                if not r.get("nppes"):
-                    cached = current_by_npi.get(r["npi"], {})
-                    if cached.get("nppes"):
-                        r["nppes"] = cached["nppes"]
-                        r["state"] = cached.get("state", "")
-                        r["city"] = cached.get("city", "")
-                        r["provider_name"] = cached.get("provider_name", "")
-
-            # Save results after every batch so progress survives interruptions
-            set_prescanned(results)
-            set_scan_progress(len(results), n_candidates, state_filter, batch_i + 1)
-
-            # Enrich this batch with NPPES in the background (name/state/city for providers list)
-            from services.nppes_enricher import enrich_batch_with_nppes
-            asyncio.create_task(enrich_batch_with_nppes([r["npi"] for r in batch]))
-
-            high_risk_so_far = sum(1 for r in results if r["risk_score"] >= 50)
-            set_prescan_status(
-                3,
-                f"Smart scan — scored {len(results):,} of {n_candidates:,} candidates"
-                f" · {high_risk_so_far} high risk (≥50) found so far",
-            )
-
-        # ── Final persist (mark scan complete) ───────────────────────────────
-        set_scan_progress(n_candidates, n_candidates, state_filter, (n_candidates - 1) // BATCH + 1)
-
-        from services.nppes_enricher import enrich_batch_with_nppes
-        asyncio.create_task(enrich_batch_with_nppes([r["npi"] for r in results]))
-
-        high_risk_count = sum(1 for r in results if r["risk_score"] >= 50)
-        msg = (
-            f"Smart scan complete — {n_candidates:,} candidates scored "
-            f"({high_risk_count} high risk ≥50) out of {N:,} total providers"
-        )
-        set_prescan_status(0, msg)
-        log.info(msg)
-
-    except Exception as exc:
-        log.error("Smart scan failed: %s", exc, exc_info=True)
-        set_prescan_status(0, f"Smart scan error: {exc}")
-    finally:
-        _scan_running = False
-        release_scan_lock()
-        _smart_scan_mode = False
+async def rescore_endpoint():
+    """Re-run all fraud signals against cached providers."""
+    return await _rescore_cached()
 
 
 class SmartScanRequest(BaseModel):
@@ -1043,33 +331,24 @@ class SmartScanRequest(BaseModel):
 
 @app.post("/api/prescan/smart-scan", dependencies=[Depends(require_user)])
 async def smart_scan_endpoint(body: SmartScanRequest = None):
-    """
-    High-risk-first scan: loads ALL provider aggregates at once, pre-screens with
-    z-score thresholds, then fully scores only the candidates.
-    Requires local Parquet data (much faster than remote).
-    """
-    global _scan_running
+    """High-risk-first scan (requires local Parquet data)."""
     if not is_local():
-        raise HTTPException(
-            400,
-            "Smart scan requires the local dataset — download it first via the Data Source card.",
-        )
-    if _scan_running or is_scan_running():
+        raise HTTPException(400, "Smart scan requires the local dataset — download it first via the Data Source card.")
+    if is_scan_active():
         raise HTTPException(409, "A scan is already in progress")
-    if not acquire_scan_lock():
-        raise HTTPException(409, "A scan is already in progress (another worker)")
-    _scan_running = True
     state = _validate_state_filter(body.state_filter if body else None)
-    task_id = enqueue_task("smart_scan", _run_smart_scan, state or None)
+    try:
+        task_id = start_smart_scan(state or None)
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
     return {"started": True, "mode": "smart", "task_id": task_id}
 
 
 @app.post("/api/prescan/reset", dependencies=[Depends(require_admin)])
 async def reset_scan_endpoint():
-    global _scan_running, _auto_mode
-    if _scan_running or is_scan_running():
+    if is_scan_active():
         raise HTTPException(409, "Cannot reset while a scan is in progress")
-    _auto_mode = False
+    stop_auto_mode()
     reset_scan()
     set_prescan_status(0, "Idle — scan has been reset")
     return {"ok": True}
@@ -1126,9 +405,7 @@ async def summary():
 @app.get("/api/prescan/status", dependencies=[Depends(require_user)])
 async def prescan_status_endpoint():
     status = get_prescan_status()
-    status["auto_mode"] = _auto_mode
-    status["smart_scan_mode"] = _smart_scan_mode
-    status["scan_locked"] = is_scan_running()
+    status.update(get_scan_state())
     return status
 
 
