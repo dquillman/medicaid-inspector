@@ -176,7 +176,8 @@ async def run_scan_batch(batch_size: int, state_filter: Optional[str], force: bo
         _scan_start_time = _time_mod.time()
 
         progress = get_scan_progress()
-        if progress.get("offset", 0) == 0:
+        if progress.get("offset", 0) == 0 and is_local():
+            # Only run validation on local data — remote Parquet is too slow
             try:
                 from services.data_validator import run_validation
                 set_prescan_status(1, "Running data quality validation…")
