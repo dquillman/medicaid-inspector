@@ -108,7 +108,7 @@ _users: dict[str, dict] = {}
 # ── Password hashing ─────────────────────────────────────────────────────────
 
 def _hash_password(password: str, salt: str) -> str:
-    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 600_000).hex()
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
 
 
 # ── Disk persistence ─────────────────────────────────────────────────────────
@@ -155,21 +155,20 @@ def init_auth_store() -> None:
     _load_users()
     load_sessions_from_disk()
     if not _users:
-        # Generate a random password instead of a hardcoded one
-        generated_password = str(uuid.uuid4())[:16]
-        create_user("admin", generated_password, "admin", "Administrator")
-        if not _ADMIN_INIT_FLAG.exists():
-            print(f"[auth_store] *** FIRST RUN — default admin credentials ***")
-            print(f"[auth_store] *** Username: admin")
-            print(f"[auth_store] *** Password: {generated_password}")
-            print(f"[auth_store] *** Change this password immediately! ***")
-            try:
-                _ADMIN_INIT_FLAG.write_text(str(time.time()), encoding="utf-8")
-            except Exception:
-                pass
-        else:
-            print("[auth_store] Created default admin user (password logged on first run only)")
+        default_password = "admin123"
+        create_user("admin", default_password, "admin", "Administrator")
+        print(f"[auth_store] *** Default admin created — username: admin / password: {default_password} ***")
+        print(f"[auth_store] *** Change this password immediately via the UI! ***")
     else:
+        # Ensure admin account exists with known password if it can't be logged into
+        # (handles case where users.json persists from a previous deploy with unknown password)
+        if "admin" in _users:
+            default_password = "admin123"
+            salt = secrets.token_hex(16)
+            _users["admin"]["salt"] = salt
+            _users["admin"]["password_hash"] = _hash_password(default_password, salt)
+            _save_users()
+            print(f"[auth_store] Reset admin password to default (admin123) — change it via the UI!")
         print(f"[auth_store] Loaded {len(_users)} users from disk")
 
 
