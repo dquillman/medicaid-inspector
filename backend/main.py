@@ -112,11 +112,11 @@ from services.scan_engine import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # ── GCS: restore persisted data before anything else ─────────────────
-    from core.gcs_sync import download_all as _gcs_download
-    gcs_count = await asyncio.to_thread(_gcs_download)
-    if gcs_count:
-        log.info("Restored %d files from GCS bucket", gcs_count)
+    # ── GCS: restore small state files before init (skip large Parquet) ──
+    from core.gcs_sync import download_state_files as _gcs_download_state
+    state_count = await asyncio.to_thread(_gcs_download_state)
+    if state_count:
+        log.info("Restored %d state files from GCS bucket", state_count)
 
     log.info("Initializing DuckDB with httpfs…")
     await asyncio.to_thread(get_connection)
@@ -178,6 +178,10 @@ async def lifespan(app: FastAPI):
     else:
         set_prescan_status(0, "Idle — use the Scan button to begin")
         log.info("No cache found — idle, waiting for manual scan trigger.")
+
+    # ── GCS: download Parquet in the background (too large for sync startup) ──
+    from core.gcs_sync import download_parquet_async
+    asyncio.create_task(download_parquet_async())
 
     yield
 
