@@ -2,12 +2,15 @@ import { useState } from 'react'
 
 interface Props {
   onLogin: (username: string, password: string) => Promise<string | null>
+  onRegister: (username: string, password: string, displayName?: string) => Promise<string | null>
   onBack: () => void
 }
 
-export default function Login({ onLogin, onBack }: Props) {
+export default function Login({ onLogin, onRegister, onBack }: Props) {
+  const [isSignUp, setIsSignUp] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
+  const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
@@ -19,10 +22,16 @@ export default function Login({ onLogin, onBack }: Props) {
       setError('Username and password are required')
       return
     }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters')
+      return
+    }
 
     setLoading(true)
     try {
-      const err = await onLogin(username, password)
+      const err = isSignUp
+        ? await onRegister(username, password, displayName || undefined)
+        : await onLogin(username, password)
       if (err) setError(err)
     } finally {
       setLoading(false)
@@ -46,8 +55,10 @@ export default function Login({ onLogin, onBack }: Props) {
               <text x="46" y="22" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="9" fill="white">!</text>
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-white">Welcome Back</h1>
-          <p className="text-sm text-gray-500 mt-1">Sign in to Medicaid Inspector</p>
+          <h1 className="text-2xl font-bold text-white">{isSignUp ? 'Create Account' : 'Welcome Back'}</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            {isSignUp ? 'Sign up for Medicaid Inspector' : 'Sign in to Medicaid Inspector'}
+          </p>
         </div>
 
         {/* Form */}
@@ -65,10 +76,23 @@ export default function Login({ onLogin, onBack }: Props) {
               value={username}
               onChange={e => setUsername(e.target.value)}
               className="input w-full"
-              placeholder="admin"
+              placeholder="username"
               autoFocus
             />
           </div>
+
+          {isSignUp && (
+            <div>
+              <label className="block text-xs text-gray-400 mb-1.5 uppercase tracking-wider">Display Name</label>
+              <input
+                type="text"
+                value={displayName}
+                onChange={e => setDisplayName(e.target.value)}
+                className="input w-full"
+                placeholder="Your Name (optional)"
+              />
+            </div>
+          )}
 
           <div>
             <label className="block text-xs text-gray-400 mb-1.5 uppercase tracking-wider">Password</label>
@@ -86,14 +110,22 @@ export default function Login({ onLogin, onBack }: Props) {
             disabled={loading}
             className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold text-sm transition-colors"
           >
-            {loading ? 'Signing in...' : 'Sign In'}
+            {loading ? (isSignUp ? 'Creating account...' : 'Signing in...') : (isSignUp ? 'Create Account' : 'Sign In')}
           </button>
         </form>
 
-        <div className="text-center mt-4">
-          <button onClick={onBack} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
-            &larr; Back to home
+        <div className="text-center mt-4 space-y-2">
+          <button
+            onClick={() => { setIsSignUp(!isSignUp); setError('') }}
+            className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+          >
+            {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
           </button>
+          <div>
+            <button onClick={onBack} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
+              &larr; Back to home
+            </button>
+          </div>
         </div>
       </div>
     </div>

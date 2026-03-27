@@ -253,6 +253,25 @@ export default function App() {
   const handleLogin = (username: string, password: string) =>
     authRequest('/auth/login', username, password, 'Login failed')
 
+  const handleRegister = async (username: string, password: string, displayName?: string) => {
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, display_name: displayName || username }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || 'Registration failed')
+      const session = { token: data.token, user: data.user }
+      setUser(data.user)
+      localStorage.setItem('mfi_session', JSON.stringify(session))
+      setView('app')
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : 'Registration failed'
+    }
+  }
+
   const handleLogout = () => {
     setUser(null)
     localStorage.removeItem('mfi_session')
@@ -267,6 +286,7 @@ export default function App() {
       ) : view === 'login' ? (
         <Login
           onLogin={handleLogin}
+          onRegister={handleRegister}
           onBack={() => setView('landing')}
         />
       ) : (

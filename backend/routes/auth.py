@@ -93,6 +93,30 @@ async def login(req: LoginRequest, request: Request):
     }
 
 
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    display_name: str = ""
+
+
+@router.post("/register")
+async def register(req: RegisterRequest, request: Request):
+    """Self-registration — creates a viewer account."""
+    from core.rate_limiter import check_login_rate
+    check_login_rate(request)
+    try:
+        user = create_user(
+            username=req.username,
+            password=req.password,
+            role="viewer",
+            display_name=req.display_name or req.username,
+        )
+        token = create_session(req.username)
+        return {"token": token, "user": user}
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.post("/logout")
 async def logout(request: Request):
     token = _extract_token(request)
