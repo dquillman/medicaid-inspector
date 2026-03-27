@@ -59,29 +59,13 @@ _PARQUET_BLOB = "medicaid-provider-spending.parquet"
 _PARQUET_LOCAL = _BACKEND_DIR / "data" / "medicaid-provider-spending.parquet"
 
 
-def download_all() -> int:
-    """Download all sync files from GCS to local disk. Returns count downloaded."""
+def download_state_files() -> int:
+    """Download small state files from GCS (fast, safe for startup). Skips Parquet."""
     bucket = _get_bucket()
     if not bucket:
         return 0
 
     downloaded = 0
-
-    # Download the Parquet dataset if not already on disk
-    if not _PARQUET_LOCAL.exists() or _PARQUET_LOCAL.stat().st_size < 1_000_000:
-        blob = bucket.blob(_PARQUET_BLOB)
-        try:
-            if blob.exists():
-                _PARQUET_LOCAL.parent.mkdir(parents=True, exist_ok=True)
-                log.info("[gcs_sync] Downloading Parquet dataset (this may take a minute)...")
-                blob.download_to_filename(str(_PARQUET_LOCAL))
-                size_mb = _PARQUET_LOCAL.stat().st_size / (1024 * 1024)
-                log.info("[gcs_sync] Downloaded Parquet dataset (%.0f MB)", size_mb)
-                downloaded += 1
-        except Exception as e:
-            log.warning("[gcs_sync] Failed to download Parquet: %s", e)
-
-    # Download state files
     for filename in _SYNC_FILES:
         local_path = _BACKEND_DIR / filename
         blob = bucket.blob(filename)
@@ -95,6 +79,45 @@ def download_all() -> int:
             log.warning("[gcs_sync] Failed to download %s: %s", filename, e)
 
     return downloaded
+
+
+def download_parquet() -> bool:
+    """Download the Parquet dataset from GCS. Called in background after server starts."""
+    if _PARQUET_LOCAL.exists() and _PARQUET_LOCAL.stat().st_size > 1_000_000:
+        log.info("[gcs_sync] Parquet already on disk (%.0f MB)", _PARQUET_LOCAL.stat().st_size / (1024 * 1024))
+        return True
+
+    bucket = _get_bucket()
+    if not bucket:
+        return False
+
+    blob = bucket.blob(_PARQUET_BLOB)
+    try:
+        if not blob.exists():
+            log.info("[gcs_sync] No Parquet in GCS bucket — will use remote URL")
+            return False
+        _PARQUET_LOCAL.parent.mkdir(parents=True, exist_ok=True)
+        log.info("[gcs_sync] Downloading Parquet dataset from GCS (this may take a minute)...")
+        blob.download_to_filename(str(_PARQUET_LOCAL))
+        size_mb = _PARQUET_LOCAL.stat().st_size / (1024 * 1024)
+        log.info("[gcs_sync] Parquet dataset ready (%.0f MB) — scans will use local data", size_mb)
+        return True
+    except Exception as e:
+        log.warning("[gcs_sync] Failed to download Parquet: %s", e)
+        return False
+
+
+async def download_parquet_async() -> bool:
+    """Async wrapper for background Parquet download."""
+    return await asyncio.to_thread(download_parquet)
+
+
+def download_all() -> int:
+    """Download everything (state files + Parquet). Used for manual sync."""
+    count = download_state_files()
+    if download_parquet():
+        count += 1
+    return count
 
 
 def upload_file(filename: str) -> bool:
