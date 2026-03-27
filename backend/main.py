@@ -112,6 +112,12 @@ from services.scan_engine import (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── GCS: restore persisted data before anything else ─────────────────
+    from core.gcs_sync import download_all as _gcs_download
+    gcs_count = await asyncio.to_thread(_gcs_download)
+    if gcs_count:
+        log.info("Restored %d files from GCS bucket", gcs_count)
+
     log.info("Initializing DuckDB with httpfs…")
     await asyncio.to_thread(get_connection)
     log.info("DuckDB ready.")

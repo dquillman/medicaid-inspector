@@ -146,6 +146,12 @@ def _save_users() -> None:
     try:
         data = {"users": list(_users.values())}
         atomic_write_json(_USERS_FILE, data, indent=2)
+        # Sync to GCS in background (non-blocking)
+        try:
+            from core.gcs_sync import upload_file
+            upload_file("users.json")
+        except Exception:
+            pass
     except Exception as e:
         print(f"[auth_store] Could not save users: {e}")
 

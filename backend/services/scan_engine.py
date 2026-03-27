@@ -360,6 +360,10 @@ async def run_scan_batch(batch_size: int, state_filter: Optional[str], force: bo
         new_offset = offset + len(agg_rows)
         set_scan_progress(new_offset, total, active_filter, batches + 1)
 
+        # Sync to GCS so data survives container restarts
+        from core.gcs_sync import sync_after_scan
+        asyncio.create_task(sync_after_scan())
+
         flagged_results = [r for r in results if r["risk_score"] > settings.RISK_THRESHOLD]
         flagged = len(flagged_results)
 
@@ -459,6 +463,10 @@ async def rescore_cached_providers():
         ))
 
     set_prescanned(rescored)
+
+    # Sync to GCS
+    from core.gcs_sync import sync_after_scan
+    await sync_after_scan()
 
     flagged = [p for p in rescored if p["risk_score"] > settings.RISK_THRESHOLD]
 
@@ -656,6 +664,10 @@ async def run_smart_scan(state_filter: Optional[str]):
 
             set_prescanned(results)
             set_scan_progress(len(results), n_candidates, state_filter, batch_i + 1)
+
+            # Sync to GCS after each smart scan batch
+            from core.gcs_sync import sync_after_scan
+            asyncio.create_task(sync_after_scan())
 
             from services.nppes_enricher import enrich_batch_with_nppes
             asyncio.create_task(enrich_batch_with_nppes([r["npi"] for r in batch]))
