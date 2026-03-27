@@ -155,20 +155,10 @@ def init_auth_store() -> None:
     _load_users()
     load_sessions_from_disk()
     if not _users:
-        # Generate a random password instead of a hardcoded one
-        generated_password = str(uuid.uuid4())[:16]
-        create_user("admin", generated_password, "admin", "Administrator")
-        if not _ADMIN_INIT_FLAG.exists():
-            print(f"[auth_store] *** FIRST RUN — default admin credentials ***")
-            print(f"[auth_store] *** Username: admin")
-            print(f"[auth_store] *** Password: {generated_password}")
-            print(f"[auth_store] *** Change this password immediately! ***")
-            try:
-                _ADMIN_INIT_FLAG.write_text(str(time.time()), encoding="utf-8")
-            except Exception:
-                pass
-        else:
-            print("[auth_store] Created default admin user (password logged on first run only)")
+        default_password = "admin123"
+        create_user("admin", default_password, "admin", "Administrator")
+        print(f"[auth_store] *** Default admin created — username: admin / password: {default_password} ***")
+        print(f"[auth_store] *** Change this password immediately via the UI! ***")
     else:
         print(f"[auth_store] Loaded {len(_users)} users from disk")
 
