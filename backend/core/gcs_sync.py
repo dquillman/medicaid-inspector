@@ -55,6 +55,10 @@ def _get_bucket():
         return None
 
 
+_PARQUET_BLOB = "medicaid-provider-spending.parquet"
+_PARQUET_LOCAL = _BACKEND_DIR / "data" / "medicaid-provider-spending.parquet"
+
+
 def download_all() -> int:
     """Download all sync files from GCS to local disk. Returns count downloaded."""
     bucket = _get_bucket()
@@ -62,6 +66,22 @@ def download_all() -> int:
         return 0
 
     downloaded = 0
+
+    # Download the Parquet dataset if not already on disk
+    if not _PARQUET_LOCAL.exists() or _PARQUET_LOCAL.stat().st_size < 1_000_000:
+        blob = bucket.blob(_PARQUET_BLOB)
+        try:
+            if blob.exists():
+                _PARQUET_LOCAL.parent.mkdir(parents=True, exist_ok=True)
+                log.info("[gcs_sync] Downloading Parquet dataset (this may take a minute)...")
+                blob.download_to_filename(str(_PARQUET_LOCAL))
+                size_mb = _PARQUET_LOCAL.stat().st_size / (1024 * 1024)
+                log.info("[gcs_sync] Downloaded Parquet dataset (%.0f MB)", size_mb)
+                downloaded += 1
+        except Exception as e:
+            log.warning("[gcs_sync] Failed to download Parquet: %s", e)
+
+    # Download state files
     for filename in _SYNC_FILES:
         local_path = _BACKEND_DIR / filename
         blob = bucket.blob(filename)
