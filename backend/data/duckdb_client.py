@@ -4,11 +4,14 @@ Uses thread-local connections so each asyncio.to_thread worker gets its own
 DuckDB connection — avoiding the "shared connection is not thread-safe" bug.
 """
 import asyncio
+import logging
 import pathlib
 import threading
 import duckdb
 from core.config import settings
 from core.cache import cached_query
+
+log = logging.getLogger(__name__)
 
 _thread_local = threading.local()
 
@@ -32,7 +35,16 @@ def get_parquet_path() -> str:
     """Return local path if a valid file exists there, otherwise the remote URL."""
     p = _resolve_local_path()
     if p.exists() and p.stat().st_size > 1_000_000:
-        return str(p).replace("\\", "/")
+        # Validate the Parquet file has proper magic bytes (PAR1 header)
+        try:
+            with open(p, "rb") as f:
+                header = f.read(4)
+            if header == b"PAR1":
+                return str(p).replace("\\", "/")
+            else:
+                log.warning("Local Parquet file has invalid header — using remote URL")
+        except Exception:
+            pass
     return settings.PARQUET_URL
 
 
