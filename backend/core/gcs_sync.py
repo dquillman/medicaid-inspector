@@ -21,7 +21,7 @@ _BACKEND_DIR = pathlib.Path(__file__).parent.parent
 
 # Files to sync — relative to backend/
 _SYNC_FILES = [
-    "prescan_cache.json",
+    # NOTE: prescan_cache.json is NOT here — it's 1.5GB and loaded in background
     "app.db",
     "users.json",
     "sessions.json",
@@ -110,6 +110,32 @@ def download_parquet() -> bool:
 async def download_parquet_async() -> bool:
     """Async wrapper for background Parquet download."""
     return await asyncio.to_thread(download_parquet)
+
+
+def download_prescan_cache() -> bool:
+    """Download prescan_cache.json from GCS. Called in background — it's 1.5GB."""
+    local_path = _BACKEND_DIR / "prescan_cache.json"
+    bucket = _get_bucket()
+    if not bucket:
+        return False
+    blob = bucket.blob("prescan_cache.json")
+    try:
+        if not blob.exists():
+            log.info("[gcs_sync] No prescan_cache.json in GCS bucket")
+            return False
+        log.info("[gcs_sync] Downloading prescan_cache.json from GCS (large file)...")
+        blob.download_to_filename(str(local_path))
+        size_mb = local_path.stat().st_size / (1024 * 1024)
+        log.info("[gcs_sync] prescan_cache.json ready (%.0f MB)", size_mb)
+        return True
+    except Exception as e:
+        log.warning("[gcs_sync] Failed to download prescan_cache.json: %s", e)
+        return False
+
+
+async def download_prescan_cache_async() -> bool:
+    """Async wrapper for background prescan cache download."""
+    return await asyncio.to_thread(download_prescan_cache)
 
 
 def download_all() -> int:
