@@ -3,8 +3,8 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     PARQUET_URL: str = (
-        "https://stopendataprod.blob.core.windows.net/datasets/"
-        "medicaid-provider-spending/2026-02-09/medicaid-provider-spending.parquet"
+        "https://storage.googleapis.com/medicaid-inspector-data/"
+        "medicaid-provider-spending.parquet"
     )
     # Optional: override the local Parquet file path.
     # Set this in .env if you downloaded the file somewhere other than
