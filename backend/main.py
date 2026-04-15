@@ -110,8 +110,49 @@ from services.scan_engine import (
 )
 
 
+def _finish_prescan_load():
+    """Post-load bookkeeping after prescan_cache.json is available in memory."""
+    prog = get_scan_progress()
+    scanned = prog.get("offset", 0)
+    total = prog.get("total_provider_count")
+    msg = f"Loaded {len(get_prescanned())} providers from cache"
+    if total:
+        msg += f" · {scanned:,} of {total:,} scanned"
+    set_prescan_status(0, msg)
+    log.info(msg)
+
+    # Enrich providers missing NPPES data
+    missing_nppes = [
+        p["npi"] for p in get_prescanned()
+        if not p.get("nppes") or not (p.get("nppes") or {}).get("enumeration_date")
+    ]
+    if missing_nppes:
+        from services.nppes_enricher import enrich_batch_with_nppes
+        from core.cache import invalidate_nppes_cache
+        invalidate_nppes_cache()
+        asyncio.get_event_loop().create_task(enrich_batch_with_nppes(missing_nppes))
+        log.info("Queued NPPES enrichment for %d providers", len(missing_nppes))
+
+
+async def _bg_download_and_load_prescan():
+    """Background: download prescan_cache.json from GCS then load into memory."""
+    from core.gcs_sync import download_prescan_cache_async
+    ok = await download_prescan_cache_async()
+    if ok and load_prescanned_from_disk():
+        _finish_prescan_load()
+    else:
+        set_prescan_status(0, "Idle — use the Scan button to begin")
+        log.info("No prescan cache in GCS — idle.")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # ── GCS: restore small state files before init (skip large Parquet) ──
+    from core.gcs_sync import download_state_files as _gcs_download_state
+    state_count = await asyncio.to_thread(_gcs_download_state)
+    if state_count:
+        log.info("Restored %d state files from GCS bucket", state_count)
+
     log.info("Initializing DuckDB with httpfs…")
     await asyncio.to_thread(get_connection)
     log.info("DuckDB ready.")
@@ -147,31 +188,17 @@ async def lifespan(app: FastAPI):
     # Load Medicaid enrollment data (disk cache or CMS API)
     asyncio.create_task(load_or_fetch_enrollment())
 
+    # Try loading prescan from local disk first (works on dev machine)
     if load_prescanned_from_disk():
-        prog = get_scan_progress()
-        scanned = prog.get("offset", 0)
-        total = prog.get("total_provider_count")
-        msg = f"Loaded {len(get_prescanned())} providers from cache"
-        if total:
-            msg += f" · {scanned:,} of {total:,} scanned"
-        set_prescan_status(0, msg)
-        log.info(msg)
-
-        # Enrich any providers that are missing NPPES data (name/state/city)
-        # Also re-enrich providers missing enumeration_date (added after initial enrichment)
-        missing_nppes = [
-            p["npi"] for p in get_prescanned()
-            if not p.get("nppes") or not (p.get("nppes") or {}).get("enumeration_date")
-        ]
-        if missing_nppes:
-            from services.nppes_enricher import enrich_batch_with_nppes
-            from core.cache import invalidate_nppes_cache
-            invalidate_nppes_cache()  # Clear stale NPPES cache so we get fresh data with enumeration_date
-            asyncio.create_task(enrich_batch_with_nppes(missing_nppes))
-            log.info("Queued NPPES enrichment for %d providers missing name/state/city or enumeration_date", len(missing_nppes))
+        _finish_prescan_load()
     else:
-        set_prescan_status(0, "Idle — use the Scan button to begin")
-        log.info("No cache found — idle, waiting for manual scan trigger.")
+        # On Cloud Run, prescan_cache.json isn't on disk yet — download from GCS in background
+        set_prescan_status(0, "Loading scan data from cloud storage…")
+        log.info("No local cache — will try GCS download in background")
+        asyncio.create_task(_bg_download_and_load_prescan())
+
+    # NOTE: Parquet stays remote (read via DuckDB httpfs) — no local download on Cloud Run.
+    # The 2.8GB file is too large to download reliably in a container.
 
     yield
 

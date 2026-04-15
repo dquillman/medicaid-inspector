@@ -176,7 +176,8 @@ async def run_scan_batch(batch_size: int, state_filter: Optional[str], force: bo
         _scan_start_time = _time_mod.time()
 
         progress = get_scan_progress()
-        if progress.get("offset", 0) == 0:
+        if progress.get("offset", 0) == 0 and is_local():
+            # Only run validation on local data — remote Parquet is too slow
             try:
                 from services.data_validator import run_validation
                 set_prescan_status(1, "Running data quality validation…")
@@ -360,6 +361,10 @@ async def run_scan_batch(batch_size: int, state_filter: Optional[str], force: bo
         new_offset = offset + len(agg_rows)
         set_scan_progress(new_offset, total, active_filter, batches + 1)
 
+        # Sync to GCS so data survives container restarts
+        from core.gcs_sync import sync_after_scan
+        asyncio.create_task(sync_after_scan())
+
         flagged_results = [r for r in results if r["risk_score"] > settings.RISK_THRESHOLD]
         flagged = len(flagged_results)
 
@@ -459,6 +464,10 @@ async def rescore_cached_providers():
         ))
 
     set_prescanned(rescored)
+
+    # Sync to GCS
+    from core.gcs_sync import sync_after_scan
+    await sync_after_scan()
 
     flagged = [p for p in rescored if p["risk_score"] > settings.RISK_THRESHOLD]
 
@@ -656,6 +665,10 @@ async def run_smart_scan(state_filter: Optional[str]):
 
             set_prescanned(results)
             set_scan_progress(len(results), n_candidates, state_filter, batch_i + 1)
+
+            # Sync to GCS after each smart scan batch
+            from core.gcs_sync import sync_after_scan
+            asyncio.create_task(sync_after_scan())
 
             from services.nppes_enricher import enrich_batch_with_nppes
             asyncio.create_task(enrich_batch_with_nppes([r["npi"] for r in batch]))
