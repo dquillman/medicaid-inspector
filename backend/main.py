@@ -188,14 +188,16 @@ async def lifespan(app: FastAPI):
     # Load Medicaid enrollment data (disk cache or CMS API)
     asyncio.create_task(load_or_fetch_enrollment())
 
-    # Try loading prescan from local disk first (works on dev machine)
-    if load_prescanned_from_disk():
+    # Try loading prescan from local disk first (works on dev machine).
+    # On Cloud Run we skip loading the 1.5GB cache — too memory-intensive.
+    # Provider data is served directly from DuckDB/Parquet instead.
+    import os as _os
+    _is_cloud_run = _os.environ.get("K_SERVICE") is not None  # Cloud Run sets K_SERVICE
+    if not _is_cloud_run and load_prescanned_from_disk():
         _finish_prescan_load()
     else:
-        # On Cloud Run, prescan_cache.json isn't on disk yet — download from GCS in background
-        set_prescan_status(0, "Loading scan data from cloud storage…")
-        log.info("No local cache — will try GCS download in background")
-        asyncio.create_task(_bg_download_and_load_prescan())
+        set_prescan_status(0, "Ready — use Scan to populate provider cache")
+        log.info("Skipping prescan cache load (Cloud Run: %s)", _is_cloud_run)
 
     # NOTE: Parquet stays remote (read via DuckDB httpfs) — no local download on Cloud Run.
     # The 2.8GB file is too large to download reliably in a container.
