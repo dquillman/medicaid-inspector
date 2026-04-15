@@ -146,30 +146,45 @@ def _save_users() -> None:
     try:
         data = {"users": list(_users.values())}
         atomic_write_json(_USERS_FILE, data, indent=2)
+        # Sync to GCS in background (non-blocking)
+        try:
+            from core.gcs_sync import upload_file
+            upload_file("users.json")
+        except Exception:
+            pass
     except Exception as e:
         print(f"[auth_store] Could not save users: {e}")
 
 
 def init_auth_store() -> None:
     """Load users and sessions from disk at startup. Create default admin if no users exist."""
+    import os
     _load_users()
     load_sessions_from_disk()
+    default_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+
     if not _users:
-        default_password = "admin123"
         create_user("admin", default_password, "admin", "Administrator")
         print(f"[auth_store] *** Default admin created — username: admin / password: {default_password} ***")
-        print(f"[auth_store] *** Change this password immediately via the UI! ***")
     else:
-        # Ensure admin account exists with known password if it can't be logged into
-        # (handles case where users.json persists from a previous deploy with unknown password)
-        if "admin" in _users:
-            default_password = "admin123"
-            salt = secrets.token_hex(16)
-            _users["admin"]["salt"] = salt
-            _users["admin"]["password_hash"] = _hash_password(default_password, salt)
-            _save_users()
-            print(f"[auth_store] Reset admin password to default (admin123) — change it via the UI!")
-        print(f"[auth_store] Loaded {len(_users)} users from disk")
+        # Ensure an admin account exists with a known password on Cloud Run
+        # (GCS may restore old users.json with unknown password hashes)
+        # Reset ALL admin-role users + ensure "admin" account exists
+        reset_count = 0
+        for username, user in _users.items():
+            if user.get("role") == "admin":
+                salt = secrets.token_hex(16)
+                user["salt"] = salt
+                user["password_hash"] = _hash_password(default_password, salt)
+                reset_count += 1
+                print(f"[auth_store] Reset password for admin user '{username}'")
+
+        if "admin" not in _users:
+            create_user("admin", default_password, "admin", "Administrator")
+            print(f"[auth_store] Created missing 'admin' account")
+
+        _save_users()
+        print(f"[auth_store] Loaded {len(_users)} users ({reset_count} admin passwords reset)")
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
