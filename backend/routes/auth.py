@@ -1,10 +1,14 @@
 """
 Authentication & user management routes — RBAC with session tokens.
 """
+import re
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
+
+# Usernames: 3-64 chars, alphanumeric + underscore/hyphen only, must start with a letter/digit
+_USERNAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_\-]{2,63}$')
 
 from core.auth_store import (
     authenticate,
@@ -56,6 +60,18 @@ async def require_admin(request: Request) -> dict:
     user = await require_user(request)
     if user["role"] != "admin":
         raise HTTPException(403, "Admin access required")
+    return user
+
+
+# Roles that can run scans / analyst-level operations (analyst, investigator, admin)
+_ANALYST_ROLES = {"analyst", "investigator", "admin"}
+
+
+async def require_analyst(request: Request) -> dict:
+    """FastAPI dependency — requires analyst role or above (analyst/investigator/admin)."""
+    user = await require_user(request)
+    if user["role"] not in _ANALYST_ROLES:
+        raise HTTPException(403, "Analyst access required")
     return user
 
 
@@ -111,6 +127,15 @@ async def register(req: RegisterRequest, request: Request):
     """Self-registration — creates a viewer account."""
     from core.rate_limiter import check_login_rate
     check_login_rate(request)
+    # Validate username format before touching the store
+    if not _USERNAME_RE.match(req.username):
+        raise HTTPException(
+            400,
+            "Username must be 3–64 characters, start with a letter or digit, "
+            "and contain only letters, digits, hyphens, or underscores.",
+        )
+    if len(req.password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters")
     try:
         user = create_user(
             username=req.username,
@@ -200,8 +225,8 @@ async def change_password(req: ChangePasswordRequest, user: dict = Depends(requi
     # Verify old password
     if not authenticate(user["username"], req.old_password):
         raise HTTPException(400, "Current password is incorrect")
-    if len(req.new_password) < 6:
-        raise HTTPException(400, "New password must be at least 6 characters")
+    if len(req.new_password) < 8:
+        raise HTTPException(400, "New password must be at least 8 characters")
     try:
         result = update_user(user["username"], {"password": req.new_password})
         if not result:
@@ -212,6 +237,6 @@ async def change_password(req: ChangePasswordRequest, user: dict = Depends(requi
 
 
 @router.get("/roles")
-async def get_roles():
-    """Return available roles (public, used by admin UI)."""
+async def get_roles(admin: dict = Depends(require_admin)):
+    """Return available roles — admin only, used by user management UI."""
     return {"roles": sorted(ROLES)}

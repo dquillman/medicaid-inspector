@@ -39,6 +39,15 @@ async def get_ownership_networks():
         }
         networks.setdefault(off_key, []).append(entry)
 
+    # Build a lookup from off_key -> canonical official name to avoid re-scanning prescan list
+    off_key_to_official: dict[str, str] = {}
+    for p in get_prescanned():
+        p_nppes = p.get("nppes") or {}
+        p_auth = p_nppes.get("authorized_official") or {}
+        p_off = (p_auth.get("name") or "").strip()
+        if p_off:
+            off_key_to_official.setdefault(p_off.lower().strip(), p_off)
+
     # Filter to 3+ NPIs and build response
     result = []
     for off_key, npis in networks.items():
@@ -49,17 +58,8 @@ async def get_ownership_networks():
         avg_risk = sum(n["risk_score"] for n in npis) / len(npis) if npis else 0
         top_risk = max(npis, key=lambda x: x["risk_score"])
 
-        # Use original-cased name from first entry
-        official_name = npis[0]["name"] if npis else off_key
-
-        # Try to get the actual authorized official name (not provider name)
-        for p in get_prescanned():
-            p_nppes = p.get("nppes") or {}
-            p_auth = p_nppes.get("authorized_official") or {}
-            p_off = (p_auth.get("name") or "").strip()
-            if p_off.lower().strip() == off_key:
-                official_name = p_off
-                break
+        # Use canonical official name from the prebuilt lookup; fall back to key
+        official_name = off_key_to_official.get(off_key, off_key)
 
         npis.sort(key=lambda x: x["risk_score"], reverse=True)
 

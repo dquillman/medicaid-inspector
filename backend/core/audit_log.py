@@ -36,17 +36,21 @@ def load_audit_from_disk() -> None:
         if not _LOG_FILE.exists():
             return
         raw = json.loads(_LOG_FILE.read_text(encoding="utf-8"))
-        _entries = raw.get("entries", [])
-        if _entries:
-            _next_id = max(e.get("id", 0) for e in _entries) + 1
+        loaded = raw.get("entries", [])
+        next_id = (max(e.get("id", 0) for e in loaded) + 1) if loaded else 1
+        with _lock:
+            _entries = loaded
+            _next_id = next_id
         print(f"[audit_log] Loaded {len(_entries)} audit entries from disk")
     except Exception as e:
         print(f"[audit_log] Could not load audit log: {e}")
 
 
 def _save_to_disk() -> None:
+    # Takes its own snapshot — safe to call with or without _lock held.
+    snapshot = list(_entries)
     try:
-        atomic_write_json(_LOG_FILE, {"entries": _entries})
+        atomic_write_json(_LOG_FILE, {"entries": snapshot})
     except Exception as e:
         print(f"[audit_log] Could not save audit log: {e}")
 
@@ -91,7 +95,8 @@ def get_audit_log(
     Return paginated audit log entries (newest first).
     Optional filters: action_type, entity_type, entity_id, date_from, date_to
     """
-    items = list(_entries)
+    with _lock:
+        items = list(_entries)
 
     if filters:
         if filters.get("action_type"):
@@ -115,12 +120,26 @@ def get_audit_log(
 
 def get_entity_history(entity_type: str, entity_id: str) -> list:
     """Return all audit entries for a specific entity, newest first."""
+    with _lock:
+        snapshot = list(_entries)
     items = [
-        e for e in _entries
+        e for e in snapshot
         if e["entity_type"] == entity_type and e["entity_id"] == str(entity_id)
     ]
     items.sort(key=lambda x: x["timestamp"], reverse=True)
     return items
+
+
+def purge_entries_before(cutoff_ts: float) -> int:
+    """Remove all audit entries older than cutoff_ts (Unix timestamp). Returns count removed."""
+    global _entries
+    with _lock:
+        before = len(_entries)
+        _entries = [e for e in _entries if e["timestamp"] >= cutoff_ts]
+        removed = before - len(_entries)
+        if removed:
+            _save_to_disk()
+    return removed
 
 
 def get_audit_stats() -> dict:
@@ -128,11 +147,14 @@ def get_audit_stats() -> dict:
     from collections import Counter
     from datetime import datetime
 
-    by_action = Counter(e["action_type"] for e in _entries)
+    with _lock:
+        snapshot = list(_entries)
+
+    by_action = Counter(e["action_type"] for e in snapshot)
     by_day: dict[str, int] = Counter()
     entity_counter: Counter = Counter()
 
-    for e in _entries:
+    for e in snapshot:
         day = datetime.fromtimestamp(e["timestamp"]).strftime("%Y-%m-%d")
         by_day[day] += 1
         entity_counter[f"{e['entity_type']}:{e['entity_id']}"] += 1
@@ -150,7 +172,7 @@ def get_audit_stats() -> dict:
     ]
 
     return {
-        "total_entries": len(_entries),
+        "total_entries": len(snapshot),
         "by_action_type": dict(by_action),
         "actions_per_day": actions_per_day,
         "most_active_entities": most_active,

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { NewsAlert } from '../lib/types'
@@ -251,9 +252,9 @@ export default function NewsAlerts() {
                   </span>
                   <span className="text-xs text-gray-600">{alert.date}</span>
                   {alert.npi && (
-                    <a href={`/providers/${alert.npi}`} className="text-xs text-blue-400 hover:underline">
+                    <Link to={`/providers/${alert.npi}`} className="text-xs text-blue-400 hover:underline">
                       NPI: {alert.npi}
-                    </a>
+                    </Link>
                   )}
                 </div>
 

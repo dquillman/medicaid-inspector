@@ -1031,6 +1031,7 @@ async def export_provider_package(npi: str):
     import httpx as _httpx
     from core.review_store import get_review_queue
 
+    npi = _validate_npi(npi)
     cached = get_provider_by_npi(npi)
     if not cached:
         raise HTTPException(404, f"Provider {npi} not found in scan cache — run a scan first")
@@ -1133,6 +1134,7 @@ async def export_provider_package(npi: str):
 @router.get("/{npi}/oig")
 async def get_oig_status(npi: str):
     """Check if a provider NPI appears on the OIG LEIE exclusion list."""
+    npi = _validate_npi(npi)
     from core.oig_store import is_excluded, get_oig_stats
     excluded, record = is_excluded(npi)
     return {"npi": npi, "excluded": excluded, "record": record, **get_oig_stats()}
@@ -1141,6 +1143,7 @@ async def get_oig_status(npi: str):
 @router.get("/{npi}/cluster")
 async def get_address_cluster(npi: str):
     """Return other providers at the same billing address (same-address clustering)."""
+    npi = _validate_npi(npi)
     cached = get_provider_by_npi(npi)
     if not cached:
         raise HTTPException(404, f"Provider {npi} not in scan cache")
@@ -1181,6 +1184,7 @@ async def get_provider_peers(npi: str):
     """Return peer-group comparison stats (providers with same top HCPCS code)."""
     import statistics as _stats
 
+    npi = _validate_npi(npi)
     cached = get_provider_by_npi(npi)
     if not cached:
         raise HTTPException(404, f"Provider {npi} not in scan cache")
@@ -1336,6 +1340,13 @@ async def provider_signal_evidence(npi: str, signal: str):
         compute_address_clusters, compute_auth_official_clusters,
     )
     from data.duckdb_client import query_async
+    import re as _re2
+
+    npi = _validate_npi(npi)
+
+    # Validate signal against known allowlist to prevent enumeration
+    if signal and signal not in _SIGNAL_META:
+        raise HTTPException(400, f"Unknown signal '{signal}'")
 
     # Find provider in prescan cache
     provider = None
@@ -1739,6 +1750,7 @@ async def provider_signal_evidence(npi: str, signal: str):
 @router.get("/{npi}/open-payments")
 async def provider_open_payments(npi: str):
     """Check CMS Open Payments for industry payments to this provider."""
+    npi = _validate_npi(npi)
     from core.open_payments_store import get_open_payments
     return await get_open_payments(npi)
 
@@ -1746,6 +1758,7 @@ async def provider_open_payments(npi: str):
 @router.get("/{npi}/sam-exclusion")
 async def provider_sam_exclusion(npi: str):
     """Check SAM.gov federal exclusion list."""
+    npi = _validate_npi(npi)
     from core.sam_store import check_sam_exclusion
     # Also try by name from NPPES data
     name = ""
@@ -1759,6 +1772,7 @@ async def provider_sam_exclusion(npi: str):
 @router.get("/{npi}/ml-score")
 async def get_provider_ml_score(npi: str):
     """Return ML anomaly score for a provider (Isolation Forest)."""
+    npi = _validate_npi(npi)
     from services.ml_scorer import get_ml_score
     result = get_ml_score(npi)
     return {"npi": npi, **result}
@@ -1769,6 +1783,7 @@ async def get_peer_distribution(npi: str):
     """Return histogram distribution data for peer comparison visualizations."""
     import math as _math
 
+    npi = _validate_npi(npi)
     cached = get_provider_by_npi(npi)
     if not cached:
         raise HTTPException(404, f"Provider {npi} not in scan cache")
@@ -1861,6 +1876,8 @@ async def get_billing_network(npi: str):
     """Return the billing/servicing provider network for a given NPI."""
     import asyncio
     from core.oig_store import is_excluded as _is_excluded
+
+    npi = _validate_npi(npi)
 
     src = f"read_parquet('{get_parquet_path()}')"
 
@@ -2107,6 +2124,7 @@ async def yoy_comparison(npi: str):
 @router.get("/{npi}/ownership-chain")
 async def get_ownership_chain(npi: str):
     """Build ownership network: authorized official -> all NPIs they control."""
+    npi = _validate_npi(npi)
     cached = get_provider_by_npi(npi)
     if not cached:
         raise HTTPException(404, f"Provider {npi} not in scan cache")
@@ -2182,6 +2200,7 @@ async def get_ownership_chain(npi: str):
 @router.get("/{npi}/narrative")
 async def provider_narrative(npi: str):
     """Generate an investigation-ready case narrative for this provider."""
+    npi = _validate_npi(npi)
     from services.narrative_generator import generate_narrative
     try:
         return generate_narrative(npi)
@@ -2192,6 +2211,7 @@ async def provider_narrative(npi: str):
 @router.get("/{npi}/exclusion-summary")
 async def provider_exclusion_summary(npi: str):
     """Consolidated exclusion check across all sources for a single provider."""
+    npi = _validate_npi(npi)
     from core.exclusion_aggregator import check_all_exclusions
     name = ""
     for p in get_prescanned():
@@ -2204,6 +2224,7 @@ async def provider_exclusion_summary(npi: str):
 @router.get("/{npi}/forecast")
 async def get_forecast(npi: str):
     """Billing forecast with anomaly detection for a provider."""
+    npi = _validate_npi(npi)
     from services.forecaster import forecast_billing
 
     tl_response = await get_timeline(npi)

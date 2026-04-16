@@ -17,5 +17,9 @@ COPY backend/ ./
 # Cloud Run uses PORT env var (default 8080)
 ENV PORT=8080
 
+# Run as non-root user for container hardening
+RUN useradd --no-create-home --shell /bin/false appuser
+USER appuser
+
 # Run uvicorn
 CMD exec uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 30

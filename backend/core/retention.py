@@ -100,13 +100,10 @@ def enforce_retention() -> dict:
     audit_days = RETENTION_POLICIES["audit_log"]
     if audit_days:
         cutoff = now - (audit_days * 86400)
-        from core.audit_log import _entries as audit_entries, _save_to_disk as save_audit
-        before = len(audit_entries)
-        audit_entries[:] = [e for e in audit_entries if e["timestamp"] >= cutoff]
-        removed = before - len(audit_entries)
-        if removed:
-            save_audit()
-        results["audit_log"] = {"removed": removed, "remaining": len(audit_entries)}
+        from core.audit_log import purge_entries_before, get_audit_stats as _get_audit_stats
+        removed = purge_entries_before(cutoff)
+        remaining = _get_audit_stats()["total_entries"]
+        results["audit_log"] = {"removed": removed, "remaining": remaining}
 
     # PHI log: 2555 days (7 years)
     phi_days = RETENTION_POLICIES["phi_log"]
