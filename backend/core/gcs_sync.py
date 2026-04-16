@@ -204,7 +204,13 @@ async def upload_file_async(filename: str) -> bool:
 
 async def sync_after_scan():
     """Upload scan-related files after a scan batch completes."""
-    await asyncio.to_thread(upload_file, "prescan_cache.json")
+    import os as _os
+    _is_cloud_run = _os.environ.get("K_SERVICE") is not None
+    if _is_cloud_run:
+        # Cloud Run uses the slim index — upload both slim and full if they exist
+        await asyncio.to_thread(upload_file, "prescan_slim.json")
+    else:
+        await asyncio.to_thread(upload_file, "prescan_cache.json")
     await asyncio.to_thread(upload_file, "app.db")
 
 
