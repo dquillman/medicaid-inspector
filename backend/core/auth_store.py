@@ -304,7 +304,7 @@ def load_sessions_from_disk() -> None:
                 now = time.time()
                 _sessions = {
                     token: sess for token, sess in raw.items()
-                    if now - sess.get("created_at", 0) < 24 * 3600
+                    if now - sess.get("created_at", 0) < 30 * 86400
                 }
                 print(f"[auth_store] Loaded {len(_sessions)} sessions from disk")
     except Exception as e:
@@ -328,7 +328,7 @@ def get_session_user(token: str) -> Optional[dict]:
     if not session:
         return None
     # Sessions valid for 30 days
-    if time.time() - session["created_at"] > 24 * 3600:
+    if time.time() - session["created_at"] > 30 * 86400:
         del _sessions[token]
         save_sessions_to_disk()
         return None
