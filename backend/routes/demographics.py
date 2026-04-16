@@ -3,6 +3,7 @@ Demographics API — overlay Census poverty/population data with provider billin
 to create a demographic fraud risk layer.
 """
 
+import re as _re
 from collections import defaultdict
 from fastapi import APIRouter, HTTPException, Depends
 
@@ -16,6 +17,14 @@ from core.store import get_prescanned
 from routes.auth import require_user
 
 router = APIRouter(prefix="/api/demographics", tags=["demographics"], dependencies=[Depends(require_user)])
+
+
+def _validate_state(state: str) -> str:
+    """Validate state is a 2-letter code."""
+    st = state.strip().upper()
+    if not _re.match(r'^[A-Z]{2}$', st):
+        raise HTTPException(400, f"Invalid state code '{state}'")
+    return st
 
 
 def _build_state_overlay() -> dict[str, dict]:
@@ -111,8 +120,8 @@ async def risk_map():
     states_with_risk = [s for s in states_list if s["avg_risk_score"] > 0]
     if len(states_with_risk) >= 3:
         for label, key in factors.items():
-            xs = [s[key] for s in states_with_risk]
-            ys = [s["avg_risk_score"] for s in states_with_risk]
+            xs = [s.get(key) or 0.0 for s in states_with_risk]
+            ys = [s.get("avg_risk_score") or 0.0 for s in states_with_risk]
             # Invert income so higher value = higher risk
             if key == "median_income":
                 xs = [-x for x in xs]
@@ -164,7 +173,7 @@ async def state_detail(state: str):
     Detailed demographic + billing breakdown for a single state.
     Includes per-provider list for that state.
     """
-    st = state.upper().strip()
+    st = _validate_state(state)
     demo = get_state_demographics(st)
     if demo is None:
         raise HTTPException(404, f"No demographic data for state: {state}")
@@ -178,7 +187,7 @@ async def state_detail(state: str):
             "total_paid": p.get("total_paid", 0),
             "total_claims": p.get("total_claims", 0),
             "risk_score": p.get("risk_score", 0),
-            "flag_count": len(p.get("flags") or []),
+            "flag_count": p.get("flag_count") if p.get("flag_count") is not None else len([f for f in (p.get("flags") or []) if f.get("flagged")]),
         }
         for p in providers
         if (p.get("state") or "").upper().strip() == st

@@ -2,6 +2,7 @@
 Trend divergence routes — enrollment vs billing growth analysis.
 """
 import logging
+import re as _re
 from fastapi import APIRouter, HTTPException, Depends
 
 from services.trend_divergence import compute_trend_divergence, get_state_detail
@@ -10,6 +11,22 @@ from routes.auth import require_user
 
 router = APIRouter(prefix="/api/trends", tags=["trends"], dependencies=[Depends(require_user)])
 log = logging.getLogger(__name__)
+
+# Valid US state/territory abbreviations
+_VALID_STATES = {
+    "AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN",
+    "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH",
+    "NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT",
+    "VT","VA","WA","WV","WI","WY","PR","VI","GU","AS","MP",
+}
+
+
+def _validate_state(state: str) -> str:
+    """Validate state is a 2-letter code."""
+    st = state.strip().upper()
+    if not _re.match(r'^[A-Z]{2}$', st):
+        raise HTTPException(400, f"Invalid state code '{state}'")
+    return st
 
 
 @router.get("/divergence")
@@ -58,6 +75,7 @@ async def state_detail(state: str):
     """
     Detailed yearly breakdown for a single state.
     """
+    state = _validate_state(state)
     detail = get_state_detail(state)
     if not detail:
         raise HTTPException(404, f"No data found for state '{state}'")

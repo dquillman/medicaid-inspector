@@ -1118,6 +1118,10 @@ def compute_address_clusters() -> dict[str, int]:
     Build a mapping of NPI -> cluster_size from the prescan cache NPPES data.
     Groups providers by normalized (zip + street) from their NPPES addresses.
     Returns {npi: cluster_size} for all providers with address data.
+
+    NOTE: On Cloud Run (slim cache) the "nppes" field is not present, so this
+    function will return an empty dict and address_cluster_risk will always
+    return score=0.  This is a known slim-cache limitation.
     """
     from core.store import get_prescanned
 
@@ -1149,6 +1153,10 @@ def compute_auth_official_clusters() -> dict[str, int]:
     Build a mapping of NPI -> cluster_size from the prescan cache NPPES data.
     Groups providers by normalized authorized official name.
     Returns {npi: cluster_size} for all providers with authorized official data.
+
+    NOTE: On Cloud Run (slim cache) the "nppes" field is not present, so this
+    function will return an empty dict and corporate_shell_risk will always
+    return score=0.  This is a known slim-cache limitation.
     """
     from core.store import get_prescanned
 

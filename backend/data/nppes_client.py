@@ -80,12 +80,10 @@ async def get_provider(npi: str) -> dict:
 
 async def search_providers(name: str, limit: int = 20) -> list[dict]:
     """Search NPPES by provider name. Returns list of summary dicts."""
-    url = (
-        f"{settings.NPPES_BASE_URL}?version=2.1"
-        f"&organization_name={name}&limit={limit}"
-    )
+    # Use params= dict so httpx handles URL encoding — prevents header/query injection
+    params = {"version": "2.1", "organization_name": name, "limit": str(limit)}
     async with httpx.AsyncClient(timeout=10.0) as client:
-        resp = await client.get(url)
+        resp = await client.get(settings.NPPES_BASE_URL, params=params)
         resp.raise_for_status()
         data = resp.json()
 

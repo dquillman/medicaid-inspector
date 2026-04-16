@@ -6,12 +6,14 @@ Uses scikit-learn's GradientBoostingClassifier to learn from human-reviewed
 labels and predict fraud probability for unreviewed providers.
 """
 import logging
+import threading
 import time
 from typing import Optional
 
 log = logging.getLogger(__name__)
 
-# Module-level state
+# Module-level state — protected by _lock for thread safety
+_lock = threading.Lock()
 _model = None  # trained sklearn model
 _scaler = None  # fitted StandardScaler
 _training_metrics: dict = {}
@@ -266,13 +268,9 @@ def train_model() -> dict:
     # Sort by importance
     feature_imp_sorted = dict(sorted(feature_imp.items(), key=lambda x: x[1], reverse=True))
 
-    # Store model
-    global _model, _scaler, _training_metrics, _feature_names, _predictions
-    _model = model
-    _scaler = scaler
-    _feature_names = list(FEATURE_COLS)
-
-    _training_metrics = {
+    # Build training metrics locally before the atomic swap
+    new_feature_names = list(FEATURE_COLS)
+    new_training_metrics = {
         "trained": True,
         "trained_at": time.time(),
         "total_labeled": len(X_list),
@@ -288,8 +286,8 @@ def train_model() -> dict:
         "cv_folds": n_splits if n_splits >= 2 else 0,
     }
 
-    # Score all providers
-    _predictions = {}
+    # Score all providers into a local dict before the atomic swap
+    new_predictions: dict[str, dict] = {}
     for p in providers:
         npi = p.get("npi")
         if not npi:
@@ -299,7 +297,7 @@ def train_model() -> dict:
             feats_scaled = scaler.transform([feats])
             proba = model.predict_proba(feats_scaled)[0]
             fraud_prob = round(float(proba[1]), 4)
-            _predictions[npi] = {
+            new_predictions[npi] = {
                 "npi": npi,
                 "fraud_probability": fraud_prob,
                 "label": labeled_npis.get(npi),  # None if unlabeled
@@ -309,23 +307,37 @@ def train_model() -> dict:
 
     log.info(
         "Supervised model trained: %d samples (%d fraud, %d clear), scored %d providers",
-        len(X_list), int(sum(y == 1)), int(sum(y == 0)), len(_predictions),
+        len(X_list), int(sum(y == 1)), int(sum(y == 0)), len(new_predictions),
     )
 
+    # Atomic swap — readers see either old complete state or new complete state
+    global _model, _scaler, _training_metrics, _feature_names, _predictions
+    with _lock:
+        _model = model
+        _scaler = scaler
+        _feature_names = new_feature_names
+        _training_metrics = new_training_metrics
+        _predictions = new_predictions
+
     return {
-        **_training_metrics,
-        "providers_scored": len(_predictions),
+        **new_training_metrics,
+        "providers_scored": len(new_predictions),
     }
 
 
 def predict_fraud_probability(npi: str) -> Optional[dict]:
     """Return fraud probability for a specific provider."""
-    if _model is None:
+    with _lock:
+        current_model = _model
+        current_scaler = _scaler
+        preds_snapshot = _predictions
+
+    if current_model is None:
         return {"error": "Model not trained yet. Call POST /api/ml/supervised/train first."}
 
     # Check cached predictions first
-    if npi in _predictions:
-        return _predictions[npi]
+    if npi in preds_snapshot:
+        return preds_snapshot[npi]
 
     # Try to score on the fly
     from core.store import get_provider_by_npi
@@ -335,15 +347,17 @@ def predict_fraud_probability(npi: str) -> Optional[dict]:
 
     try:
         feats = _extract_features(pdata)
-        feats_scaled = _scaler.transform([feats])
-        proba = _model.predict_proba(feats_scaled)[0]
+        feats_scaled = current_scaler.transform([feats])
+        proba = current_model.predict_proba(feats_scaled)[0]
         fraud_prob = round(float(proba[1]), 4)
         result = {
             "npi": npi,
             "fraud_probability": fraud_prob,
             "label": None,
         }
-        _predictions[npi] = result
+        # Cache result (benign race: worst case two threads both write the same value)
+        with _lock:
+            _predictions[npi] = result
         return result
     except Exception as e:
         return {"error": str(e)}
@@ -351,34 +365,42 @@ def predict_fraud_probability(npi: str) -> Optional[dict]:
 
 def get_model_status() -> dict:
     """Return current model status and metrics."""
-    if not _training_metrics:
+    with _lock:
+        metrics_snapshot = dict(_training_metrics)
+        preds_len = len(_predictions)
+    if not metrics_snapshot:
         return {
             "trained": False,
             "message": "Supervised model not trained yet. Call POST /api/ml/supervised/train.",
         }
     return {
-        **_training_metrics,
-        "providers_scored": len(_predictions),
+        **metrics_snapshot,
+        "providers_scored": preds_len,
     }
 
 
 def get_feature_importance() -> dict:
     """Return ranked feature importances from the trained model."""
-    if not _training_metrics or not _training_metrics.get("feature_importance"):
+    with _lock:
+        metrics_snapshot = dict(_training_metrics)
+    if not metrics_snapshot or not metrics_snapshot.get("feature_importance"):
         return {"error": "Model not trained yet.", "features": []}
 
-    fi = _training_metrics["feature_importance"]
+    fi = metrics_snapshot["feature_importance"]
     features = [{"feature": k, "importance": v} for k, v in fi.items()]
     return {"features": features}
 
 
 def get_all_predictions(limit: int = 100, offset: int = 0) -> dict:
     """Return all provider predictions ranked by fraud probability."""
-    if _model is None:
+    with _lock:
+        current_model = _model
+        preds_snapshot = dict(_predictions)
+    if current_model is None:
         return {"error": "Model not trained yet.", "predictions": [], "total": 0}
 
     sorted_preds = sorted(
-        _predictions.values(),
+        preds_snapshot.values(),
         key=lambda x: x.get("fraud_probability", 0),
         reverse=True,
     )

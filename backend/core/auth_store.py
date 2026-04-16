@@ -4,6 +4,7 @@ Manages users, roles, permissions, and session tokens.
 Persists users to backend/users.json.
 """
 import hashlib
+import hmac
 import json
 import secrets
 import time
@@ -161,7 +162,22 @@ def init_auth_store() -> None:
     import os
     _load_users()
     load_sessions_from_disk()
-    default_password = os.environ.get("ADMIN_PASSWORD", "admin123")
+    default_password = os.environ.get("ADMIN_PASSWORD")
+    if not default_password:
+        # No ADMIN_PASSWORD set — refuse to start with a known-weak default in
+        # production. Generate a random password and print it once so the
+        # operator can grab it from the Cloud Run logs on first deploy.
+        import warnings
+        default_password = secrets.token_urlsafe(16)
+        warnings.warn(
+            "[auth_store] ADMIN_PASSWORD env var is not set. "
+            f"Generated one-time admin password: {default_password}  "
+            "Set ADMIN_PASSWORD in Cloud Run env vars to make this permanent.",
+            stacklevel=2,
+        )
+        print(
+            f"[auth_store] *** ADMIN_PASSWORD not set — one-time password: {default_password} ***"
+        )
 
     if not _users:
         create_user("admin", default_password, "admin", "Administrator")
@@ -192,10 +208,10 @@ def init_auth_store() -> None:
 def authenticate(username: str, password: str) -> Optional[dict]:
     """Check credentials. Returns user dict (without password) or None."""
     user = _users.get(username)
-    if not user:
-        return None
-    hashed = _hash_password(password, user["salt"])
-    if hashed != user["password_hash"]:
+    # Always compute hash even for unknown users to prevent timing attacks
+    salt = user["salt"] if user else "0" * 32
+    hashed = _hash_password(password, salt)
+    if not user or not hmac.compare_digest(hashed, user.get("password_hash", "")):
         return None
     return _safe_user(user)
 
@@ -304,7 +320,7 @@ def load_sessions_from_disk() -> None:
                 now = time.time()
                 _sessions = {
                     token: sess for token, sess in raw.items()
-                    if now - sess.get("created_at", 0) < 30 * 86400
+                    if now - sess.get("created_at", 0) < 24 * 3600
                 }
                 print(f"[auth_store] Loaded {len(_sessions)} sessions from disk")
     except Exception as e:
@@ -328,7 +344,7 @@ def get_session_user(token: str) -> Optional[dict]:
     if not session:
         return None
     # Sessions valid for 30 days
-    if time.time() - session["created_at"] > 30 * 86400:
+    if time.time() - session["created_at"] > 30 * 24 * 3600:
         del _sessions[token]
         save_sessions_to_disk()
         return None

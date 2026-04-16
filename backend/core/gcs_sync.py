@@ -32,6 +32,12 @@ _SYNC_FILES = [
     "score_history.json",
     "watchlist.json",
     "prescan_slim.json",  # 54MB slim index — safe to load at startup
+    "roi_data.json",
+    "notifications.json",
+    "saved_searches.json",
+    "referrals.json",
+    "evidence_metadata.json",
+    "lineage.json",
 ]
 
 _client = None

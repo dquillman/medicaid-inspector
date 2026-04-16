@@ -12,7 +12,7 @@ import RiskScoreModal from '../components/RiskScoreModal'
 import ProviderTimelineAnalysis from '../components/ProviderTimelineAnalysis'
 import SpecialtyBenchmark from '../components/SpecialtyBenchmark'
 import TemporalAnalysisSection from '../components/TemporalAnalysisSection'
-import type { ClusterProvider, OpenPaymentsData, SamExclusion, RelatedProvider, MedicareComparison, LicenseVerification } from '../lib/types'
+import type { ClusterProvider, OpenPaymentsData, SamExclusion, RelatedProvider, MedicareComparison, LicenseVerification, ScoreSnapshot, NewsAlert } from '../lib/types'
 
 
 /** Fires once when the element scrolls into the viewport (200px margin). */
@@ -568,7 +568,7 @@ export default function ProviderDetail() {
             {scoreTrendData.snapshot_count} scan snapshots tracked
           </p>
           <ResponsiveContainer width="100%" height={200}>
-            <LineChart data={scoreTrendData.snapshots.map((s: any) => ({
+            <LineChart data={scoreTrendData.snapshots.map((s: ScoreSnapshot) => ({
               ...s,
               date: new Date(s.timestamp * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }),
             }))}>
@@ -1085,7 +1085,7 @@ export default function ProviderDetail() {
             <Link to="/news" className="text-xs text-blue-400 hover:underline">View all alerts</Link>
           </div>
           <div className="space-y-2">
-            {providerNewsData.alerts.slice(0, 5).map((alert: any) => {
+            {providerNewsData.alerts.slice(0, 5).map((alert: NewsAlert) => {
               const catColors: Record<string, string> = {
                 news: 'bg-blue-900/60 text-blue-300 border-blue-700',
                 legal: 'bg-yellow-900/60 text-yellow-300 border-yellow-700',

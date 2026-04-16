@@ -2,7 +2,8 @@
 Data pipeline admin routes — dataset discovery, validation, lineage tracking.
 """
 from typing import Optional
-from fastapi import APIRouter, Query, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends
+from pydantic import BaseModel, HttpUrl
 from routes.auth import require_admin
 
 router = APIRouter(prefix="/api/admin", tags=["data-pipeline"], dependencies=[Depends(require_admin)])
@@ -29,8 +30,12 @@ async def dataset_refresh():
     return await check_for_updates()
 
 
+class DatasetSwitchBody(BaseModel):
+    url: HttpUrl  # Pydantic validates that this is a well-formed http/https URL
+
+
 @router.post("/dataset-switch")
-async def dataset_switch(body: dict):
+async def dataset_switch(body: DatasetSwitchBody):
     """
     Switch to a specific dataset URL.
     Body: { "url": "https://..." }
@@ -39,12 +44,12 @@ async def dataset_switch(body: dict):
     from services.data_discovery import switch_dataset
     from core.cache import invalidate_query_cache
 
-    url = body.get("url")
-    if not url:
-        from fastapi import HTTPException
-        raise HTTPException(400, "Missing 'url' in request body")
+    url_str = str(body.url)
+    # Restrict to http/https to block file://, ftp://, internal SSRF attempts
+    if not url_str.startswith(("http://", "https://")):
+        raise HTTPException(400, "URL must use http or https scheme")
 
-    result = switch_dataset(url)
+    result = switch_dataset(url_str)
     invalidate_query_cache()
     return result
 

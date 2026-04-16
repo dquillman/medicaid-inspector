@@ -133,7 +133,10 @@ export async function get<T>(path: string, params?: Record<string, string | numb
   }
   const res = await fetch(url.toString(), { headers: { ...authHeaders() } })
   if (res.status === 401) { clearSessionAndRedirect(); throw new Error('Session expired') }
-  if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`)
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => null)
+    throw new Error(errBody?.detail || `Request failed (${res.status})`)
+  }
   return res.json()
 }
 
@@ -951,18 +954,34 @@ export const api = {
       method: 'POST',
       headers: { ...authHeaders() },
       body: formData,
-    }).then(r => r.json()) as Promise<EvidenceRecord>
+    }).then(async r => {
+      if (!r.ok) {
+        const errBody = await r.json().catch(() => null)
+        throw new Error(errBody?.detail || `Upload failed (${r.status})`)
+      }
+      return r.json() as Promise<EvidenceRecord>
+    })
   },
 
   listEvidence: (caseId: string) =>
     get<EvidenceListResponse>(`/cases/${caseId}/evidence`),
 
-  downloadEvidence: (caseId: string, evidenceId: string) => {
+  downloadEvidence: async (caseId: string, evidenceId: string) => {
+    const res = await fetch(`${BASE}/cases/${caseId}/evidence/${evidenceId}/download`, {
+      headers: { ...authHeaders() },
+    })
+    if (!res.ok) throw new Error(`Download failed (${res.status})`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
-    a.href = `${BASE}/cases/${caseId}/evidence/${evidenceId}/download`
+    a.href = url
+    const disposition = res.headers.get('content-disposition')
+    const match = disposition?.match(/filename="?([^"]+)"?/)
+    a.download = match?.[1] ?? `evidence_${evidenceId}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   },
 
   verifyEvidence: (caseId: string, evidenceId: string) =>
