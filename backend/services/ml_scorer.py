@@ -7,11 +7,13 @@ risk score by surfacing providers that are statistically unusual even
 if they don't trigger specific fraud signals.
 """
 import logging
+import threading
 import time
 
 log = logging.getLogger(__name__)
 
-# Module-level state
+# Module-level state — protected by _lock for thread safety
+_lock = threading.Lock()
 _ml_scores: dict[str, dict] = {}  # keyed by NPI
 _training_stats: dict = {}
 
@@ -62,7 +64,12 @@ def train_and_score() -> dict:
         if not npi:
             continue
 
-        flag_count = len([s for s in (p.get("signal_results") or []) if s.get("flagged")])
+        # Use flag_count directly if present (slim cache), else derive from signal_results
+        explicit_fc = p.get("flag_count")
+        if explicit_fc is not None:
+            flag_count = int(explicit_fc)
+        else:
+            flag_count = len([s for s in (p.get("signal_results") or []) if s.get("flagged")])
 
         row = [
             float(p.get("total_paid") or 0),
@@ -117,9 +124,8 @@ def train_and_score() -> dict:
         else:
             feature_importance[col] = 0.0
 
-    # Store per-NPI scores
-    global _ml_scores, _training_stats
-    _ml_scores = {}
+    # Build per-NPI scores into local dicts first, then swap atomically
+    new_ml_scores: dict[str, dict] = {}
 
     all_mapped_scores: list[float] = []
     for idx, npi in enumerate(npis):
@@ -146,7 +152,7 @@ def train_and_score() -> dict:
             # Use absolute scaled value as contribution indicator
             provider_importances[col] = round(float(abs(X_scaled[idx, fi])), 3)
 
-        _ml_scores[npi] = {
+        new_ml_scores[npi] = {
             "ml_anomaly_score": score,
             "ml_percentile": percentile,
             "feature_importances": provider_importances,
@@ -154,12 +160,12 @@ def train_and_score() -> dict:
 
     # Top anomalies
     top_anomalies = sorted(
-        _ml_scores.items(),
+        new_ml_scores.items(),
         key=lambda x: x[1]["ml_anomaly_score"],
         reverse=True,
     )[:20]
 
-    _training_stats = {
+    new_training_stats = {
         "trained_at": time.time(),
         "provider_count": len(npis),
         "anomaly_count": int(anomaly_mask.sum()),
@@ -175,6 +181,12 @@ def train_and_score() -> dict:
         int(anomaly_mask.sum()),
     )
 
+    # Atomic swap — readers see either old complete state or new complete state
+    global _ml_scores, _training_stats
+    with _lock:
+        _ml_scores = new_ml_scores
+        _training_stats = new_training_stats
+
     return {
         "scored": len(npis),
         "anomalies_detected": int(anomaly_mask.sum()),
@@ -187,27 +199,32 @@ def train_and_score() -> dict:
 
 def get_ml_score(npi: str) -> dict:
     """Return ML anomaly score for a single provider."""
-    if npi in _ml_scores:
-        return _ml_scores[npi]
+    with _lock:
+        scores_snapshot = _ml_scores
+    if npi in scores_snapshot:
+        return scores_snapshot[npi]
     return {
         "ml_anomaly_score": None,
         "ml_percentile": None,
         "feature_importances": None,
         "note": "ML model not trained yet — call POST /api/ml/train first"
-        if not _ml_scores
+        if not scores_snapshot
         else f"NPI {npi} not found in ML scores",
     }
 
 
 def get_ml_status() -> dict:
     """Return training stats and model status."""
-    if not _training_stats:
+    with _lock:
+        stats_snapshot = dict(_training_stats)
+        scores_len = len(_ml_scores)
+    if not stats_snapshot:
         return {
             "trained": False,
             "message": "ML model not trained yet — call POST /api/ml/train",
         }
     return {
         "trained": True,
-        **_training_stats,
-        "scores_available": len(_ml_scores),
+        **stats_snapshot,
+        "scores_available": scores_len,
     }

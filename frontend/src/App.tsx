@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { BrowserRouter, Routes, Route, NavLink, Navigate, useLocation } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useClickOutside } from './hooks/useClickOutside'
 import Sidebar, { useSidebarCollapsed } from './components/Sidebar'
@@ -255,15 +255,14 @@ export default function App() {
 
   const handleRegister = async (username: string, password: string, displayName?: string) => {
     try {
-      const res = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password, display_name: displayName || username }),
+      const data = await mutate<{ token: string; user: { username: string } }>('POST', '/auth/register', {
+        username,
+        password,
+        display_name: displayName || username,
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || 'Registration failed')
-      const session = { token: data.token, user: data.user }
-      setUser(data.user)
+      const email = data.user?.username || username
+      const session: AuthUser = { email, token: data.token, savedAt: Date.now() }
+      setUser(session)
       localStorage.setItem('mfi_session', JSON.stringify(session))
       setView('app')
       return null

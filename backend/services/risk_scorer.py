@@ -35,10 +35,13 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
     Returns {risk_score, flags, signal_results}.
     provider_agg must be a row from provider_aggregate_sql.
     """
-    # Fetch supporting data in parallel
-    hcpcs_task = query_async(_hcpcs_sql(npi))
-    timeline_task = query_async(_timeline_sql(npi))
-    peer_task = query_async(_peer_stats_sql(npi))
+    # Fetch supporting data in parallel — use parameterized queries
+    hcpcs_sql, hcpcs_params = _hcpcs_sql(npi)
+    timeline_sql, timeline_params = _timeline_sql(npi)
+    peer_sql, peer_params = _peer_stats_sql(npi)
+    hcpcs_task = query_async(hcpcs_sql, hcpcs_params)
+    timeline_task = query_async(timeline_sql, timeline_params)
+    peer_task = query_async(peer_sql, peer_params)
 
     hcpcs_rows, timeline_rows, peer_rows = await asyncio.gather(
         hcpcs_task, timeline_task, peer_task
@@ -87,48 +90,72 @@ async def batch_score(npis: list[str], provider_aggs: list[dict]) -> list[dict]:
     return await asyncio.gather(*tasks)
 
 
+# ── NPI validation ────────────────────────────────────────────────────────────
+import re as _re
+
+_NPI_RE = _re.compile(r"^\d{10}$")
+
+
+def _validate_npi(npi: str) -> str:
+    """
+    Validate that npi is exactly 10 digits.
+    Raises ValueError on invalid input — prevents SQL injection via NPI parameter.
+    """
+    if not isinstance(npi, str) or not _NPI_RE.match(npi):
+        raise ValueError(f"Invalid NPI format (must be 10 digits): {npi!r}")
+    return npi
+
+
 # ── SQL helpers ───────────────────────────────────────────────────────────────
-def _hcpcs_sql(npi: str) -> str:
+def _hcpcs_sql(npi: str) -> tuple[str, tuple]:
+    """Return (sql, params) for HCPCS breakdown query — uses parameterized query."""
+    _validate_npi(npi)
     src = f"read_parquet('{get_parquet_path()}')"
-    return f"""
+    sql = f"""
     SELECT
         HCPCS_CODE          AS hcpcs_code,
         SUM(TOTAL_PAID)     AS total_paid,
         SUM(TOTAL_CLAIMS)   AS total_claims
     FROM {src}
-    WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
+    WHERE BILLING_PROVIDER_NPI_NUM = ?
     GROUP BY HCPCS_CODE
     ORDER BY total_paid DESC
     LIMIT 50
     """
+    return sql, (npi,)
 
 
-def _timeline_sql(npi: str) -> str:
+def _timeline_sql(npi: str) -> tuple[str, tuple]:
+    """Return (sql, params) for monthly timeline query — uses parameterized query."""
+    _validate_npi(npi)
     src = f"read_parquet('{get_parquet_path()}')"
-    return f"""
+    sql = f"""
     SELECT
         CLAIM_FROM_MONTH                    AS month,
         SUM(TOTAL_PAID)                     AS total_paid,
         SUM(TOTAL_CLAIMS)                   AS total_claims,
         SUM(TOTAL_UNIQUE_BENEFICIARIES)     AS total_unique_beneficiaries
     FROM {src}
-    WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
+    WHERE BILLING_PROVIDER_NPI_NUM = ?
     GROUP BY CLAIM_FROM_MONTH
     ORDER BY CLAIM_FROM_MONTH ASC
     """
+    return sql, (npi,)
 
 
-def _peer_stats_sql(npi: str) -> str:
+def _peer_stats_sql(npi: str) -> tuple[str, tuple]:
     """
     Compute mean and std of revenue_per_beneficiary for providers
     sharing the same top HCPCS code as this NPI.
+    Uses parameterized query to prevent SQL injection.
     """
+    _validate_npi(npi)
     src = f"read_parquet('{get_parquet_path()}')"
-    return f"""
+    sql = f"""
     WITH this_top AS (
         SELECT HCPCS_CODE
         FROM {src}
-        WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
+        WHERE BILLING_PROVIDER_NPI_NUM = ?
         GROUP BY HCPCS_CODE
         ORDER BY SUM(TOTAL_PAID) DESC
         LIMIT 1
@@ -147,3 +174,4 @@ def _peer_stats_sql(npi: str) -> str:
         STDDEV(rpb) AS std_rpb
     FROM peers
     """
+    return sql, (npi,)

@@ -1,8 +1,11 @@
+import re
 from fastapi import APIRouter, HTTPException, Depends
 from data.duckdb_client import query_async, PARQUET
 from routes.auth import require_user
 
 router = APIRouter(prefix="/api/network", tags=["network"], dependencies=[Depends(require_user)])
+
+_NPI_RE = re.compile(r"^\d{10}$")
 
 
 @router.get("/{npi}")
@@ -13,6 +16,10 @@ async def get_network(npi: str):
     and all BILLING_PROVIDER_NPI_NUM when this NPI is the SERVICING provider.
     Returns Cytoscape-ready nodes + edges.
     """
+    # Validate NPI format before interpolating into SQL (prevent SQL injection)
+    if not _NPI_RE.match(npi):
+        raise HTTPException(400, "Invalid NPI — must be exactly 10 digits")
+
     # Providers this NPI billed for (as billing provider, they serviced others)
     billed_for_sql = f"""
     SELECT DISTINCT

@@ -1,14 +1,15 @@
 from fastapi import APIRouter, Depends
-from routes.auth import require_user
+from routes.auth import require_user, require_admin
 
 router = APIRouter(prefix="/api/exclusions", tags=["exclusions"], dependencies=[Depends(require_user)])
 
 
-@router.post("/scan-all")
+@router.post("/scan-all", dependencies=[Depends(require_admin)])
 async def scan_all_exclusions():
     """
     Batch scan all providers in prescan cache against OIG LEIE
     and check NPI status from cached NPPES data.
+    Admin-only — this is a heavy, long-running operation.
     """
     from core.exclusion_aggregator import run_batch_exclusion_scan
     return run_batch_exclusion_scan()

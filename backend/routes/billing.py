@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Request, Depends
 from pydantic import BaseModel
 from routes.auth import require_user
 
-router = APIRouter(prefix="/api/billing", tags=["billing"], dependencies=[Depends(require_user)])
+router = APIRouter(prefix="/api/billing", tags=["billing"])
 log = logging.getLogger(__name__)
 
 _STRIPE_KEY = os.environ.get("STRIPE_SECRET_KEY", "")
@@ -45,7 +45,7 @@ class CheckoutRequest(BaseModel):
     email: str = ""
 
 
-@router.post("/create-checkout")
+@router.post("/create-checkout", dependencies=[Depends(require_user)])
 async def create_checkout(req: CheckoutRequest):
     stripe = _get_stripe()
     if not stripe or not _STRIPE_KEY:
@@ -54,9 +54,12 @@ async def create_checkout(req: CheckoutRequest):
             "Stripe is not configured. Set STRIPE_SECRET_KEY environment variable.",
         )
 
+    _valid_plans = set(PRICE_IDS.keys())
+    if req.plan not in _valid_plans:
+        raise HTTPException(400, f"Unknown plan: {req.plan!r}")
     price_id = PRICE_IDS.get(req.plan)
     if not price_id:
-        raise HTTPException(400, f"Unknown plan: {req.plan}")
+        raise HTTPException(503, f"Plan '{req.plan}' is not configured — set STRIPE_PRICE_{req.plan.upper()} environment variable")
 
     try:
         session = stripe.checkout.Session.create(
@@ -109,7 +112,7 @@ async def stripe_webhook(request: Request):
     return {"received": True}
 
 
-@router.get("/plans")
+@router.get("/plans", dependencies=[Depends(require_user)])
 async def get_plans():
     """Return available plans and whether Stripe is configured."""
     return {

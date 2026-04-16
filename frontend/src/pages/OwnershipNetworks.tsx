@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import React, { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
@@ -131,9 +131,8 @@ export default function OwnershipNetworks() {
               {networks.map((net: OwnershipNetworkEntry, idx: number) => {
                 const isExpanded = expandedIdx === idx
                 return (
-                  <>
+                  <React.Fragment key={idx}>
                     <tr
-                      key={`row-${idx}`}
                       className={`border-b border-gray-800 cursor-pointer transition-colors ${
                         isExpanded ? 'bg-gray-800/70' : 'hover:bg-gray-800/30'
                       }`}
@@ -165,8 +164,8 @@ export default function OwnershipNetworks() {
                         <span className="text-gray-500 text-xs ml-2">({net.top_risk_npi.risk_score.toFixed(0)})</span>
                       </td>
                     </tr>
-                    {isExpanded && <ExpandedRow key={`expanded-${idx}`} npis={net.npis} />}
-                  </>
+                    {isExpanded && <ExpandedRow npis={net.npis} />}
+                  </React.Fragment>
                 )
               })}
             </tbody>

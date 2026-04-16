@@ -48,9 +48,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
               localStorage.setItem(USER_KEY, JSON.stringify(data.user))
             }
           })
-          .catch(() => {
-            // Token expired/invalid or server unreachable
-            // If API returned 4xx, clear session; network errors keep cached session
+          .catch((err: unknown) => {
+            // On 401/403 the token is revoked or expired — clear the session so
+            // the user is redirected to login rather than silently staying "logged in"
+            // with a stale cached user object.
+            // On network errors (no status) we keep the cached session to allow
+            // offline/degraded mode.
+            const status = (err as { status?: number })?.status
+            if (status === 401 || status === 403) {
+              setToken(null)
+              setUser(null)
+              localStorage.removeItem(TOKEN_KEY)
+              localStorage.removeItem(USER_KEY)
+            }
           })
       } catch {
         localStorage.removeItem(TOKEN_KEY)

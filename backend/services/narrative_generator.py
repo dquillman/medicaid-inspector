@@ -258,6 +258,9 @@ def _fmt_currency(amount: float) -> str:
 
 def _fmt_number(n: float) -> str:
     """Format a number with commas."""
+    import math as _math
+    if not _math.isfinite(n):
+        return str(n)
     if n == int(n):
         return f"{int(n):,}"
     return f"{n:,.1f}"
