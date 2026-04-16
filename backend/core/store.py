@@ -38,13 +38,14 @@ def save_to_disk() -> None:
         print(f"[store] Could not save cache: {e}")
 
 
-def load_from_disk() -> bool:
+def load_from_disk(filename: str = "prescan_cache.json") -> bool:
     from core.config import settings
     global prescanned_providers, scan_progress, _npi_index
     try:
-        if not _CACHE_FILE.exists():
+        cache_file = pathlib.Path(__file__).parent.parent / filename
+        if not cache_file.exists():
             return False
-        raw = json.loads(_CACHE_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(cache_file.read_text(encoding="utf-8"))
         # Invalidate only if a parquet_url is present AND it differs (new data release)
         # If parquet_url is absent it's the old cache format — migrate it
         cached_url = raw.get("parquet_url")
@@ -96,9 +97,9 @@ def get_provider_by_npi(npi: str) -> dict | None:
     return _npi_index.get(npi)
 
 
-def load_prescanned_from_disk() -> bool:
+def load_prescanned_from_disk(filename: str = "prescan_cache.json") -> bool:
     """Call once at startup. Returns True if cache was loaded successfully."""
-    return load_from_disk()
+    return load_from_disk(filename)
 
 
 def get_scan_progress() -> dict:

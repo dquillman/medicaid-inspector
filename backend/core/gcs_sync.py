@@ -21,7 +21,8 @@ _BACKEND_DIR = pathlib.Path(__file__).parent.parent
 
 # Files to sync — relative to backend/
 _SYNC_FILES = [
-    # NOTE: prescan_cache.json is NOT here — it's 1.5GB and loaded in background
+    # NOTE: prescan_cache.json is NOT here — it's 1.5GB and OOMs the container
+    # prescan_slim.json (54MB) is synced separately below
     "app.db",
     "users.json",
     "sessions.json",
@@ -30,6 +31,7 @@ _SYNC_FILES = [
     "audit_log.json",
     "score_history.json",
     "watchlist.json",
+    "prescan_slim.json",  # 54MB slim index — safe to load at startup
 ]
 
 _client = None
