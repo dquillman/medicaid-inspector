@@ -114,9 +114,10 @@ const BASE = (import.meta.env.VITE_API_BASE as string) || '/api'
 
 function authHeaders(): Record<string, string> {
   try {
-    const session = JSON.parse(localStorage.getItem('mfi_session') || '{}')
-    if (session.token) {
-      return { 'Authorization': `Bearer ${session.token}` }
+    // auth.tsx stores token directly under 'mfi_token'
+    const token = localStorage.getItem('mfi_token')
+    if (token) {
+      return { 'Authorization': `Bearer ${token}` }
     }
   } catch {
     // ignore parse errors
