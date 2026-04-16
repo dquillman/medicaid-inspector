@@ -41,6 +41,12 @@ def load_review_from_disk() -> None:
 def save_review_to_disk() -> None:
     try:
         atomic_write_json(_QUEUE_FILE, {"items": list(_review_items.values())})
+        # Sync to GCS so data survives container restarts on Cloud Run
+        try:
+            from core.gcs_sync import upload_file
+            upload_file("review_queue.json")
+        except Exception:
+            pass  # GCS not available locally — that's fine
     except Exception as e:
         print(f"[review_store] Could not save review queue: {e}")
 

@@ -132,6 +132,7 @@ export async function get<T>(path: string, params?: Record<string, string | numb
     })
   }
   const res = await fetch(url.toString(), { headers: { ...authHeaders() } })
+  if (res.status === 401) { clearSessionAndRedirect(); throw new Error('Session expired') }
   if (!res.ok) throw new Error(`API error ${res.status}: ${await res.text()}`)
   return res.json()
 }
@@ -144,11 +145,21 @@ export async function mutate<T>(method: string, path: string, body?: unknown): P
     init.body = JSON.stringify(body)
   }
   const res = await fetch(BASE + path, init)
+  if (res.status === 401 && !path.includes('/auth/')) { clearSessionAndRedirect(); throw new Error('Session expired') }
   if (!res.ok) {
     const errBody = await res.json().catch(() => null)
     throw new Error(errBody?.detail || `API error ${res.status}`)
   }
   return res.json()
+}
+
+function clearSessionAndRedirect() {
+  localStorage.removeItem('mfi_session')
+  localStorage.removeItem('mfi_token')
+  localStorage.removeItem('mfi_user')
+  // Redirect to root so App.tsx shows login
+  if (window.location.pathname !== '/') window.location.href = '/'
+  else window.location.reload()
 }
 
 export const api = {
