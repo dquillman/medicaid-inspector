@@ -8,12 +8,29 @@ frontend/dist/
 
 # Environment
 .env
+.env.*
 *.env.local
+*.env.production
 
 # Data files (large, generated)
 backend/prescan_cache.json
 backend/review_queue.json
+backend/enrollment_cache.json
+backend/oig_exclusions.json
 backend/data/*.parquet
+
+# Auth / session state — never commit
+backend/users.json
+backend/sessions.json
+backend/.admin_initialized
+
+# Private keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*-service-account*.json
+*-credentials*.json
 
 # IDE
 .vscode/

@@ -7,6 +7,7 @@ import time
 import uuid
 import operator
 import pathlib
+import threading
 from typing import Optional
 
 from core.safe_io import atomic_write_json
@@ -15,6 +16,7 @@ _RULES_FILE = pathlib.Path(__file__).parent.parent / "alert_rules.json"
 
 # In-memory store: rule_id -> rule dict
 _rules: dict[str, dict] = {}
+_rules_lock = threading.Lock()
 
 # Cached evaluation results
 _last_results: list[dict] = []
@@ -44,15 +46,19 @@ def load_rules_from_disk() -> None:
         if not _RULES_FILE.exists():
             return
         raw = json.loads(_RULES_FILE.read_text(encoding="utf-8"))
-        _rules = {r["id"]: r for r in raw.get("rules", [])}
+        loaded = {r["id"]: r for r in raw.get("rules", [])}
+        with _rules_lock:
+            _rules = loaded
         print(f"[alert_store] Loaded {len(_rules)} alert rules from disk")
     except Exception as e:
         print(f"[alert_store] Could not load alert rules: {e}")
 
 
 def save_rules_to_disk() -> None:
+    with _rules_lock:
+        snapshot = list(_rules.values())
     try:
-        atomic_write_json(_RULES_FILE, {"rules": list(_rules.values())})
+        atomic_write_json(_RULES_FILE, {"rules": snapshot})
     except Exception as e:
         print(f"[alert_store] Could not save alert rules: {e}")
 
@@ -61,7 +67,8 @@ def save_rules_to_disk() -> None:
 
 def get_rules() -> list[dict]:
     """Return all rules sorted by created_at DESC."""
-    rules = list(_rules.values())
+    with _rules_lock:
+        rules = list(_rules.values())
     rules.sort(key=lambda r: r.get("created_at", 0), reverse=True)
     return rules
 
@@ -77,28 +84,32 @@ def add_rule(rule: dict) -> dict:
         "enabled": rule.get("enabled", True),
         "created_at": now,
     }
-    _rules[rule_id] = new_rule
+    with _rules_lock:
+        _rules[rule_id] = new_rule
     save_rules_to_disk()
     return new_rule
 
 
 def update_rule(rule_id: str, updates: dict) -> Optional[dict]:
     """Update an existing rule. Returns updated rule or None if not found."""
-    rule = _rules.get(rule_id)
-    if rule is None:
-        return None
-    for key in ("name", "conditions", "enabled"):
-        if key in updates:
-            rule[key] = updates[key]
+    with _rules_lock:
+        rule = _rules.get(rule_id)
+        if rule is None:
+            return None
+        for key in ("name", "conditions", "enabled"):
+            if key in updates:
+                rule[key] = updates[key]
+        result = dict(rule)
     save_rules_to_disk()
-    return rule
+    return result
 
 
 def delete_rule(rule_id: str) -> bool:
     """Delete a rule. Returns True if found and deleted."""
-    if rule_id not in _rules:
-        return False
-    del _rules[rule_id]
+    with _rules_lock:
+        if rule_id not in _rules:
+            return False
+        del _rules[rule_id]
     save_rules_to_disk()
     return True
 
@@ -134,8 +145,10 @@ def evaluate_rules(providers: list[dict]) -> list[dict]:
     Caches results for GET /api/alerts/results.
     """
     global _last_results
+    with _rules_lock:
+        rules_snapshot = list(_rules.values())
     results = []
-    for rule in _rules.values():
+    for rule in rules_snapshot:
         if not rule.get("enabled", True):
             continue
         if not rule.get("conditions"):

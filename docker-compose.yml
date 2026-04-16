@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: medicaid-inspector
     ports:
-      - "8000:8000"
+      - "8080:8080"
     volumes:
       # Persist JSON data files across container restarts
       - ./backend/prescan_cache.json:/app/prescan_cache.json
@@ -27,7 +27,7 @@ services:
       - CACHE_TTL=3600
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
       interval: 30s
       timeout: 10s
       retries: 3

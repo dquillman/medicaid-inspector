@@ -2,6 +2,7 @@
 Temporal anomaly detection routes — time-based billing pattern analysis.
 """
 import logging
+import re as _re
 from fastapi import APIRouter, HTTPException, Depends
 
 from services.temporal_analyzer import analyze_provider_temporal, get_system_temporal_patterns
@@ -11,6 +12,14 @@ router = APIRouter(prefix="/api/temporal", tags=["temporal"], dependencies=[Depe
 log = logging.getLogger(__name__)
 
 
+def _validate_npi(npi: str) -> str:
+    """Validate NPI is exactly 10 digits."""
+    npi = npi.strip()
+    if not _re.match(r'^\d{10}$', npi):
+        raise HTTPException(400, f"Invalid NPI '{npi}' — must be exactly 10 digits")
+    return npi
+
+
 @router.get("/providers/{npi}")
 async def provider_temporal_analysis(npi: str):
     """
@@ -18,6 +27,7 @@ async def provider_temporal_analysis(npi: str):
     Returns day-of-week distribution, monthly trend with anomaly flags,
     detected anomalies, and impossible day volumes.
     """
+    npi = _validate_npi(npi)
     try:
         result = await analyze_provider_temporal(npi)
     except Exception as e:

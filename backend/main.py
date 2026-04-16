@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from datetime import datetime
 import re
 
-from routes.auth import require_user, require_admin
+from routes.auth import require_user, require_admin, require_analyst
 from core.rate_limiter import RateLimitMiddleware, check_login_rate
 
 from core.config import settings
@@ -130,7 +130,7 @@ def _finish_prescan_load():
         from services.nppes_enricher import enrich_batch_with_nppes
         from core.cache import invalidate_nppes_cache
         invalidate_nppes_cache()
-        asyncio.get_event_loop().create_task(enrich_batch_with_nppes(missing_nppes))
+        asyncio.create_task(enrich_batch_with_nppes(missing_nppes))
         log.info("Queued NPPES enrichment for %d providers", len(missing_nppes))
 
 
@@ -183,10 +183,20 @@ async def lifespan(app: FastAPI):
 
     # Load OIG exclusion list — try cache first, download if missing
     if not load_oig_from_disk():
-        asyncio.create_task(download_oig_list())
+        async def _oig_bg():
+            try:
+                await download_oig_list()
+            except Exception as exc:
+                log.error("OIG download failed: %s", exc)
+        asyncio.create_task(_oig_bg())
 
     # Load Medicaid enrollment data (disk cache or CMS API)
-    asyncio.create_task(load_or_fetch_enrollment())
+    async def _enrollment_bg():
+        try:
+            await load_or_fetch_enrollment()
+        except Exception as exc:
+            log.error("Enrollment load failed: %s", exc)
+    asyncio.create_task(_enrollment_bg())
 
     # Load prescan data — use slim index (54MB) on Cloud Run, full cache locally
     import os as _os
@@ -248,6 +258,19 @@ async def add_security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    # Prevent MIME-sniffing attacks and restrict resource loading.
+    # 'unsafe-inline' is required for Vite's injected styles in dev/prod builds.
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data: https:; "
+        "connect-src 'self' https://api.cms.gov https://npiregistry.cms.hhs.gov https://storage.googleapis.com; "
+        "frame-ancestors 'none';"
+    )
+    # HSTS — only sent over HTTPS; instructs browsers to always use HTTPS for 1 year
+    if request.url.scheme == "https":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 # Routers sharing /api/providers prefix with specific sub-paths must come
@@ -324,7 +347,7 @@ class ScanBatchRequest(BaseModel):
     force: bool = False  # When True, skip incremental check and rescan all providers
 
 
-@app.post("/api/prescan/scan-batch", dependencies=[Depends(require_user)])
+@app.post("/api/prescan/scan-batch", dependencies=[Depends(require_analyst)])
 async def trigger_scan_batch(body: ScanBatchRequest = None):
     if body is None:
         body = ScanBatchRequest()
@@ -338,7 +361,7 @@ async def trigger_scan_batch(body: ScanBatchRequest = None):
     return {"started": True, "batch_size": body.batch_size, "state_filter": body.state_filter, "force": body.force, "task_id": task_id}
 
 
-@app.post("/api/prescan/auto-start", dependencies=[Depends(require_user)])
+@app.post("/api/prescan/auto-start", dependencies=[Depends(require_analyst)])
 async def auto_start_scan(body: ScanBatchRequest = None):
     if body is None:
         body = ScanBatchRequest()
@@ -349,13 +372,13 @@ async def auto_start_scan(body: ScanBatchRequest = None):
     return {"started": True, "auto_mode": True, "batch_size": body.batch_size}
 
 
-@app.post("/api/prescan/auto-stop", dependencies=[Depends(require_user)])
+@app.post("/api/prescan/auto-stop", dependencies=[Depends(require_analyst)])
 async def auto_stop_scan():
     stop_auto_mode()
     return {"auto_mode": False, "note": "Auto mode disabled — current batch will finish normally"}
 
 
-@app.post("/api/prescan/rescore", dependencies=[Depends(require_user)])
+@app.post("/api/prescan/rescore", dependencies=[Depends(require_analyst)])
 async def rescore_endpoint():
     """Re-run all fraud signals against cached providers."""
     return await _rescore_cached()
@@ -365,7 +388,7 @@ class SmartScanRequest(BaseModel):
     state_filter: Optional[str] = None
 
 
-@app.post("/api/prescan/smart-scan", dependencies=[Depends(require_user)])
+@app.post("/api/prescan/smart-scan", dependencies=[Depends(require_analyst)])
 async def smart_scan_endpoint(body: SmartScanRequest = None):
     """High-risk-first scan (requires local Parquet data)."""
     if not is_local():
@@ -445,7 +468,7 @@ async def prescan_status_endpoint():
     return status
 
 
-@app.post("/api/ml/train", dependencies=[Depends(require_user)])
+@app.post("/api/ml/train", dependencies=[Depends(require_analyst)])
 async def train_ml_model():
     """Train Isolation Forest on all cached providers and return anomaly scores."""
     from services.ml_scorer import train_and_score
@@ -490,8 +513,8 @@ async def admin_metrics(user: dict = Depends(require_admin)):
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
-async def prometheus_metrics():
-    """Prometheus-compatible text format metrics."""
+async def prometheus_metrics(user: dict = Depends(require_admin)):
+    """Prometheus-compatible text format metrics — admin only."""
     return get_prometheus_text()
 
 

@@ -21,7 +21,8 @@ async def state_heatmap():
     total_beneficiaries = 0
 
     for p in prescanned:
-        state = p.get("state") or p.get("nppes", {}).get("address", {}).get("state", "")
+        # slim cache stores state at top level; full cache may also have it in nppes.address
+        state = p.get("state") or (p.get("nppes") or {}).get("address", {}).get("state", "")
         tp = p.get("total_paid", 0) or 0
         tc = p.get("total_claims", 0) or 0
         tb = p.get("total_beneficiaries", 0) or 0

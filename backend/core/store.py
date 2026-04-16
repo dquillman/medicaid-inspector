@@ -6,11 +6,13 @@ Cache is invalidated by Parquet URL change (new data release) rather than by TTL
 import json
 import time
 import pathlib
+import threading
 
 from core.safe_io import atomic_write_json
 
 _CACHE_FILE = pathlib.Path(__file__).parent.parent / "prescan_cache.json"
 
+_store_lock = threading.Lock()
 prescanned_providers: list[dict] = []
 _npi_index: dict[str, dict] = {}
 prescan_status: dict = {"phase": 0, "message": "Idle — use the Scan button to begin", "started_at": None}
@@ -52,9 +54,12 @@ def load_from_disk(filename: str = "prescan_cache.json") -> bool:
         if cached_url and cached_url != settings.PARQUET_URL:
             print(f"[store] Parquet URL changed — cache invalidated")
             return False
-        prescanned_providers = raw.get("providers", [])
-        _npi_index = {p["npi"]: p for p in prescanned_providers}
+        loaded_providers = raw.get("providers", [])
+        loaded_index = {p["npi"]: p for p in loaded_providers}
         saved_prog = raw.get("scan_progress", {})
+        with _store_lock:
+            prescanned_providers = loaded_providers
+            _npi_index = loaded_index
         scan_progress.update({
             "offset": saved_prog.get("offset", 0),
             "total_provider_count": saved_prog.get("total_provider_count"),
@@ -73,28 +78,32 @@ def load_from_disk(filename: str = "prescan_cache.json") -> bool:
 
 def set_prescanned(data: list[dict]) -> None:
     global prescanned_providers, _npi_index
-    prescanned_providers = data
-    _npi_index = {p["npi"]: p for p in prescanned_providers}
+    with _store_lock:
+        prescanned_providers = data
+        _npi_index = {p["npi"]: p for p in prescanned_providers}
     save_to_disk()
 
 
 def append_prescanned(new_providers: list[dict], save: bool = True) -> None:
     """Merge new providers into existing cache, de-dup by NPI, sort by total_paid DESC."""
     global prescanned_providers, _npi_index
-    for p in new_providers:
-        _npi_index[p["npi"]] = p
-    prescanned_providers = sorted(_npi_index.values(), key=lambda p: p.get("total_paid") or 0, reverse=True)
+    with _store_lock:
+        for p in new_providers:
+            _npi_index[p["npi"]] = p
+        prescanned_providers = sorted(_npi_index.values(), key=lambda p: p.get("total_paid") or 0, reverse=True)
     if save:
         save_to_disk()
 
 
 def get_prescanned() -> list[dict]:
-    return prescanned_providers
+    with _store_lock:
+        return list(prescanned_providers)
 
 
 def get_provider_by_npi(npi: str) -> dict | None:
     """O(1) lookup of a single provider by NPI."""
-    return _npi_index.get(npi)
+    with _store_lock:
+        return _npi_index.get(npi)
 
 
 def load_prescanned_from_disk(filename: str = "prescan_cache.json") -> bool:
@@ -122,8 +131,9 @@ def set_scan_progress(offset: int, total: int | None, state_filter: str | None, 
 def reset_scan() -> None:
     """Clear all scanned providers and reset progress to zero."""
     global prescanned_providers, scan_progress, _npi_index
-    prescanned_providers = []
-    _npi_index = {}
+    with _store_lock:
+        prescanned_providers = []
+        _npi_index = {}
     scan_progress = {
         "offset": 0,
         "total_provider_count": None,

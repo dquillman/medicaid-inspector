@@ -2,7 +2,7 @@
 ROI tracking API routes.
 """
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Query, Depends
 from pydantic import BaseModel
 
 from core.roi_store import (
@@ -42,7 +42,10 @@ async def log_recovery(body: RecoveryBody):
 
 
 @router.get("/recoveries")
-async def list_recoveries(page: int = 1, limit: int = 50):
+async def list_recoveries(
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=200),
+):
     """List all recoveries, paginated."""
     return get_recoveries(page=page, limit=limit)
 
