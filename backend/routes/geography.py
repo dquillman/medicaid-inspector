@@ -15,7 +15,8 @@ def _get_provider_city(p: dict) -> str:
 
 
 def _get_provider_zip(p: dict) -> str:
-    return p.get("nppes", {}).get("address", {}).get("zip", "")
+    # Slim cache stores zip at top level; full cache has it in nppes.address
+    return p.get("zip") or p.get("nppes", {}).get("address", {}).get("zip", "")
 
 
 def _is_flagged(p: dict) -> bool:
@@ -148,7 +149,7 @@ async def geography_hotspots():
     for bucket in zip_map.values():
         scores = bucket["risk_scores"]
         avg_risk = sum(scores) / len(scores) if scores else 0
-        if bucket["flagged_count"] >= 5 and avg_risk > 30:
+        if bucket["flagged_count"] >= 5 and avg_risk > settings.RISK_THRESHOLD:
             hotspots.append({
                 "zip3": bucket["zip3"],
                 "provider_count": bucket["provider_count"],

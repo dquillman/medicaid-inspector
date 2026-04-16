@@ -915,6 +915,12 @@ async def list_providers(
             entry["oig_excluded"] = oig_excluded
             if oig_record:
                 entry["oig_detail"] = oig_record
+            # Compute flag_count from flags if missing (slim cache doesn't store it)
+            if entry.get("flag_count") is None:
+                entry["flag_count"] = len([f for f in (entry.get("flags") or []) if f.get("flagged")])
+            # Get specialty from nppes taxonomy if not in slim cache
+            if not entry.get("specialty") and entry.get("nppes"):
+                entry["specialty"] = (entry["nppes"].get("taxonomy") or {}).get("description", "")
             enriched_slice.append(entry)
 
         return {"providers": enriched_slice, "page": page, "limit": limit, "total": total}
@@ -970,10 +976,28 @@ async def get_provider_detail(npi: str):
         ]
         spending = {k: cached.get(k) for k in spending_keys}
 
+        # Slim cache stores signals under "flags" — expose also as "signal_results"
+        # for backward compatibility with the frontend ProviderDetail page.
+        flags = cached.get("flags") or []
+        signal_results = cached.get("signal_results") or flags
+
+        # Compute flag_count from flags if missing (slim cache doesn't store it)
+        flag_count = cached.get("flag_count")
+        if flag_count is None:
+            flag_count = len([f for f in flags if f.get("flagged")])
+
+        # Get specialty from nppes taxonomy if not in slim cache
+        specialty = cached.get("specialty")
+        if not specialty and nppes_data:
+            specialty = (nppes_data.get("taxonomy") or {}).get("description", "")
+
         return {
             **cached,
             "nppes": nppes_data,
             "spending": spending,
+            "signal_results": signal_results,
+            "flag_count": flag_count,
+            "specialty": specialty,
         }
 
     # Fallback: provider not in cache yet — query Parquet + NPPES in parallel
@@ -1232,11 +1256,14 @@ async def get_provider_peers(npi: str):
 @router.get("/{npi}/timeline")
 async def get_timeline(npi: str):
     """Monthly billing timeline — served from prescan cache when available."""
+    import asyncio
+    npi = _validate_npi(npi)
     cached = get_provider_by_npi(npi)
     if cached and cached.get("timeline"):
         return {"npi": npi, "timeline": cached["timeline"]}
 
     # Fallback: query Parquet (provider not yet scanned)
+    # Wrap in a timeout to avoid Cloud Run request timeouts
     sql = f"""
     SELECT
         CLAIM_FROM_MONTH                    AS month,
@@ -1248,7 +1275,10 @@ async def get_timeline(npi: str):
     GROUP BY CLAIM_FROM_MONTH
     ORDER BY CLAIM_FROM_MONTH ASC
     """
-    rows = await query_async(sql)
+    try:
+        rows = await asyncio.wait_for(query_async(sql), timeout=25.0)
+    except asyncio.TimeoutError:
+        return {"npi": npi, "timeline": [], "note": "Timeline data not available — run a full scan to populate"}
     return {"npi": npi, "timeline": rows}
 
 
@@ -1256,11 +1286,14 @@ async def get_timeline(npi: str):
 @router.get("/{npi}/hcpcs")
 async def get_hcpcs(npi: str):
     """HCPCS breakdown with descriptions — served from prescan cache when available."""
+    import asyncio
+    npi = _validate_npi(npi)
     cached = get_provider_by_npi(npi)
     if cached and cached.get("hcpcs"):
         rows = cached["hcpcs"]
     else:
         # Fallback: query Parquet (provider not yet scanned)
+        # Wrap in a timeout to avoid Cloud Run request timeouts
         sql = f"""
         SELECT
             HCPCS_CODE          AS hcpcs_code,
@@ -1273,7 +1306,10 @@ async def get_hcpcs(npi: str):
         ORDER BY total_paid DESC
         LIMIT 20
         """
-        rows = await query_async(sql)
+        try:
+            rows = await asyncio.wait_for(query_async(sql), timeout=25.0)
+        except asyncio.TimeoutError:
+            return {"npi": npi, "hcpcs": [], "note": "HCPCS data not available — run a full scan to populate"}
 
     # Fetch descriptions for all unique codes in one concurrent batch
     codes = list({r.get("hcpcs_code", "") for r in rows if r.get("hcpcs_code")})
@@ -1984,21 +2020,45 @@ async def get_hcpcs_detail(npi: str, code: str):
 @router.get("/{npi}/yoy-comparison")
 async def yoy_comparison(npi: str):
     """Year-over-year comparison of billing metrics."""
+    import asyncio
     npi = _validate_npi(npi)
-    src = f"read_parquet('{get_parquet_path()}')"
-    sql = f"""
-    SELECT
-        SUBSTRING(CLAIM_FROM_MONTH, 1, 4) AS year,
-        SUM(TOTAL_PAID)                   AS total_paid,
-        SUM(TOTAL_CLAIMS)                 AS total_claims,
-        SUM(TOTAL_UNIQUE_BENEFICIARIES)   AS total_beneficiaries,
-        COUNT(DISTINCT HCPCS_CODE)        AS distinct_hcpcs
-    FROM {src}
-    WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
-    GROUP BY year
-    ORDER BY year ASC
-    """
-    rows = await query_async(sql)
+
+    # Try to derive YoY from cached timeline first (works with slim cache)
+    cached = get_provider_by_npi(npi)
+    if cached and cached.get("timeline"):
+        from collections import defaultdict
+        yearly: dict[str, dict] = defaultdict(lambda: {"total_paid": 0.0, "total_claims": 0, "total_beneficiaries": 0, "distinct_hcpcs": 0})
+        for t in cached["timeline"]:
+            year = (t.get("month") or "")[:4]
+            if not year:
+                continue
+            yearly[year]["total_paid"] += float(t.get("total_paid") or 0)
+            yearly[year]["total_claims"] += int(t.get("total_claims") or 0)
+            yearly[year]["total_beneficiaries"] += int(t.get("total_unique_beneficiaries") or 0)
+        rows_from_cache = [{"year": y, **d} for y, d in sorted(yearly.items())]
+    else:
+        rows_from_cache = None
+
+    if rows_from_cache is not None:
+        rows = rows_from_cache
+    else:
+        src = f"read_parquet('{get_parquet_path()}')"
+        sql = f"""
+        SELECT
+            SUBSTRING(CLAIM_FROM_MONTH, 1, 4) AS year,
+            SUM(TOTAL_PAID)                   AS total_paid,
+            SUM(TOTAL_CLAIMS)                 AS total_claims,
+            SUM(TOTAL_UNIQUE_BENEFICIARIES)   AS total_beneficiaries,
+            COUNT(DISTINCT HCPCS_CODE)        AS distinct_hcpcs
+        FROM {src}
+        WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
+        GROUP BY year
+        ORDER BY year ASC
+        """
+        try:
+            rows = await asyncio.wait_for(query_async(sql), timeout=25.0)
+        except asyncio.TimeoutError:
+            return {"npi": npi, "years": [], "note": "Year-over-year data not available — run a full scan to populate"}
 
     years = []
     for i, row in enumerate(rows):
