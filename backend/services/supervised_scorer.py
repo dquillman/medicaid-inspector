@@ -74,13 +74,27 @@ SIGNAL_TO_FEATURE = {
 
 def _extract_features(provider: dict) -> list[float]:
     """Extract feature vector from a provider dict."""
+    # Full cache uses signal_results (with scores); slim cache uses flags (with flagged bool).
+    # Merge both so feature extraction works with either cache format.
     signal_results = provider.get("signal_results") or []
+    flags = provider.get("flags") or []
     signal_scores: dict[str, float] = {}
     for s in signal_results:
         sig_name = s.get("signal", "")
         signal_scores[sig_name] = float(s.get("score", 0))
+    # Fill in flagged signals from slim-cache flags if not already in signal_results
+    for f in flags:
+        sig_name = f.get("signal", "")
+        if sig_name and sig_name not in signal_scores:
+            # Use flagged as a binary score (1.0 = flagged)
+            signal_scores[sig_name] = 1.0 if f.get("flagged") else 0.0
 
-    flag_count = len([s for s in signal_results if s.get("flagged")])
+    # Use flag_count from provider if available (slim cache stores it directly)
+    explicit_flag_count = provider.get("flag_count")
+    if explicit_flag_count is not None:
+        flag_count = int(explicit_flag_count)
+    else:
+        flag_count = len([s for s in (signal_results + flags) if s.get("flagged")])
     total_claims = float(provider.get("total_claims") or 0)
     total_paid = float(provider.get("total_paid") or 0)
     avg_per_claim = (total_paid / total_claims) if total_claims > 0 else 0
