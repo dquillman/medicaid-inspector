@@ -18,7 +18,9 @@ COPY backend/ ./
 ENV PORT=8080
 
 # Run as non-root user for container hardening
-RUN useradd --no-create-home --shell /bin/false appuser
+# --create-home is required so DuckDB can install httpfs extension (~/.duckdb)
+RUN useradd --create-home --shell /bin/false appuser \
+    && chown -R appuser:appuser /app
 USER appuser
 
 # Run uvicorn
