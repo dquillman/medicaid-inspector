@@ -32,6 +32,12 @@ def load_watchlist_from_disk() -> None:
 def save_watchlist_to_disk() -> None:
     try:
         atomic_write_json(_WATCHLIST_FILE, {"items": list(_watchlist_items.values())})
+        # Sync to GCS so data survives container restarts on Cloud Run
+        try:
+            from core.gcs_sync import upload_file
+            upload_file("watchlist.json")
+        except Exception:
+            pass  # GCS not available locally — that's fine
     except Exception as e:
         print(f"[watchlist_store] Could not save watchlist: {e}")
 

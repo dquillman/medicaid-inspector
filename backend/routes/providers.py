@@ -485,7 +485,8 @@ def _build_report_html(provider: dict, review_item: dict | None, hcpcs_descripti
     name         = nppes.get("name") or provider.get("provider_name") or f"NPI {npi}"
     entity_type  = "Organization" if nppes.get("entity_type") == "NPI-2" else "Individual Provider"
     risk_score   = provider.get("risk_score") or 0
-    signals      = provider.get("signal_results") or []
+    # Slim cache stores signals in "flags"; full cache uses "signal_results"
+    signals      = provider.get("signal_results") or provider.get("flags") or []
     flagged      = [s for s in signals if s.get("flagged")]
 
     risk_label, risk_color = classify_risk(risk_score)
@@ -755,8 +756,9 @@ async def export_providers_csv():
     writer.writerow(["NPI", "Name", "Specialty", "State", "Risk Score", "Total Paid", "Flag Count", "Flags"])
     for p in sorted(prescanned, key=lambda x: -(x.get("risk_score") or 0)):
         nppes = p.get("nppes") or {}
-        name = nppes.get("name", "")
-        specialty = nppes.get("specialty", "")
+        # Slim cache stores name/specialty at top level; fall back to nppes fields
+        name = p.get("provider_name") or nppes.get("name", "")
+        specialty = p.get("specialty") or nppes.get("specialty", "") or (nppes.get("taxonomy") or {}).get("description", "")
         state = p.get("state") or nppes.get("address", {}).get("state", "")
         flags = p.get("flags") or []
         flag_names = "; ".join(f.get("signal", "") if isinstance(f, dict) else str(f) for f in flags)
@@ -1081,11 +1083,13 @@ async def export_provider_package(npi: str):
         add_text("provider_summary.json", _json.dumps(summary, indent=2, default=str))
 
         # fraud_signals.json
+        # Slim cache stores signals in "flags"; full cache uses "signal_results"
+        _all_signals = cached.get("signal_results") or cached.get("flags") or []
         signals_doc = {
             "npi":             npi,
             "risk_score":      cached.get("risk_score"),
-            "signals":         cached.get("signal_results") or [],
-            "flagged_signals": [s for s in (cached.get("signal_results") or []) if s.get("flagged")],
+            "signals":         _all_signals,
+            "flagged_signals": [s for s in _all_signals if s.get("flagged")],
         }
         add_text("fraud_signals.json", _json.dumps(signals_doc, indent=2, default=str))
 
@@ -1142,11 +1146,14 @@ async def get_address_cluster(npi: str):
         raise HTTPException(404, f"Provider {npi} not in scan cache")
 
     addr   = (cached.get("nppes") or {}).get("address") or {}
-    zip5   = (addr.get("zip") or "").strip()[:5]
+    # Slim cache stores zip at top level; full cache stores it in nppes.address
+    zip5   = (addr.get("zip") or cached.get("zip") or "").strip()[:5]
     line1  = (addr.get("line1") or "").strip().upper()
 
     if not zip5 or not line1:
-        return {"npi": npi, "address": addr, "cluster": [], "cluster_count": 0}
+        # For slim cache providers with no nppes, return an empty cluster gracefully
+        slim_addr = {"zip": cached.get("zip", ""), "state": cached.get("state", ""), "city": cached.get("city", "")}
+        return {"npi": npi, "address": addr or slim_addr, "cluster": [], "cluster_count": 0, "note": "Address clustering requires full NPPES data"}
 
     cluster = []
     for p in get_prescanned():
