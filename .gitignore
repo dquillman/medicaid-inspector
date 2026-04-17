@@ -24,6 +24,11 @@ backend/users.json
 backend/sessions.json
 backend/.admin_initialized
 
+# SQLite runtime DB — never commit
+backend/app.db
+backend/app.db-shm
+backend/app.db-wal
+
 # Private keys and certificates
 *.pem
 *.key
