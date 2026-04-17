@@ -3,12 +3,15 @@ Persistent storage for configurable alert rules.
 Disk file: backend/alert_rules.json
 """
 import json
+import logging
 import time
 import uuid
 import operator
 import pathlib
 import threading
 from typing import Optional
+
+_log = logging.getLogger(__name__)
 
 from core.safe_io import atomic_write_json
 
@@ -130,7 +133,9 @@ def _matches_rule(provider: dict, rule: dict) -> bool:
         op_name = cond.get("operator", "")
         value = float(cond.get("value", 0))
         if field not in VALID_FIELDS or op_name not in VALID_OPERATORS:
-            continue
+            # Unrecognised condition — fail closed so misconfigured rules don't fire silently
+            _log.warning("Alert rule %r has invalid condition: field=%r op=%r", rule.get("id"), field, op_name)
+            return False
         actual = _get_field_value(provider, field)
         op_fn = _OP_MAP[op_name]
         if not op_fn(actual, value):

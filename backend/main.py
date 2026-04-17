@@ -348,7 +348,7 @@ class ScanBatchRequest(BaseModel):
 
 
 @app.post("/api/prescan/scan-batch", dependencies=[Depends(require_analyst)])
-async def trigger_scan_batch(body: ScanBatchRequest = None):
+async def trigger_scan_batch(body: Optional[ScanBatchRequest] = None):
     if body is None:
         body = ScanBatchRequest()
     body.state_filter = _validate_state_filter(body.state_filter)
@@ -362,7 +362,7 @@ async def trigger_scan_batch(body: ScanBatchRequest = None):
 
 
 @app.post("/api/prescan/auto-start", dependencies=[Depends(require_analyst)])
-async def auto_start_scan(body: ScanBatchRequest = None):
+async def auto_start_scan(body: Optional[ScanBatchRequest] = None):
     if body is None:
         body = ScanBatchRequest()
     body.state_filter = _validate_state_filter(body.state_filter)

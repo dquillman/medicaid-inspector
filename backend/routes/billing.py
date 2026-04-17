@@ -158,5 +158,6 @@ def _get_email_from_customer(stripe, customer_id: str) -> str:
     try:
         customer = stripe.Customer.retrieve(customer_id)
         return (customer.get("email") or "").lower().strip()
-    except Exception:
+    except Exception as e:
+        log.warning("Failed to retrieve Stripe customer %s: %s", customer_id, e)
         return ""

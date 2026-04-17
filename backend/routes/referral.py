@@ -47,8 +47,8 @@ async def generate_referral_packet(npi: str):
     if not nppes:
         try:
             nppes = await get_provider(npi)
-        except Exception:
-            logger.warning("Failed to fetch NPPES data for NPI %s in referral packet", npi)
+        except Exception as e:
+            logger.warning("Failed to fetch NPPES data for NPI %s in referral packet: %s", npi, e)
 
     addr = nppes.get("address") or {}
     tax = nppes.get("taxonomy") or {}
