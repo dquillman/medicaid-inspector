@@ -23,41 +23,72 @@ SCAN_LOCK_FILE = pathlib.Path(__file__).parent.parent / ".scan.lock"
 STALE_LOCK_SECONDS = 600  # 10 minutes
 
 
+def _atomic_create_lock() -> bool:
+    """
+    Try to create the lock file atomically with O_EXCL semantics.
+    Returns True if we created it, False if it already existed.
+    Works cross-platform (Unix + Windows).
+    """
+    try:
+        # O_CREAT | O_EXCL is atomic on all platforms — if the file exists,
+        # this raises FileExistsError and we never overwrite.
+        fd = os.open(str(SCAN_LOCK_FILE), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        return False
+    except OSError as e:
+        log.error("[scan_lock] Could not create lock file: %s", e)
+        return False
+    try:
+        os.write(fd, f"{os.getpid()}:{time.time()}".encode("utf-8"))
+    finally:
+        os.close(fd)
+    return True
+
+
 def acquire_scan_lock() -> bool:
     """
     Try to acquire the file-based scan lock.
     Returns True on success, False if another process holds it.
     Automatically overrides stale locks from crashed/dead processes.
     """
-    if SCAN_LOCK_FILE.exists():
-        try:
-            lock_content = SCAN_LOCK_FILE.read_text(encoding="utf-8").strip()
-            parts = lock_content.split(":")
-            pid = int(parts[0])
-            lock_time = float(parts[1]) if len(parts) > 1 else 0
-
-            try:
-                os.kill(pid, 0)  # Signal 0 = check if process exists
-                # Process is alive -- check if lock is stale by age
-                if time.time() - lock_time > STALE_LOCK_SECONDS:
-                    log.warning(
-                        "[scan_lock] Stale lock from PID %d (%.0fs old) — overriding",
-                        pid, time.time() - lock_time,
-                    )
-                else:
-                    return False  # Lock is held and not stale
-            except (OSError, ProcessLookupError):
-                # Process is dead -- stale lock
-                log.warning("[scan_lock] Stale lock from dead PID %d — overriding", pid)
-        except Exception as e:
-            log.warning("[scan_lock] Could not parse lock file: %s — overriding", e)
-
-    # Write our PID and timestamp
-    try:
-        SCAN_LOCK_FILE.write_text(f"{os.getpid()}:{time.time()}", encoding="utf-8")
+    # Fast path: atomic create. If it succeeds, we hold the lock.
+    if _atomic_create_lock():
         return True
+
+    # Lock already exists — decide if it is stale. If it is, remove it and
+    # retry the atomic create. A failed retry means someone else won the race.
+    try:
+        lock_content = SCAN_LOCK_FILE.read_text(encoding="utf-8").strip()
+        parts = lock_content.split(":")
+        pid = int(parts[0])
+        lock_time = float(parts[1]) if len(parts) > 1 else 0
+
+        stale = False
+        try:
+            os.kill(pid, 0)  # Signal 0 = check if process exists
+            if time.time() - lock_time > STALE_LOCK_SECONDS:
+                log.warning(
+                    "[scan_lock] Stale lock from PID %d (%.0fs old) — overriding",
+                    pid, time.time() - lock_time,
+                )
+                stale = True
+        except (OSError, ProcessLookupError):
+            log.warning("[scan_lock] Stale lock from dead PID %d — overriding", pid)
+            stale = True
+
+        if not stale:
+            return False
+
+        # Best-effort remove and retry. If the unlink or the retry loses a
+        # race to another process, we return False rather than overwrite.
+        try:
+            SCAN_LOCK_FILE.unlink(missing_ok=True)
+        except OSError as e:
+            log.warning("[scan_lock] Could not remove stale lock: %s", e)
+            return False
+        return _atomic_create_lock()
     except Exception as e:
-        log.error("[scan_lock] Could not write lock file: %s", e)
+        log.warning("[scan_lock] Could not parse lock file: %s", e)
         return False
 
 

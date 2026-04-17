@@ -139,7 +139,28 @@ export default function Landing({ onLogin }: Props) {
     try {
       const data = await mutate<{ url?: string }>('POST', '/billing/create-checkout', { plan: priceId, email })
       if (data.url) {
-        window.location.href = data.url
+        // Validate the redirect target before navigating. Stripe checkout URLs
+        // are always https://checkout.stripe.com/* or https://*.stripe.com/*
+        // — anything else (http://, javascript:, data:, attacker-controlled
+        // domain) must be refused to prevent open-redirect / phishing.
+        let parsed: URL | null = null
+        try {
+          parsed = new URL(data.url)
+        } catch {
+          parsed = null
+        }
+        const isSafe =
+          parsed !== null &&
+          parsed.protocol === 'https:' &&
+          (parsed.hostname === 'checkout.stripe.com' ||
+            parsed.hostname.endsWith('.stripe.com'))
+        if (isSafe) {
+          window.location.href = parsed!.toString()
+        } else {
+          // Refuse to follow an unexpected redirect target.
+          console.error('Refusing to follow unsafe checkout URL:', data.url)
+          onLogin()
+        }
       }
     } catch {
       // Stripe not configured — go to login

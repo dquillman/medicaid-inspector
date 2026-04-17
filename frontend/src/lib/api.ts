@@ -124,6 +124,22 @@ function authHeaders(): Record<string, string> {
   return {}
 }
 
+/**
+ * Safely decode a fetch response body. Returns `null` for 204 / empty bodies
+ * or when the server sent non-JSON — never throws a raw SyntaxError from JSON.parse
+ * that would surface as a cryptic "Unexpected end of JSON input" to the user.
+ */
+async function parseJsonSafe<T>(res: Response): Promise<T | null> {
+  if (res.status === 204) return null
+  const text = await res.text()
+  if (!text) return null
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
+}
+
 export async function get<T>(path: string, params?: Record<string, string | number | boolean>): Promise<T> {
   const url = new URL(BASE + path, window.location.origin)
   if (params) {
@@ -134,10 +150,14 @@ export async function get<T>(path: string, params?: Record<string, string | numb
   const res = await fetch(url.toString(), { headers: { ...authHeaders() } })
   if (res.status === 401) { clearSessionAndRedirect(); throw new Error('Session expired') }
   if (!res.ok) {
-    const errBody = await res.json().catch(() => null)
+    const errBody = await parseJsonSafe<{ detail?: string }>(res)
     throw new Error(errBody?.detail || `Request failed (${res.status})`)
   }
-  return res.json()
+  const body = await parseJsonSafe<T>(res)
+  if (body === null) {
+    throw new Error(`Request to ${path} returned an empty or non-JSON body`)
+  }
+  return body
 }
 
 export async function mutate<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -150,10 +170,13 @@ export async function mutate<T>(method: string, path: string, body?: unknown): P
   const res = await fetch(BASE + path, init)
   if (res.status === 401 && !path.includes('/auth/')) { clearSessionAndRedirect(); throw new Error('Session expired') }
   if (!res.ok) {
-    const errBody = await res.json().catch(() => null)
+    const errBody = await parseJsonSafe<{ detail?: string }>(res)
     throw new Error(errBody?.detail || `API error ${res.status}`)
   }
-  return res.json()
+  // Tolerate empty/204 mutation responses: callers typed `Promise<T>`, but
+  // returning an empty object is safer than throwing on a successful op.
+  const parsed = await parseJsonSafe<T>(res)
+  return (parsed ?? ({} as T))
 }
 
 function clearSessionAndRedirect() {
@@ -278,7 +301,16 @@ export const api = {
     const html = await res.text()
     const blob = new Blob([html], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
-    window.open(url, '_blank')
+    // 'noopener,noreferrer' prevents the opened tab from accessing window.opener
+    // and leaking Referer headers.
+    const win = window.open(url, '_blank', 'noopener,noreferrer')
+    // Release the blob URL shortly after opening so it doesn't leak if
+    // the popup is blocked or the user closes the tab quickly.
+    if (!win) {
+      URL.revokeObjectURL(url)
+      throw new Error('Pop-up was blocked — please allow pop-ups and retry.')
+    }
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
   },
 
   addToReview: (data: { npi: string; status?: string; notes?: string; assigned_to?: string }) =>

@@ -133,7 +133,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
               const max = Math.max(...(ev.first_6_months as { total_paid: number }[]).map(x => x.total_paid))
               const h = max > 0 ? (m.total_paid / max) * 100 : 0
               return (
-                <div key={i} className="flex-1 flex flex-col items-center gap-1">
+                <div key={`${m.month ?? ''}-${i}`} className="flex-1 flex flex-col items-center gap-1">
                   <span className="text-[9px] text-gray-500">{fmt(m.total_paid)}</span>
                   <div className="w-full bg-gray-800 rounded-t relative" style={{ height: `${Math.max(h, 2)}%` }}>
                     <div className={`absolute inset-0 rounded-t ${i === 5 ? 'bg-red-500' : 'bg-blue-500/70'}`} />
@@ -159,7 +159,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
               const h = max > 0 ? (m.total_paid / max) * 100 : 0
               return (
                 <div
-                  key={i}
+                  key={`${m.month ?? ''}-${i}`}
                   className={`flex-1 rounded-t ${m.is_peak ? 'bg-red-500' : m.total_paid === 0 ? 'bg-gray-800' : 'bg-blue-500/60'}`}
                   style={{ height: `${Math.max(h, 2)}%` }}
                   title={`${m.month}: ${fmt(m.total_paid)}`}
@@ -181,7 +181,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
           <div className="grid grid-cols-6 gap-1 text-[10px]">
             {(ev.months as { month: string; beneficiaries: number; is_ghost: boolean; total_paid: number }[]).slice(0, 24).map((m, i) => (
               <div
-                key={i}
+                key={`${m.month ?? ''}-${i}`}
                 className={`rounded px-1 py-0.5 text-center ${m.is_ghost ? 'bg-red-950/50 border border-red-800 text-red-300' : 'bg-gray-800 text-gray-500'}`}
               >
                 <div className="font-mono">{m.beneficiaries}</div>

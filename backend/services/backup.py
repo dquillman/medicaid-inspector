@@ -129,9 +129,32 @@ def restore_backup(backup_id: str) -> dict:
         return {"error": f"Backup not found: {backup_id}"}
 
     restored_files = []
+    skipped: list[str] = []
+    backend_dir_resolved = _BACKEND_DIR.resolve()
     with zipfile.ZipFile(zip_path, "r") as zf:
         for member in zf.namelist():
+            # Zip-slip defense: reject absolute paths, traversal components
+            # (`..`, `\\`), drive letters, and anything that resolves outside
+            # _BACKEND_DIR. A malicious archive could otherwise overwrite any
+            # file the server process can write.
+            if not member or member.endswith("/"):
+                continue
+            if (
+                member.startswith("/")
+                or member.startswith("\\")
+                or ".." in pathlib.Path(member).parts
+                or (len(member) > 1 and member[1] == ":")
+            ):
+                skipped.append(member)
+                continue
+
             target = _BACKEND_DIR / member
+            try:
+                target.resolve().relative_to(backend_dir_resolved)
+            except ValueError:
+                skipped.append(member)
+                continue
+
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(member) as src, open(target, "wb") as dst:
                 dst.write(src.read())
@@ -141,6 +164,7 @@ def restore_backup(backup_id: str) -> dict:
         "backup_id": backup_id,
         "restored_files": len(restored_files),
         "files": restored_files,
+        "skipped_unsafe": skipped,
         "restored_at": datetime.now(timezone.utc).isoformat(),
         "note": "Restart the server to reload restored data into memory.",
     }

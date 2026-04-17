@@ -31,8 +31,35 @@ def _resolve_local_path() -> pathlib.Path:
 _LOCAL_PARQUET = _DEFAULT_LOCAL_PARQUET
 
 
+# Characters that could break out of a single-quoted SQL string literal
+# (e.g., read_parquet('...')). These must never appear in a parquet path
+# because paths are interpolated into SQL as f-strings in many call sites.
+_SQL_UNSAFE_CHARS = ("'", '"', ";", "\n", "\r", "\x00", "--", "/*", "*/")
+
+
+def _assert_sql_safe_path(path: str) -> str:
+    """
+    Defense-in-depth: reject parquet paths that contain SQL metacharacters.
+    The parquet path comes from config/env, but this guards against misconfig
+    or any future user-influenced input that reaches the dataset URL.
+    Raises ValueError on anything suspicious.
+    """
+    if not path:
+        raise ValueError("Parquet path is empty")
+    for bad in _SQL_UNSAFE_CHARS:
+        if bad in path:
+            raise ValueError(
+                f"Parquet path contains unsafe character sequence {bad!r}"
+            )
+    return path
+
+
 def get_parquet_path() -> str:
-    """Return local path if a valid file exists there, otherwise the remote URL."""
+    """Return local path if a valid file exists there, otherwise the remote URL.
+
+    The returned string is guaranteed to contain no SQL metacharacters, so it
+    is safe to interpolate into `read_parquet('...')`.
+    """
     p = _resolve_local_path()
     if p.exists() and p.stat().st_size > 1_000_000:
         # Validate the Parquet file has proper magic bytes (PAR1 header)
@@ -40,12 +67,12 @@ def get_parquet_path() -> str:
             with open(p, "rb") as f:
                 header = f.read(4)
             if header == b"PAR1":
-                return str(p).replace("\\", "/")
+                return _assert_sql_safe_path(str(p).replace("\\", "/"))
             else:
                 log.warning("Local Parquet file has invalid header — using remote URL")
         except Exception:
             pass
-    return settings.PARQUET_URL
+    return _assert_sql_safe_path(settings.PARQUET_URL)
 
 
 def is_local() -> bool:
