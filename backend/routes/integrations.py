@@ -1,11 +1,14 @@
 """
 Integration routes — MMIS, NPPES bulk, DEA, Email, FHIR.
 """
+import logging
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
 from routes.auth import require_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
 admin_router = APIRouter(prefix="/api/admin", tags=["admin-integrations"], dependencies=[Depends(require_user)])
@@ -113,8 +116,8 @@ async def provider_fhir(npi: str):
     nppes_data = {}
     try:
         nppes_data = await get_provider(npi)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("NPPES lookup failed for NPI %s: %s", npi, e)
 
     if not nppes_data and not scoring:
         raise HTTPException(status_code=404, detail=f"Provider {npi} not found")
@@ -143,8 +146,8 @@ async def provider_fhir_report(npi: str):
     nppes_data = {}
     try:
         nppes_data = await get_provider(npi)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("NPPES lookup failed for NPI %s: %s", npi, e)
 
     flags = scoring.get("signal_results", scoring.get("flags", []))
     return investigation_to_fhir_document_reference(npi, nppes_data or {}, scoring, flags)

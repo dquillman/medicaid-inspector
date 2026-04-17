@@ -1,8 +1,11 @@
 """
 Authentication & user management routes — RBAC with session tokens.
 """
+import logging
 import re
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
@@ -108,8 +111,8 @@ async def login(req: LoginRequest, request: Request):
         from core.gcs_sync import upload_file
         import asyncio
         asyncio.get_event_loop().run_in_executor(None, upload_file, "sessions.json")
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("GCS session persistence failed: %s", e)
     return {
         "token": token,
         "user": user,

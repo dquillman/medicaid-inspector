@@ -3,6 +3,7 @@ Related Provider Auto-Discovery — finds providers related to a given NPI
 via shared billing relationships, shared addresses, and shared beneficiaries.
 """
 import asyncio
+import re
 
 from fastapi import APIRouter, HTTPException, Depends
 from data.duckdb_client import query_async, get_parquet_path
@@ -10,6 +11,15 @@ from core.store import get_prescanned
 from routes.auth import require_user
 
 router = APIRouter(prefix="/api/providers", tags=["related"], dependencies=[Depends(require_user)])
+
+_NPI_RE = re.compile(r"^\d{10}$")
+
+
+def _validate_npi(npi: str) -> str:
+    npi = npi.strip()
+    if not _NPI_RE.match(npi):
+        raise HTTPException(400, f"Invalid NPI '{npi}' — must be exactly 10 digits")
+    return npi
 
 
 def _prescan_lookup() -> dict[str, dict]:
@@ -19,6 +29,7 @@ def _prescan_lookup() -> dict[str, dict]:
 
 @router.get("/{npi}/related")
 async def get_related_providers(npi: str, limit: int = 30):
+    npi = _validate_npi(npi)
     """
     Find providers related to the given NPI through three relationship types:
     1. Shared billing/servicing NPI (same billing org or same servicing NPI)
