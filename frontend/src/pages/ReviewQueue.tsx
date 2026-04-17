@@ -158,7 +158,13 @@ function AuditTrailPanel({ npi }: { npi: string }) {
         </thead>
         <tbody>
           {trail.slice().reverse().map((entry, i) => (
-            <tr key={i} className="border-b border-gray-800/50">
+            // Audit-trail entries don't carry a server-assigned id, so build
+            // a stable composite key from timestamp + action + prev/new status.
+            // Falling back to index only when all identifying fields are blank.
+            <tr
+              key={`${entry.timestamp ?? ''}-${entry.action ?? ''}-${entry.previous_status ?? ''}-${entry.new_status ?? ''}-${i}`}
+              className="border-b border-gray-800/50"
+            >
               <td className="py-1 pr-3 text-gray-500 whitespace-nowrap">{formatTimestamp(entry.timestamp)}</td>
               <td className="py-1 pr-3 text-gray-400">{entry.action === 'status_change' ? 'Status' : 'Assignment'}</td>
               <td className="py-1 pr-3">
@@ -569,7 +575,7 @@ export default function ReviewQueue() {
             )}
           </div>
           <button
-            onClick={() => window.open('/api/review/export/csv', '_blank')}
+            onClick={() => window.open('/api/review/export/csv', '_blank', 'noopener,noreferrer')}
             className="px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600"
             aria-label="Export full review queue as CSV"
           >

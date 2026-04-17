@@ -3,6 +3,7 @@ Email/SMTP integration service.
 Sends alert notifications, reports, and test emails via configurable SMTP.
 Non-fatal if SMTP is not configured — logs a warning and skips.
 """
+import asyncio
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
@@ -62,7 +63,8 @@ async def send_email(
     msg["To"] = to
     msg.attach(MIMEText(body_html, "html"))
 
-    try:
+    def _blocking_send() -> None:
+        """All smtplib calls are blocking socket I/O — keep them in a worker thread."""
         if settings.SMTP_PORT == 465:
             server = smtplib.SMTP_SSL(settings.SMTP_HOST, settings.SMTP_PORT, timeout=15)
         else:
@@ -72,12 +74,21 @@ async def send_email(
                 server.starttls()
                 server.ehlo()
 
-        if settings.SMTP_USER and settings.SMTP_PASS:
-            server.login(settings.SMTP_USER, settings.SMTP_PASS)
+        try:
+            if settings.SMTP_USER and settings.SMTP_PASS:
+                server.login(settings.SMTP_USER, settings.SMTP_PASS)
+            server.sendmail(sender, [to], msg.as_string())
+        finally:
+            # .quit() can itself block; guarantee the socket closes even on error.
+            try:
+                server.quit()
+            except Exception:
+                pass
 
-        server.sendmail(sender, [to], msg.as_string())
-        server.quit()
-
+    try:
+        # Run the blocking SMTP dialog off the event loop so slow/unreachable
+        # mail servers cannot freeze all async request handlers.
+        await asyncio.to_thread(_blocking_send)
         log.info("Email sent to %s: %s", to, subject)
         return {"sent": True, "message": f"Email sent to {to}"}
     except Exception as e:

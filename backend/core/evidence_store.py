@@ -4,12 +4,28 @@ Tracks metadata for evidence files uploaded to cases, including SHA-256 hashes.
 Persisted to backend/evidence_metadata.json.
 """
 import json
+import re
 import time
 import pathlib
 import hashlib
 import threading
 import uuid
 from typing import Optional
+
+# Only allow a short, alphanumeric file extension so the stored filename
+# can never be manipulated via a malicious uploaded filename.
+_SAFE_EXT_RE = re.compile(r"^\.[A-Za-z0-9]{1,10}$")
+# case_id and evidence_id both need to be filesystem-safe (no separators,
+# no traversal sequences) since they form the on-disk filename.
+_SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_\-]{1,64}$")
+
+
+def _safe_extension(original_filename: str) -> str:
+    """Return a safe file extension (or empty string) from a user-supplied name."""
+    raw_ext = pathlib.Path(original_filename).suffix
+    if raw_ext and _SAFE_EXT_RE.match(raw_ext):
+        return raw_ext
+    return ""
 
 _META_FILE = pathlib.Path(__file__).parent.parent / "evidence_metadata.json"
 _EVIDENCE_DIR = pathlib.Path(__file__).parent.parent / "evidence"
@@ -69,16 +85,29 @@ def add_evidence(
     """
     _ensure_evidence_dir()
 
+    # Validate case_id — it becomes part of the stored filename, so it must
+    # be free of path separators and traversal sequences.
+    if not _SAFE_ID_RE.match(case_id):
+        raise ValueError("case_id contains unsafe characters")
+
     evidence_id = str(uuid.uuid4())[:12]
     sha256_hash = compute_sha256(file_bytes)
     file_size = len(file_bytes)
 
-    # Preserve extension from original filename
-    ext = pathlib.Path(original_filename).suffix
+    # Safely derive extension — rejects anything beyond a short alphanumeric
+    # suffix (prevents null-byte / separator / overlong injection).
+    ext = _safe_extension(original_filename)
     stored_filename = f"{case_id}_{evidence_id}{ext}"
     stored_path = _EVIDENCE_DIR / stored_filename
 
-    # Write file to disk
+    # Defense-in-depth: ensure the resolved path stays within _EVIDENCE_DIR.
+    try:
+        stored_path.resolve().relative_to(_EVIDENCE_DIR.resolve())
+    except ValueError:
+        raise ValueError("Stored path escaped evidence directory") from None
+
+    # Write the file first. Only register metadata if the write succeeds,
+    # so we never have a metadata record pointing at a missing file.
     stored_path.write_bytes(file_bytes)
 
     now = time.time()
@@ -103,11 +132,20 @@ def add_evidence(
         ],
     }
 
-    with _lock:
-        if case_id not in _evidence:
-            _evidence[case_id] = []
-        _evidence[case_id].append(record)
-        _save_to_disk()
+    try:
+        with _lock:
+            if case_id not in _evidence:
+                _evidence[case_id] = []
+            _evidence[case_id].append(record)
+            _save_to_disk()
+    except Exception:
+        # If metadata persistence fails, roll back the file write so we
+        # don't leave an orphaned blob on disk with no custody record.
+        try:
+            stored_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+        raise
 
     return record
 

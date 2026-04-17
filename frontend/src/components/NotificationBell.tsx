@@ -1,7 +1,27 @@
 import { useState, useRef, useCallback } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { get, mutate } from '../lib/api'
+
+/**
+ * Notification links come from the backend notification store and are treated
+ * as untrusted. Only allow in-app SPA paths: must start with a single `/`,
+ * must not contain a backslash, parent-directory traversal, protocol-relative
+ * prefix (`//`), or control characters. Anything else is dropped so a
+ * malicious/buggy notification cannot bounce the user to an unexpected route.
+ */
+function safeInternalPath(link: string | undefined): string | null {
+  if (!link || typeof link !== 'string') return null
+  if (link.length > 512) return null
+  if (!link.startsWith('/')) return null
+  if (link.startsWith('//')) return null // protocol-relative
+  if (link.includes('\\')) return null
+  if (link.includes('..')) return null
+  // eslint-disable-next-line no-control-regex
+  if (/[\x00-\x1f\x7f]/.test(link)) return null
+  return link
+}
 
 interface Notification {
   id: string
@@ -40,6 +60,7 @@ export default function NotificationBell() {
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
 
   const { data } = useQuery({
     queryKey: ['notifications'],
@@ -107,9 +128,9 @@ export default function NotificationBell() {
                   }`}
                   onClick={() => {
                     if (!n.read) markRead(n.id)
-                    if (n.link) {
-                      window.location.hash = ''
-                      window.location.pathname = n.link
+                    const safe = safeInternalPath(n.link)
+                    if (safe) {
+                      navigate(safe)
                     }
                     setOpen(false)
                   }}

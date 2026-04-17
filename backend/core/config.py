@@ -32,6 +32,10 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        # Ignore unknown env vars instead of crashing at startup.
+        # Cloud Run / hosting platforms often inject extra env vars
+        # (e.g. bootstrap_admin_email) that this app doesn't consume.
+        extra = "ignore"
 
 
 settings = Settings()

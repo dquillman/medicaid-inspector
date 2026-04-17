@@ -316,11 +316,13 @@ def load_sessions_from_disk() -> None:
         if _SESSIONS_FILE.exists():
             raw = json.loads(_SESSIONS_FILE.read_text(encoding="utf-8"))
             if isinstance(raw, dict):
-                # Prune expired sessions (30 days)
+                # Prune expired sessions — must match the 30-day TTL used
+                # by get_session_user(); previously this was 24h, which
+                # silently invalidated all sessions older than one day.
                 now = time.time()
                 _sessions = {
                     token: sess for token, sess in raw.items()
-                    if now - sess.get("created_at", 0) < 24 * 3600
+                    if now - sess.get("created_at", 0) < 30 * 24 * 3600
                 }
                 print(f"[auth_store] Loaded {len(_sessions)} sessions from disk")
     except Exception as e:

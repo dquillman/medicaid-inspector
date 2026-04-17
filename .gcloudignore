@@ -7,3 +7,33 @@ __pycache__
 backend/tests
 backend/backups
 backend/evidence
+
+# Large data files — never upload to Cloud Build
+# NOTE: backend/data/ contains Python modules (duckdb_client.py, etc.)
+# so we exclude only the large data artifacts within it, not the dir.
+backend/data/*.parquet
+backend/data/*.csv
+backend/data/*.json
+backend/.tmp/
+backend/prescan_cache.json
+backend/prescan_slim.json
+backend/.prescan_cache_*.tmp
+backend/*.tmp
+backend/oig_exclusions.json
+backend/enrollment_cache.json
+backend/users.json
+backend/sessions.json
+backend/review_queue.json
+backend/watchlist.json
+backend/alert_rules.json
+backend/app.db
+backend/app.db-shm
+backend/app.db-wal
+backend/app.db.backup
+backend/phi_access_log.json
+backend/uvicorn.log
+backend/stdout*.log
+backend/stderr*.log
+deploy-tmp/
+frontend/dist/
+.firebase/

@@ -61,7 +61,12 @@ function HcpcsDetailPanel({ npi, code, onClose }: { npi: string; code: string; o
           </thead>
           <tbody>
             {data.monthly.map((row, i) => (
-              <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+              // Stable key: month is unique per HCPCS-code/provider timeline;
+              // include servicing_npi in case the same month appears for multiple NPIs.
+              <tr
+                key={`${row.month}-${row.servicing_npi ?? ''}-${i}`}
+                className="border-b border-gray-800/50 hover:bg-gray-800/30"
+              >
                 <td className="py-1.5 pr-3 font-mono text-gray-300">{row.month}</td>
                 <td className="py-1.5 pr-3 text-right text-white">{row.claims.toLocaleString()}</td>
                 <td className="py-1.5 pr-3 text-right text-gray-400">{row.beneficiaries.toLocaleString()}</td>
@@ -189,9 +194,15 @@ export default function ClaimLineTable({ npi, initialHcpcsCode }: Props) {
             <tbody>
               {sorted.map((row: ClaimLine, i: number) => {
                 const npiMismatch = row.servicing_npi !== row.billing_npi
+                // Table is sortable by the user — an index-based key would
+                // cause React to reuse the wrong row DOM nodes when the sort
+                // column changes. Compose a stable key from the unique
+                // (month, hcpcs, servicing_npi) tuple; fall back to index
+                // only to guarantee uniqueness if any field is missing.
+                const stableKey = `${row.month ?? ''}-${row.hcpcs_code ?? ''}-${row.servicing_npi ?? ''}-${i}`
                 return (
                   <tr
-                    key={i}
+                    key={stableKey}
                     className={`border-b border-gray-800/50 hover:bg-gray-800/30 ${npiMismatch ? 'bg-orange-950/10' : ''}`}
                   >
                     <td className="py-1.5 pr-3 font-mono text-gray-300">

@@ -576,7 +576,7 @@ export default function ProviderExplorer() {
 
   // ── CSV export ────────────────────────────────────────────────────────────
   const handleExportCSV = () => {
-    window.open('/api/providers/export/csv', '_blank')
+    window.open('/api/providers/export/csv', '_blank', 'noopener,noreferrer')
   }
 
   // ── Saved searches ──────────────────────────────────────────────────────
