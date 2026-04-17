@@ -2,8 +2,11 @@
 Medicare Cross-Reference routes.
 Provides Medicare utilization data and Medicaid vs Medicare comparison.
 """
+import logging
 from fastapi import APIRouter, HTTPException, Depends
 from routes.auth import require_user
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/providers", tags=["medicare"], dependencies=[Depends(require_user)])
 
@@ -119,8 +122,8 @@ async def medicare_compare(npi: str):
             {"hcpcs_code": r[0], "total_paid": float(r[1]), "total_claims": int(r[2])}
             for r in rows
         ]
-    except Exception:
-        pass
+    except Exception as e:
+        logger.warning("Medicaid HCPCS cross-reference query failed for NPI %s: %s", npi, e)
 
     return {
         "npi": npi,

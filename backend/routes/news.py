@@ -1,9 +1,12 @@
 """
 News & Legal Alerts API routes.
 """
+import logging
 from typing import Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from core.news_store import (
     get_alerts,
@@ -174,8 +177,8 @@ async def scan_hhs():
                     date=date_str,
                 )
                 added += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning("Failed to store HHS OIG alert '%s': %s", title, e)
 
         return {"ok": True, "fetched": added, "message": f"Added {added} alerts from HHS OIG feed"}
 

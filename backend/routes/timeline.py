@@ -2,6 +2,7 @@
 Provider Timeline Analysis — enhanced monthly billing timeline with spike
 detection, gap identification, and notable event extraction.
 """
+import re
 
 from fastapi import APIRouter, HTTPException, Depends
 from core.store import get_prescanned, get_provider_by_npi
@@ -9,6 +10,15 @@ from data.duckdb_client import query_async, get_parquet_path
 from routes.auth import require_user
 
 router = APIRouter(prefix="/api/providers", tags=["timeline"], dependencies=[Depends(require_user)])
+
+_NPI_RE = re.compile(r"^\d{10}$")
+
+
+def _validate_npi(npi: str) -> str:
+    npi = npi.strip()
+    if not _NPI_RE.match(npi):
+        raise HTTPException(400, f"Invalid NPI '{npi}' — must be exactly 10 digits")
+    return npi
 
 
 def _detect_spikes_and_events(months: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -97,6 +107,7 @@ async def get_timeline_analysis(npi: str):
     Returns monthly aggregates enriched with spike flags, plus a list of
     notable events (first/last billing, gaps > 3 months, spike months).
     """
+    npi = _validate_npi(npi)
 
     # Try prescan cache first
     cached = get_provider_by_npi(npi)
