@@ -3,6 +3,7 @@ Related Provider Auto-Discovery — finds providers related to a given NPI
 via shared billing relationships, shared addresses, and shared beneficiaries.
 """
 import asyncio
+import logging
 import re
 
 from fastapi import APIRouter, HTTPException, Depends
@@ -10,9 +11,14 @@ from data.duckdb_client import query_async, get_parquet_path
 from core.store import get_prescanned
 from routes.auth import require_user
 
+_log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/providers", tags=["related"], dependencies=[Depends(require_user)])
 
 _NPI_RE = re.compile(r"^\d{10}$")
+
+# Module-level cache: rebuilt only when the prescan list object changes (e.g. after a scan)
+_prescan_cache: tuple[object, dict[str, dict]] | None = None
 
 
 def _validate_npi(npi: str) -> str:
@@ -23,13 +29,15 @@ def _validate_npi(npi: str) -> str:
 
 
 def _prescan_lookup() -> dict[str, dict]:
-    """Build NPI -> prescan record dict for enrichment."""
-    return {p["npi"]: p for p in get_prescanned()}
+    global _prescan_cache
+    current = get_prescanned()
+    if _prescan_cache is None or _prescan_cache[0] is not current:
+        _prescan_cache = (current, {p["npi"]: p for p in current})
+    return _prescan_cache[1]
 
 
 @router.get("/{npi}/related")
 async def get_related_providers(npi: str, limit: int = 30):
-    npi = _validate_npi(npi)
     """
     Find providers related to the given NPI through three relationship types:
     1. Shared billing/servicing NPI (same billing org or same servicing NPI)
@@ -37,6 +45,7 @@ async def get_related_providers(npi: str, limit: int = 30):
     3. Shared beneficiary overlap (same patients)
     Returns a deduplicated, scored list sorted by strength_score descending.
     """
+    npi = _validate_npi(npi)
     parquet = get_parquet_path()
     src = f"read_parquet('{parquet}')"
 
@@ -123,8 +132,9 @@ async def get_related_providers(npi: str, limit: int = 30):
             query_async(shared_servicing_sql),
             query_async(shared_bene_sql),
         )
-    except Exception:
-        # If BENE_ID column doesn't exist, fall back without beneficiary overlap
+    except Exception as e:
+        # BENE_ID column may not exist in all data sets — retry without beneficiary overlap
+        _log.warning("Shared-beneficiary query failed for NPI %s (retrying without BENE_ID): %s", npi, e)
         try:
             billing_rows, servicing_rows = await asyncio.gather(
                 query_async(shared_billing_sql),

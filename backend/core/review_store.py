@@ -165,8 +165,8 @@ def update_review_item(
             item["assigned_to"] = assigned_to
             item["audit_trail"].append({
                 "action": "assignment_change",
-                "previous_status": item["status"],
-                "new_status": item["status"],
+                "previous_assigned_to": old_assigned,
+                "new_assigned_to": assigned_to or "",
                 "timestamp": now,
                 "note": f"Assigned to {assigned_to}" if assigned_to else f"Unassigned (was {old_assigned})",
             })
