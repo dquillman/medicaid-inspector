@@ -214,6 +214,7 @@ export default function App() {
   // Restore session from localStorage (with expiry check)
   useEffect(() => {
     const saved = localStorage.getItem('mfi_session')
+    let restored = false
     if (saved) {
       try {
         const parsed = JSON.parse(saved)
@@ -225,9 +226,21 @@ export default function App() {
           } else {
             setUser(parsed)
             setView('app')
+            restored = true
           }
         }
       } catch { /* ignore */ }
+    }
+
+    // Deep-link handling: unauthenticated visitors to a non-root URL
+    // (e.g. bookmarked /dashboard, /providers, /review) should land on the
+    // login shell, not the marketing Landing page. Preserves the URL so the
+    // router resolves it after authentication.
+    if (!restored) {
+      const path = window.location.pathname
+      if (path && path !== '/') {
+        setView('login')
+      }
     }
   }, [])
 

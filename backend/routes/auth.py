@@ -10,8 +10,9 @@ logger = logging.getLogger(__name__)
 from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel
 
-# Usernames: 3-64 chars, alphanumeric + underscore/hyphen only, must start with a letter/digit
-_USERNAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_\-]{2,63}$')
+# Usernames: 3-254 chars, must start with letter/digit, then letters/digits/_/-/./@/+.
+# Allows email-style usernames (which are already present in users.json).
+_USERNAME_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_\-.@+]{2,253}$')
 
 from core.auth_store import (
     authenticate,

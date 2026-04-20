@@ -158,49 +158,61 @@ def _save_users() -> None:
 
 
 def init_auth_store() -> None:
-    """Load users and sessions from disk at startup. Create default admin if no users exist."""
+    """Load users and sessions from disk at startup. Guarantee an 'admin' account exists.
+
+    Policy (fixes prior lock-out bug — do NOT revert):
+    - If ADMIN_PASSWORD env var is set: (re)sync the 'admin' account to that
+      password on every boot. Other admin-role users are NEVER touched.
+    - If ADMIN_PASSWORD env var is NOT set: existing admin passwords are
+      preserved across restarts. An 'admin' account is created with a one-time
+      random password only if it does not already exist.
+    """
     import os
     _load_users()
     load_sessions_from_disk()
-    default_password = os.environ.get("ADMIN_PASSWORD")
-    if not default_password:
-        # No ADMIN_PASSWORD set — refuse to start with a known-weak default in
-        # production. Generate a random password and print it once so the
-        # operator can grab it from the Cloud Run logs on first deploy.
-        import warnings
-        default_password = secrets.token_urlsafe(16)
-        warnings.warn(
-            "[auth_store] ADMIN_PASSWORD env var is not set. "
-            f"Generated one-time admin password: {default_password}  "
-            "Set ADMIN_PASSWORD in Cloud Run env vars to make this permanent.",
-            stacklevel=2,
-        )
-        print(
-            f"[auth_store] *** ADMIN_PASSWORD not set — one-time password: {default_password} ***"
-        )
 
+    admin_password = os.environ.get("ADMIN_PASSWORD")
+
+    def _set_admin_password(username: str, password: str) -> None:
+        salt = secrets.token_hex(16)
+        _users[username]["salt"] = salt
+        _users[username]["password_hash"] = _hash_password(password, salt)
+        _users[username]["role"] = "admin"
+
+    # Case 1: no users at all — cold bootstrap
     if not _users:
-        create_user("admin", default_password, "admin", "Administrator")
-        print(f"[auth_store] *** Default admin created — username: admin / password: {default_password} ***")
-    else:
-        # Ensure an admin account exists with a known password on Cloud Run
-        # (GCS may restore old users.json with unknown password hashes)
-        # Reset ALL admin-role users + ensure "admin" account exists
-        reset_count = 0
-        for username, user in _users.items():
-            if user.get("role") == "admin":
-                salt = secrets.token_hex(16)
-                user["salt"] = salt
-                user["password_hash"] = _hash_password(default_password, salt)
-                reset_count += 1
-                print(f"[auth_store] Reset password for admin user '{username}'")
+        if not admin_password:
+            admin_password = secrets.token_urlsafe(16)
+            print(
+                f"[auth_store] *** Cold bootstrap — one-time admin password: {admin_password}. "
+                f"Set ADMIN_PASSWORD env var in Cloud Run to make this permanent. ***"
+            )
+        create_user("admin", admin_password, "admin", "Administrator")
+        print("[auth_store] Bootstrapped admin account (username: admin)")
+        return
 
-        if "admin" not in _users:
-            create_user("admin", default_password, "admin", "Administrator")
-            print(f"[auth_store] Created missing 'admin' account")
-
+    # Case 2: users exist, ADMIN_PASSWORD is set — sync canonical 'admin' only
+    if admin_password:
+        if "admin" in _users:
+            _set_admin_password("admin", admin_password)
+            print("[auth_store] Synced 'admin' password from ADMIN_PASSWORD env var")
+        else:
+            create_user("admin", admin_password, "admin", "Administrator")
+            print("[auth_store] Created 'admin' account from ADMIN_PASSWORD env var")
         _save_users()
-        print(f"[auth_store] Loaded {len(_users)} users ({reset_count} admin passwords reset)")
+        print(f"[auth_store] Loaded {len(_users)} users")
+        return
+
+    # Case 3: users exist, ADMIN_PASSWORD not set — preserve existing hashes.
+    # Only create 'admin' if it is missing, so the operator always has a path in.
+    if "admin" not in _users:
+        admin_password = secrets.token_urlsafe(16)
+        create_user("admin", admin_password, "admin", "Administrator")
+        print(
+            f"[auth_store] *** Created missing 'admin' with one-time password: {admin_password}. "
+            f"Set ADMIN_PASSWORD env var and restart for a stable password. ***"
+        )
+    print(f"[auth_store] Loaded {len(_users)} users (existing admin hashes preserved)")
 
 
 # ── CRUD ─────────────────────────────────────────────────────────────────────
@@ -228,8 +240,8 @@ def create_user(username: str, password: str, role: str, display_name: str) -> d
         raise ValueError(f"Username '{username}' already exists")
     if role not in ROLES:
         raise ValueError(f"Invalid role '{role}'. Must be one of {ROLES}")
-    if len(password) < 6:
-        raise ValueError("Password must be at least 6 characters")
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters")
 
     salt = secrets.token_hex(16)
     user = {
@@ -260,8 +272,8 @@ def update_user(username: str, updates: dict) -> Optional[dict]:
         user["display_name"] = updates["display_name"]
 
     if "password" in updates:
-        if len(updates["password"]) < 6:
-            raise ValueError("Password must be at least 6 characters")
+        if len(updates["password"]) < 8:
+            raise ValueError("Password must be at least 8 characters")
         salt = secrets.token_hex(16)
         user["salt"] = salt
         user["password_hash"] = _hash_password(updates["password"], salt)

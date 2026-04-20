@@ -51,3 +51,20 @@ Thumbs.db
 
 # Firebase
 .firebase/
+
+# added by github-push batch
+.venv/
+venv/
+.env.local
+.env.*.local
+secrets.*
+credentials*
+.claude/
+dist/
+build/
+.next/
+*.log
+.tmp/
+.prescan_cache*
+prescan_cache.json
+backend/data/*.duckdb

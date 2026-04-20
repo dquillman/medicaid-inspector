@@ -1,0 +1,15 @@
+__pycache__
+*.pyc
+.env
+app.db
+app.db-shm
+app.db-wal
+*.log
+test_*.py
+run_*.bat
+stdout*.log
+stderr*.log
+.claude/
+*-sa-key.json
+*service*account*.json
+firebase-sa-key.json
