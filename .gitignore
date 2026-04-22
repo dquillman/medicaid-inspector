@@ -68,3 +68,13 @@ build/
 .prescan_cache*
 prescan_cache.json
 backend/data/*.duckdb
+# --- Secrets (never commit) ---
+*serviceAccount*.json
+*serviceAccountKey*
+*firebase-adminsdk*.json
+*firebase-sa*.json
+*sa-key*.json
+.env
+.env.local
+.env.*.local
+!.env.example
