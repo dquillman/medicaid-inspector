@@ -6,9 +6,21 @@ from typing import Optional
 from fastapi import APIRouter, Depends
 
 from core.phi_logger import get_phi_log, get_phi_log_stats
+from core.store import get_cache_status
 from routes.auth import require_admin
 
 router = APIRouter(prefix="/api/admin", tags=["phi-log"], dependencies=[Depends(require_admin)])
+
+
+@router.get("/cache-status")
+async def cache_status():
+    """Diagnostic snapshot of the prescan cache (admin only).
+
+    Returns provider count loaded in memory, slim/full file sizes on disk,
+    whether running on Cloud Run, and the timestamp of the last load.
+    Useful for diagnosing empty-chart bugs caused by an empty cache on prod.
+    """
+    return get_cache_status()
 
 
 @router.get("/phi-log")
