@@ -67,8 +67,19 @@ _PARQUET_BLOB = "medicaid-provider-spending.parquet"
 _PARQUET_LOCAL = _BACKEND_DIR / "data" / "medicaid-provider-spending.parquet"
 
 
+_SHRINK_GUARD_RATIO = 0.5  # refuse to overwrite a local file if GCS blob is <50% its size
+_SHRINK_GUARD_MIN_LOCAL_BYTES = 1_000_000  # only guard files larger than 1MB locally
+
+
 def download_state_files() -> int:
-    """Download small state files from GCS (fast, safe for startup). Skips Parquet."""
+    """Download small state files from GCS (fast, safe for startup). Skips Parquet.
+
+    Includes a size guard: if a non-trivial local file (>1MB) already exists and
+    the GCS blob is suspiciously smaller (<50% of local size), we skip the
+    overwrite and log a warning. This prevents a stale or empty GCS object from
+    clobbering the larger copy baked into the Docker image (the failure mode
+    that left the slim prescan cache empty on prod).
+    """
     bucket = _get_bucket()
     if not bucket:
         return 0
@@ -78,11 +89,29 @@ def download_state_files() -> int:
         local_path = _BACKEND_DIR / filename
         blob = bucket.blob(filename)
         try:
-            if blob.exists():
-                blob.download_to_filename(str(local_path))
-                size_kb = local_path.stat().st_size / 1024
-                log.info("[gcs_sync] Downloaded %s (%.1f KB)", filename, size_kb)
-                downloaded += 1
+            if not blob.exists():
+                continue
+            # Size guard — fetch blob metadata so we can compare before downloading
+            blob.reload()
+            blob_size = blob.size or 0
+            local_size = local_path.stat().st_size if local_path.exists() else 0
+            if (
+                local_size > _SHRINK_GUARD_MIN_LOCAL_BYTES
+                and blob_size < local_size * _SHRINK_GUARD_RATIO
+            ):
+                log.warning(
+                    "[gcs_sync] Refusing to overwrite %s — local=%.1fMB but GCS blob=%.1fMB (<%.0f%%). "
+                    "Keeping the larger local copy.",
+                    filename,
+                    local_size / (1024 * 1024),
+                    blob_size / (1024 * 1024),
+                    _SHRINK_GUARD_RATIO * 100,
+                )
+                continue
+            blob.download_to_filename(str(local_path))
+            size_kb = local_path.stat().st_size / 1024
+            log.info("[gcs_sync] Downloaded %s (%.1f KB)", filename, size_kb)
+            downloaded += 1
         except Exception as e:
             log.warning("[gcs_sync] Failed to download %s: %s", filename, e)
 
