@@ -23,6 +23,9 @@ Subcommands:
     news enrich-url     Classify a single press-release URL (prints JSON draft)
     user list           List configured users
     user reset-password Reset a user's password (generates one if omitted)
+    train-ml            Retrain Isolation Forest on cached providers (Tier 2)
+    feedback-summary    Print signal weight adjustments + dismissal stats (Tier 2)
+    precompute-forecasts Pre-run forecaster for every provider in the cache (Tier 2)
     version             Print version and exit
 
 Exit codes:
@@ -443,6 +446,86 @@ def cmd_user_reset_password(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── Subcommand: train-ml ─────────────────────────────────────────────────────
+def cmd_train_ml(args: argparse.Namespace) -> int:
+    """Retrain Isolation Forest on every provider in the prescan cache.
+
+    Moves training out of the hot request path — was previously called inline
+    from ``POST /api/ml/train``, which blocked the worker for several seconds
+    on a cold cache. Schedule this nightly via cron so the served model is
+    always warm.
+    """
+    try:
+        from core.store import load_prescanned_from_disk
+        from services.ml_scorer import train_and_score
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"failed to import ml_scorer: {exc}")
+
+    # Make sure the in-memory cache is populated when invoked outside the API.
+    load_prescanned_from_disk()
+    _log("training Isolation Forest on prescan cache…")
+    t0 = time.time()
+    try:
+        result = train_and_score()
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"ml training failed: {exc}")
+    elapsed = time.time() - t0
+    if "error" in result:
+        return _err(f"{result['error']} (after {elapsed:.1f}s)")
+    _log(f"ml training complete in {elapsed:.1f}s")
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
+# ── Subcommand: feedback-summary ─────────────────────────────────────────────
+def cmd_feedback_summary(args: argparse.Namespace) -> int:
+    """Print the current weight adjustments and dismissal/confirmation counts.
+
+    Useful for ops review: which signals are over-firing and quietly losing
+    weight because investigators keep dismissing them.
+    """
+    try:
+        from services.feedback_tracker import get_feedback_summary
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"failed to import feedback_tracker: {exc}")
+
+    try:
+        summary = get_feedback_summary()
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"feedback summary failed: {exc}")
+
+    print(json.dumps(summary, indent=2, default=str))
+    return 0
+
+
+# ── Subcommand: precompute-forecasts ─────────────────────────────────────────
+def cmd_precompute_forecasts(args: argparse.Namespace) -> int:
+    """Pre-run the forecaster against every cached provider; write a JSON cache.
+
+    Removes a per-request linear regression from the hot path. The cache lands
+    at ``backend/forecast_cache.json`` and is safe to delete — the next CLI
+    run rebuilds it.
+    """
+    try:
+        from core.store import load_prescanned_from_disk
+        from services.forecaster import precompute_all_forecasts
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"failed to import forecaster: {exc}")
+
+    load_prescanned_from_disk()
+    _log(f"precomputing forecasts (min_months={args.min_months})…")
+    try:
+        result = precompute_all_forecasts(min_months=args.min_months)
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"precompute failed: {exc}")
+    _log(
+        f"wrote {result['forecasts_written']}/{result['providers_total']} "
+        f"forecasts to {result['output_path']} in {result['elapsed_seconds']}s"
+    )
+    print(json.dumps(result, indent=2, default=str))
+    return 0
+
+
 # ── Subcommand: version ──────────────────────────────────────────────────────
 def cmd_version(args: argparse.Namespace) -> int:
     repo_root = _BACKEND_DIR.parent
@@ -520,6 +603,30 @@ def _build_parser() -> argparse.ArgumentParser:
     p_user_rp.add_argument("--user", required=True, help="Username to reset")
     p_user_rp.add_argument("--password", default=None, help="New password (generated if omitted)")
     p_user_rp.set_defaults(func=cmd_user_reset_password)
+
+    # train-ml
+    p_train = sub.add_parser("train-ml", help="Retrain Isolation Forest on cached providers")
+    p_train.set_defaults(func=cmd_train_ml)
+
+    # feedback-summary
+    p_feedback = sub.add_parser(
+        "feedback-summary",
+        help="Print signal weight adjustments + dismissal/confirmation counts",
+    )
+    p_feedback.set_defaults(func=cmd_feedback_summary)
+
+    # precompute-forecasts
+    p_pf = sub.add_parser(
+        "precompute-forecasts",
+        help="Pre-run forecaster for every provider; write forecast_cache.json",
+    )
+    p_pf.add_argument(
+        "--min-months",
+        type=int,
+        default=3,
+        help="Skip providers with fewer than N months of history (default: 3)",
+    )
+    p_pf.set_defaults(func=cmd_precompute_forecasts)
 
     # version
     p_version = sub.add_parser("version", help="Print version and exit")

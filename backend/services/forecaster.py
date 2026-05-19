@@ -176,3 +176,72 @@ def forecast_billing(timeline: list[dict]) -> dict:
         "spike_detected": spike_detected,
         "spike_magnitude": spike_magnitude,
     }
+
+
+# ── Batch precompute ─────────────────────────────────────────────────────────
+
+def precompute_all_forecasts(min_months: int = 3) -> dict:
+    """
+    Walk every provider in the prescan cache, run forecast_billing against
+    its in-cache timeline, and write the results to forecast_cache.json next
+    to the other JSON state files.
+
+    Providers without a timeline (or with fewer than `min_months` months of
+    history) are skipped so we don't poison the cache with empty forecasts.
+
+    This is the entry point for the `mfi precompute-forecasts` CLI; moving
+    forecast work to a nightly job removes a per-request linear regression
+    from the hot path.
+
+    Returns a summary dict suitable for printing from the CLI.
+    """
+    import json
+    import pathlib
+    import time
+
+    # Imported lazily so this module stays import-safe in contexts where the
+    # store package is not yet on sys.path (tests, isolated CLI invocations).
+    from core.store import get_prescanned  # noqa: WPS433 (intentional local import)
+
+    providers = list(get_prescanned())
+    total = len(providers)
+    forecasts: dict[str, dict] = {}
+    skipped_short = 0
+    skipped_no_timeline = 0
+    errors = 0
+
+    t0 = time.time()
+    for p in providers:
+        npi = p.get("npi")
+        if not npi:
+            continue
+        timeline = p.get("timeline") or []
+        if not timeline:
+            skipped_no_timeline += 1
+            continue
+        if len(timeline) < min_months:
+            skipped_short += 1
+            continue
+        try:
+            forecasts[npi] = forecast_billing(timeline)
+        except Exception:  # noqa: BLE001 — keep the batch alive on bad data
+            errors += 1
+            continue
+
+    out_path = pathlib.Path(__file__).parent.parent / "forecast_cache.json"
+    payload = {
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "provider_count": len(forecasts),
+        "forecasts": forecasts,
+    }
+    out_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    return {
+        "providers_total": total,
+        "forecasts_written": len(forecasts),
+        "skipped_no_timeline": skipped_no_timeline,
+        "skipped_short_history": skipped_short,
+        "errors": errors,
+        "output_path": str(out_path),
+        "elapsed_seconds": round(time.time() - t0, 2),
+    }
