@@ -1,6 +1,11 @@
 """
 Billing Code Search — find providers who bill specific HCPCS/CPT codes.
-Uses the in-memory prescan cache (no Parquet queries).
+
+Strategy: the slim prescan cache does not carry per-HCPCS breakdowns
+(per-provider hcpcs arrays were dropped to keep the file at 59 MB), so
+when those arrays are absent we fall back to a DuckDB query against the
+Parquet dataset and enrich each row with the provider's name/state/
+risk_score from the slim cache. Responses are cached for 10 minutes.
 """
 import time as _time
 from typing import Any
@@ -9,6 +14,7 @@ from fastapi import APIRouter, Depends, Query
 
 from core.store import get_prescanned
 from data.cpt_descriptions import CPT_DESCRIPTIONS
+from data.duckdb_client import get_parquet_path, query_async
 from data.icd10_descriptions import ICD10_DESCRIPTIONS, HCPCS_TO_ICD10
 from routes.auth import require_user
 
@@ -34,6 +40,88 @@ def _cache_set(key: str, value: Any) -> None:
     _cache[key] = (_time.time(), value)
 
 
+def _has_hcpcs_in_cache() -> bool:
+    """True if at least one provider in the slim cache carries a populated hcpcs list.
+
+    Used to decide whether to use the in-memory path (fast, works with the
+    1.5 GB full cache) or fall back to DuckDB-on-demand (works with the slim
+    cache where per-HCPCS detail was stripped).
+    """
+    for p in get_prescanned()[:200]:
+        if p.get("hcpcs"):
+            return True
+    return False
+
+
+def _npi_enrichment_map() -> dict[str, dict]:
+    """Lookup of {npi: {provider_name, provider_type, state, risk_score}} from the cache."""
+    out: dict[str, dict] = {}
+    for p in get_prescanned():
+        npi = p.get("npi")
+        if not npi:
+            continue
+        out[npi] = {
+            "provider_name": p.get("provider_name", ""),
+            "provider_type": p.get("provider_type", ""),
+            "state": p.get("state", ""),
+            "risk_score": p.get("risk_score", 0),
+        }
+    return out
+
+
+# ── DuckDB-backed query helpers (used when slim cache lacks hcpcs detail) ────
+
+
+async def _ddb_providers_by_code(code: str, limit: int) -> list[dict]:
+    """Aggregate per-NPI spend on a single HCPCS code via DuckDB."""
+    sql = f"""
+    SELECT
+        BILLING_PROVIDER_NPI_NUM        AS npi,
+        SUM(TOTAL_PAID)                 AS total_paid,
+        SUM(TOTAL_CLAIMS)               AS total_claims
+    FROM read_parquet('{get_parquet_path()}')
+    WHERE UPPER(HCPCS_CODE) = ?
+    GROUP BY npi
+    ORDER BY total_paid DESC
+    LIMIT ?
+    """
+    return await query_async(sql, (code, limit))
+
+
+async def _ddb_top_codes(limit: int, min_providers: int) -> list[dict]:
+    """Rank HCPCS codes by total paid across providers."""
+    sql = f"""
+    SELECT
+        UPPER(HCPCS_CODE)                            AS code,
+        COUNT(DISTINCT BILLING_PROVIDER_NPI_NUM)     AS provider_count,
+        SUM(TOTAL_PAID)                              AS total_paid,
+        SUM(TOTAL_CLAIMS)                            AS total_claims
+    FROM read_parquet('{get_parquet_path()}')
+    WHERE HCPCS_CODE IS NOT NULL
+    GROUP BY UPPER(HCPCS_CODE)
+    HAVING provider_count >= ?
+    ORDER BY total_paid DESC
+    LIMIT ?
+    """
+    return await query_async(sql, (min_providers, limit))
+
+
+async def _ddb_providers_by_codes(codes: list[str]) -> list[dict]:
+    """Per-NPI per-code spend for the given HCPCS codes."""
+    placeholders = ", ".join("?" for _ in codes)
+    sql = f"""
+    SELECT
+        BILLING_PROVIDER_NPI_NUM        AS npi,
+        UPPER(HCPCS_CODE)               AS hcpcs_code,
+        SUM(TOTAL_PAID)                 AS total_paid,
+        SUM(TOTAL_CLAIMS)               AS total_claims
+    FROM read_parquet('{get_parquet_path()}')
+    WHERE UPPER(HCPCS_CODE) IN ({placeholders})
+    GROUP BY npi, hcpcs_code
+    """
+    return await query_async(sql, tuple(codes))
+
+
 @router.get("/search")
 async def search_by_code(
     code: str = Query(..., min_length=1, max_length=10, description="HCPCS/CPT code"),
@@ -46,28 +134,44 @@ async def search_by_code(
     if cached is not None:
         return cached
 
-    providers = get_prescanned()
-    matches = []
-
-    for p in providers:
-        hcpcs_list = p.get("hcpcs") or []
-        for h in hcpcs_list:
-            if h.get("hcpcs_code", "").upper() == code:
-                matches.append({
-                    "npi": p.get("npi", ""),
-                    "provider_name": p.get("provider_name", ""),
-                    "provider_type": p.get("provider_type", ""),
-                    "state": p.get("state", ""),
-                    "risk_score": p.get("risk_score", 0),
-                    "total_paid": h.get("total_paid", 0),
-                    "total_claims": h.get("total_claims", 0),
-                    "code_rank": next(
-                        (i + 1 for i, x in enumerate(hcpcs_list) if x.get("hcpcs_code", "").upper() == code),
-                        None,
-                    ),
-                    "total_codes_billed": len(hcpcs_list),
-                })
-                break
+    matches: list[dict] = []
+    if _has_hcpcs_in_cache():
+        for p in get_prescanned():
+            hcpcs_list = p.get("hcpcs") or []
+            for h in hcpcs_list:
+                if h.get("hcpcs_code", "").upper() == code:
+                    matches.append({
+                        "npi": p.get("npi", ""),
+                        "provider_name": p.get("provider_name", ""),
+                        "provider_type": p.get("provider_type", ""),
+                        "state": p.get("state", ""),
+                        "risk_score": p.get("risk_score", 0),
+                        "total_paid": h.get("total_paid", 0),
+                        "total_claims": h.get("total_claims", 0),
+                        "code_rank": next(
+                            (i + 1 for i, x in enumerate(hcpcs_list) if x.get("hcpcs_code", "").upper() == code),
+                            None,
+                        ),
+                        "total_codes_billed": len(hcpcs_list),
+                    })
+                    break
+    else:
+        rows = await _ddb_providers_by_code(code, limit * 2)  # pull extra for stable ranking
+        enrich = _npi_enrichment_map()
+        for r in rows:
+            npi = r["npi"]
+            meta = enrich.get(npi, {})
+            matches.append({
+                "npi": npi,
+                "provider_name": meta.get("provider_name", ""),
+                "provider_type": meta.get("provider_type", ""),
+                "state": meta.get("state", ""),
+                "risk_score": meta.get("risk_score", 0),
+                "total_paid": r["total_paid"] or 0,
+                "total_claims": r["total_claims"] or 0,
+                "code_rank": None,  # would require a per-NPI HCPCS ordering query — omitted in DDB path
+                "total_codes_billed": None,
+            })
 
     matches.sort(key=lambda x: x["total_paid"], reverse=True)
     total = len(matches)
@@ -100,37 +204,50 @@ async def top_codes(
     if cached is not None:
         return cached
 
-    providers = get_prescanned()
-    code_stats: dict[str, dict] = {}
+    results: list[dict] = []
+    if _has_hcpcs_in_cache():
+        providers = get_prescanned()
+        code_stats: dict[str, dict] = {}
 
-    for p in providers:
-        hcpcs_list = p.get("hcpcs") or []
-        for h in hcpcs_list:
-            c = h.get("hcpcs_code", "").upper()
-            if not c:
+        for p in providers:
+            hcpcs_list = p.get("hcpcs") or []
+            for h in hcpcs_list:
+                c = h.get("hcpcs_code", "").upper()
+                if not c:
+                    continue
+                if c not in code_stats:
+                    code_stats[c] = {
+                        "code": c,
+                        "provider_count": 0,
+                        "total_paid": 0,
+                        "total_claims": 0,
+                        "avg_risk_score_sum": 0,
+                    }
+                code_stats[c]["provider_count"] += 1
+                code_stats[c]["total_paid"] += h.get("total_paid", 0)
+                code_stats[c]["total_claims"] += h.get("total_claims", 0)
+                code_stats[c]["avg_risk_score_sum"] += p.get("risk_score", 0)
+
+        for stats in code_stats.values():
+            if stats["provider_count"] < min_providers:
                 continue
-            if c not in code_stats:
-                code_stats[c] = {
-                    "code": c,
-                    "provider_count": 0,
-                    "total_paid": 0,
-                    "total_claims": 0,
-                    "avg_risk_score_sum": 0,
-                }
-            code_stats[c]["provider_count"] += 1
-            code_stats[c]["total_paid"] += h.get("total_paid", 0)
-            code_stats[c]["total_claims"] += h.get("total_claims", 0)
-            code_stats[c]["avg_risk_score_sum"] += p.get("risk_score", 0)
-
-    results = []
-    for stats in code_stats.values():
-        if stats["provider_count"] < min_providers:
-            continue
-        stats["avg_risk_score"] = round(
-            stats["avg_risk_score_sum"] / stats["provider_count"], 1
-        )
-        del stats["avg_risk_score_sum"]
-        results.append(stats)
+            stats["avg_risk_score"] = round(
+                stats["avg_risk_score_sum"] / stats["provider_count"], 1
+            )
+            del stats["avg_risk_score_sum"]
+            results.append(stats)
+    else:
+        rows = await _ddb_top_codes(limit, min_providers)
+        # avg_risk_score requires per-NPI scores, which DuckDB doesn't have —
+        # leave as 0 in DDB path (the slim cache can't compute it without HCPCS rosters)
+        for r in rows:
+            results.append({
+                "code": r["code"],
+                "provider_count": r["provider_count"],
+                "total_paid": r["total_paid"] or 0,
+                "total_claims": r["total_claims"] or 0,
+                "avg_risk_score": 0.0,
+            })
 
     results.sort(key=lambda x: x["total_paid"], reverse=True)
     results = results[:limit]
@@ -159,44 +276,76 @@ async def providers_by_codes(
     if cached is not None:
         return cached
 
-    providers = get_prescanned()
-    matches = []
+    matches: list[dict] = []
+    if _has_hcpcs_in_cache():
+        for p in get_prescanned():
+            hcpcs_list = p.get("hcpcs") or []
+            provider_codes = {h.get("hcpcs_code", "").upper() for h in hcpcs_list}
+            matched_codes = code_set & provider_codes
 
-    for p in providers:
-        hcpcs_list = p.get("hcpcs") or []
-        provider_codes = {h.get("hcpcs_code", "").upper() for h in hcpcs_list}
-        matched_codes = code_set & provider_codes
+            if logic == "all" and matched_codes != code_set:
+                continue
+            if logic == "any" and not matched_codes:
+                continue
 
-        if logic == "all" and matched_codes != code_set:
-            continue
-        if logic == "any" and not matched_codes:
-            continue
+            code_details = []
+            total_paid_matched = 0
+            total_claims_matched = 0
+            for h in hcpcs_list:
+                if h.get("hcpcs_code", "").upper() in code_set:
+                    code_details.append({
+                        "code": h["hcpcs_code"],
+                        "total_paid": h.get("total_paid", 0),
+                        "total_claims": h.get("total_claims", 0),
+                    })
+                    total_paid_matched += h.get("total_paid", 0)
+                    total_claims_matched += h.get("total_claims", 0)
 
-        code_details = []
-        total_paid_matched = 0
-        total_claims_matched = 0
-        for h in hcpcs_list:
-            if h.get("hcpcs_code", "").upper() in code_set:
-                code_details.append({
-                    "code": h["hcpcs_code"],
-                    "total_paid": h.get("total_paid", 0),
-                    "total_claims": h.get("total_claims", 0),
-                })
-                total_paid_matched += h.get("total_paid", 0)
-                total_claims_matched += h.get("total_claims", 0)
-
-        matches.append({
-            "npi": p.get("npi", ""),
-            "provider_name": p.get("provider_name", ""),
-            "provider_type": p.get("provider_type", ""),
-            "state": p.get("state", ""),
-            "risk_score": p.get("risk_score", 0),
-            "matched_codes": code_details,
-            "total_paid_matched": total_paid_matched,
-            "total_claims_matched": total_claims_matched,
-            "codes_matched": len(matched_codes),
-            "total_codes_billed": len(hcpcs_list),
-        })
+            matches.append({
+                "npi": p.get("npi", ""),
+                "provider_name": p.get("provider_name", ""),
+                "provider_type": p.get("provider_type", ""),
+                "state": p.get("state", ""),
+                "risk_score": p.get("risk_score", 0),
+                "matched_codes": code_details,
+                "total_paid_matched": total_paid_matched,
+                "total_claims_matched": total_claims_matched,
+                "codes_matched": len(matched_codes),
+                "total_codes_billed": len(hcpcs_list),
+            })
+    else:
+        rows = await _ddb_providers_by_codes(sorted(code_set))
+        # Group rows by NPI so we can apply ANY/ALL logic
+        by_npi: dict[str, list[dict]] = {}
+        for r in rows:
+            by_npi.setdefault(r["npi"], []).append(r)
+        enrich = _npi_enrichment_map()
+        for npi, code_rows in by_npi.items():
+            matched_codes = {r["hcpcs_code"] for r in code_rows}
+            if logic == "all" and matched_codes != code_set:
+                continue
+            # ANY path: matched_codes guaranteed non-empty since rows exist
+            meta = enrich.get(npi, {})
+            code_details = [
+                {
+                    "code": r["hcpcs_code"],
+                    "total_paid": r["total_paid"] or 0,
+                    "total_claims": r["total_claims"] or 0,
+                }
+                for r in code_rows
+            ]
+            matches.append({
+                "npi": npi,
+                "provider_name": meta.get("provider_name", ""),
+                "provider_type": meta.get("provider_type", ""),
+                "state": meta.get("state", ""),
+                "risk_score": meta.get("risk_score", 0),
+                "matched_codes": code_details,
+                "total_paid_matched": sum(c["total_paid"] for c in code_details),
+                "total_claims_matched": sum(c["total_claims"] for c in code_details),
+                "codes_matched": len(matched_codes),
+                "total_codes_billed": None,
+            })
 
     matches.sort(key=lambda x: x["total_paid_matched"], reverse=True)
     total = len(matches)
@@ -337,6 +486,57 @@ for _cat_key, _cat_info in _CATEGORY_RULES.items():
         _HCPCS_CATEGORIES.setdefault(_h, []).append(_cat_info)
 
 
+def _build_diag_flag_for_provider(npi: str, name: str, state: str, risk_score: float,
+                                  code_rows: list[dict]) -> dict | None:
+    """Shared scoring loop used by both the cache- and DuckDB-backed code paths."""
+    provider_issues = []
+    for r in code_rows:
+        code = r["hcpcs_code"].upper() if r.get("hcpcs_code") else ""
+        if code not in _HCPCS_CATEGORIES:
+            continue
+        for rule in _HCPCS_CATEGORIES[code]:
+            expected_icd = HCPCS_TO_ICD10.get(code, [])
+            valid_prefixes = rule["valid_icd_prefixes"]
+            matching = sum(
+                1 for icd in expected_icd
+                if any(icd.startswith(pfx) for pfx in valid_prefixes)
+            )
+            if expected_icd and matching == 0:
+                paid = r.get("total_paid", 0) or 0
+                claims = r.get("total_claims", 0) or 0
+                if paid > 0:
+                    expected_dx = [
+                        {"icd10": icd, "description": ICD10_DESCRIPTIONS.get(icd, "")}
+                        for icd in expected_icd[:3]
+                    ]
+                    valid_dx_examples = [
+                        {"icd10": icd, "description": ICD10_DESCRIPTIONS.get(icd, "")}
+                        for icd in list(ICD10_DESCRIPTIONS.keys())
+                        if any(icd.startswith(pfx) for pfx in valid_prefixes)
+                    ][:3]
+                    provider_issues.append({
+                        "hcpcs_code": code,
+                        "hcpcs_description": CPT_DESCRIPTIONS.get(code, ""),
+                        "category": rule["label"],
+                        "issue": rule["issue"],
+                        "total_paid": round(paid, 2),
+                        "total_claims": claims,
+                        "expected_diagnoses": expected_dx,
+                        "valid_diagnoses_for_category": valid_dx_examples,
+                    })
+    if not provider_issues:
+        return None
+    return {
+        "npi": npi,
+        "provider_name": name,
+        "state": state,
+        "risk_score": risk_score,
+        "issues": provider_issues,
+        "issue_count": len(provider_issues),
+        "total_flagged_paid": round(sum(i["total_paid"] for i in provider_issues), 2),
+    }
+
+
 @router.get("/diagnosis-flags")
 async def diagnosis_flags(limit: int = Query(100, ge=1, le=500)):
     """
@@ -350,73 +550,54 @@ async def diagnosis_flags(limit: int = Query(100, ge=1, le=500)):
     if cached is not None:
         return cached
 
-    providers = get_prescanned()
-    flagged = []
+    flagged: list[dict] = []
     category_counts: dict[str, int] = {}
 
-    for p in providers:
-        hcpcs_list = p.get("hcpcs") or []
-        provider_issues = []
-
-        # Build a set of all codes this provider bills
-        provider_codes = {h.get("hcpcs_code", "").upper() for h in hcpcs_list}
-
-        for h in hcpcs_list:
-            code = h.get("hcpcs_code", "").upper()
-            if code not in _HCPCS_CATEGORIES:
-                continue
-
-            for rule in _HCPCS_CATEGORIES[code]:
-                # Check if provider also bills related codes that validate the category
-                # E.g., if billing psych codes, do they also bill E&M codes with F-prefix ICD?
-                # For now: look at the crosswalk expected diagnoses
-                expected_icd = HCPCS_TO_ICD10.get(code, [])
-                valid_prefixes = rule["valid_icd_prefixes"]
-
-                # Count how many expected diagnoses match the valid category
-                matching = sum(
-                    1 for icd in expected_icd
-                    if any(icd.startswith(pfx) for pfx in valid_prefixes)
-                )
-
-                # If NONE of the crosswalk diagnoses match, this is a red flag
-                if expected_icd and matching == 0:
-                    paid = h.get("total_paid", 0) or 0
-                    claims = h.get("total_claims", 0) or 0
-                    if paid > 0:
-                        expected_dx = [
-                            {"icd10": icd, "description": ICD10_DESCRIPTIONS.get(icd, "")}
-                            for icd in expected_icd[:3]
-                        ]
-                        valid_dx_examples = [
-                            {"icd10": icd, "description": ICD10_DESCRIPTIONS.get(icd, "")}
-                            for icd in list(ICD10_DESCRIPTIONS.keys())
-                            if any(icd.startswith(pfx) for pfx in valid_prefixes)
-                        ][:3]
-
-                        provider_issues.append({
-                            "hcpcs_code": code,
-                            "hcpcs_description": CPT_DESCRIPTIONS.get(code, ""),
-                            "category": rule["label"],
-                            "issue": rule["issue"],
-                            "total_paid": round(paid, 2),
-                            "total_claims": claims,
-                            "expected_diagnoses": expected_dx,
-                            "valid_diagnoses_for_category": valid_dx_examples,
-                        })
-                        cat = rule["label"]
-                        category_counts[cat] = category_counts.get(cat, 0) + 1
-
-        if provider_issues:
-            flagged.append({
-                "npi": p.get("npi", ""),
-                "provider_name": p.get("provider_name", ""),
-                "state": p.get("state", ""),
-                "risk_score": p.get("risk_score", 0),
-                "issues": provider_issues,
-                "issue_count": len(provider_issues),
-                "total_flagged_paid": round(sum(i["total_paid"] for i in provider_issues), 2),
-            })
+    if _has_hcpcs_in_cache():
+        for p in get_prescanned():
+            entry = _build_diag_flag_for_provider(
+                p.get("npi", ""),
+                p.get("provider_name", ""),
+                p.get("state", ""),
+                p.get("risk_score", 0),
+                p.get("hcpcs") or [],
+            )
+            if entry:
+                flagged.append(entry)
+                for iss in entry["issues"]:
+                    category_counts[iss["category"]] = category_counts.get(iss["category"], 0) + 1
+    else:
+        # DuckDB: only pull rows for the small set of HCPCS codes in our category rules
+        all_rule_codes = sorted(_HCPCS_CATEGORIES.keys())
+        placeholders = ", ".join("?" for _ in all_rule_codes)
+        sql = f"""
+        SELECT
+            BILLING_PROVIDER_NPI_NUM        AS npi,
+            UPPER(HCPCS_CODE)               AS hcpcs_code,
+            SUM(TOTAL_PAID)                 AS total_paid,
+            SUM(TOTAL_CLAIMS)               AS total_claims
+        FROM read_parquet('{get_parquet_path()}')
+        WHERE UPPER(HCPCS_CODE) IN ({placeholders})
+        GROUP BY npi, hcpcs_code
+        """
+        rows = await query_async(sql, tuple(all_rule_codes))
+        by_npi: dict[str, list[dict]] = {}
+        for r in rows:
+            by_npi.setdefault(r["npi"], []).append(r)
+        enrich = _npi_enrichment_map()
+        for npi, code_rows in by_npi.items():
+            meta = enrich.get(npi, {})
+            entry = _build_diag_flag_for_provider(
+                npi,
+                meta.get("provider_name", ""),
+                meta.get("state", ""),
+                meta.get("risk_score", 0),
+                code_rows,
+            )
+            if entry:
+                flagged.append(entry)
+                for iss in entry["issues"]:
+                    category_counts[iss["category"]] = category_counts.get(iss["category"], 0) + 1
 
     flagged.sort(key=lambda x: x["total_flagged_paid"], reverse=True)
     total = len(flagged)
