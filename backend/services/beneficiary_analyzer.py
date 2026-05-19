@@ -273,9 +273,14 @@ async def detect_geographic_anomalies(limit: int = 100) -> dict:
         if nppes_state and nppes_state != state:
             states_in_data.add(nppes_state)
 
-        # Look at HCPCS diversity as proxy for multi-location billing
-        hcpcs_list = p.get("hcpcs") or []
-        distinct_codes = len(hcpcs_list)
+        # Look at HCPCS diversity as proxy for multi-location billing.
+        # Slim cache stores distinct_hcpcs as a count field; the full cache
+        # stores a per-code array under "hcpcs". Prefer the explicit count.
+        explicit_count = p.get("distinct_hcpcs")
+        if explicit_count is not None:
+            distinct_codes = int(explicit_count)
+        else:
+            distinct_codes = len(p.get("hcpcs") or [])
         total_paid = p.get("total_paid") or 0
         total_claims = p.get("total_claims") or 0
         total_benes = p.get("total_beneficiaries") or 0

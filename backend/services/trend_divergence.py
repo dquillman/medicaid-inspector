@@ -93,12 +93,69 @@ def _extract_year(month_str: str | None) -> int | None:
 def _aggregate_billing_by_state_year() -> dict[str, dict[int, float]]:
     """
     From prescan cache, aggregate total billing ($) by state and year.
-    Uses timeline data for year breakdown; falls back to total_paid split
-    evenly if no timeline is available.
+    Uses timeline data for year breakdown; when no provider in the cache has
+    a populated timeline (i.e. we're on the slim cache), falls back to a
+    single DuckDB aggregation against the Parquet dataset so historical
+    billing isn't all collapsed into the current year.
     """
     billing: dict[str, dict[int, float]] = defaultdict(lambda: defaultdict(float))
     providers = get_prescanned()
+    if not providers:
+        return {}
 
+    has_timeline = any(p.get("timeline") for p in providers[:200])
+
+    if not has_timeline:
+        # Slim-cache path: one DuckDB pass over the whole dataset.
+        # We get (npi, year, billing); state comes from the slim cache via
+        # the npi-state map below.
+        from data.duckdb_client import get_connection, get_parquet_path
+        npi_state: dict[str, str] = {}
+        for p in providers:
+            npi = p.get("npi")
+            if not npi:
+                continue
+            s = (p.get("state") or "").strip().upper()
+            if not s or len(s) != 2:
+                nppes = p.get("nppes") or {}
+                s = ((nppes.get("address") or {}).get("state") or "").strip().upper()
+            if s and len(s) == 2:
+                npi_state[npi] = s
+        if not npi_state:
+            return {}
+        try:
+            con = get_connection()
+            sql = f"""
+            SELECT
+                BILLING_PROVIDER_NPI_NUM                                AS npi,
+                CAST(SUBSTR(CAST(CLAIM_FROM_MONTH AS VARCHAR), 1, 4)
+                     AS INTEGER)                                        AS year,
+                SUM(TOTAL_PAID)                                         AS billing
+            FROM read_parquet('{get_parquet_path()}')
+            WHERE CLAIM_FROM_MONTH IS NOT NULL
+            GROUP BY npi, year
+            """
+            rel = con.execute(sql)
+            cols = [d[0] for d in rel.description]
+            for row in rel.fetchall():
+                r = dict(zip(cols, row))
+                npi = r["npi"]
+                year = r["year"]
+                if year not in YEARS:
+                    continue
+                state = npi_state.get(npi)
+                if not state:
+                    continue
+                billing[state][year] += float(r["billing"] or 0)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(
+                "[trend_divergence] DuckDB fallback failed (%s); returning empty trends", e
+            )
+            return {}
+        return dict(billing)
+
+    # Full-cache path: per-provider timeline arrays are available
     for p in providers:
         state = (p.get("state") or "").strip().upper()
         if not state or len(state) != 2:
