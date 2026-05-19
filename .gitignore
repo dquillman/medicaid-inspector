@@ -59,7 +59,12 @@ venv/
 .env.*.local
 secrets.*
 credentials*
-.claude/
+# Ignore everything inside .claude/ EXCEPT shared skills and agents that
+# should ship with the repo. Use `.claude/*` (children) — NOT `.claude/`
+# (the dir itself) — so the negations below can re-include subpaths.
+.claude/*
+!.claude/skills/
+!.claude/agents/
 dist/
 build/
 .next/
