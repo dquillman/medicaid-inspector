@@ -145,35 +145,20 @@ async def scan_hhs():
                 except Exception:
                     date_str = pub_date[:10] if len(pub_date) >= 10 else None
 
-            # Determine category from title/summary
-            text_lower = (title + " " + summary).lower()
-            if any(w in text_lower for w in ["settlement", "settles", "agreed to pay"]):
-                cat = "settlement"
-            elif any(w in text_lower for w in ["enforcement", "indictment", "convicted", "sentenced", "charged"]):
-                cat = "enforcement"
-            elif any(w in text_lower for w in ["legal", "court", "ruling", "order", "injunction"]):
-                cat = "legal"
-            else:
-                cat = "news"
-
-            # Determine severity from keywords
-            if any(w in text_lower for w in ["million", "convicted", "sentenced", "prison"]):
-                sev = "critical"
-            elif any(w in text_lower for w in ["indicted", "charged", "fraud scheme"]):
-                sev = "high"
-            elif any(w in text_lower for w in ["settlement", "agreed", "civil"]):
-                sev = "medium"
-            else:
-                sev = "low"
+            # Classify + extract NPI. Uses Claude when NEWS_LLM_ENABLED is set,
+            # otherwise falls back to keyword heuristics with identical behavior.
+            from services.news_enrichment import classify_item
+            classified = classify_item(title, summary)
 
             try:
                 add_alert(
                     title=title,
                     source="HHS OIG",
                     url=link,
-                    category=cat,
-                    summary=summary[:500],
-                    severity=sev,
+                    category=classified["category"],
+                    summary=classified["summary"],
+                    severity=classified["severity"],
+                    npi=classified["npi"],
                     date=date_str,
                 )
                 added += 1
@@ -185,6 +170,47 @@ async def scan_hhs():
     except Exception as e:
         # Non-fatal — return error info but don't crash
         return {"ok": False, "fetched": 0, "message": f"Could not fetch HHS OIG feed: {str(e)}"}
+
+
+class EnrichUrlBody(BaseModel):
+    url: str
+    source: str = "Manual"
+
+
+@router.post("/enrich-url", dependencies=[Depends(require_admin)])
+async def enrich_url(body: EnrichUrlBody):
+    """
+    Fetch a press-release URL, classify it with the news-enrichment agent,
+    and propose an alert record. The alert is NOT saved automatically — the
+    response is a draft for the admin to review and POST back to /api/news.
+    """
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
+            resp = await client.get(body.url)
+            resp.raise_for_status()
+            html = resp.text
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Could not fetch URL: {e}")
+
+    # Crude text extraction — strip tags. Keeps this endpoint dependency-free.
+    import re as _re
+    text = _re.sub(r"<script[\s\S]*?</script>", " ", html, flags=_re.I)
+    text = _re.sub(r"<style[\s\S]*?</style>", " ", text, flags=_re.I)
+    text = _re.sub(r"<[^>]+>", " ", text)
+    text = _re.sub(r"\s+", " ", text).strip()
+
+    title_match = _re.search(r"<title>([^<]+)</title>", html, flags=_re.I)
+    title = title_match.group(1).strip() if title_match else text[:120]
+
+    from services.news_enrichment import enrich_from_text
+    draft = enrich_from_text(
+        title=title,
+        source=body.source,
+        url=body.url,
+        summary=text[:2000],
+    )
+    return {"draft": draft}
 
 
 # ── Provider-specific news endpoint (mounted under /api/providers) ───────────

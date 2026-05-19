@@ -2198,12 +2198,19 @@ async def get_ownership_chain(npi: str):
 
 
 @router.get("/{npi}/narrative")
-async def provider_narrative(npi: str):
-    """Generate an investigation-ready case narrative for this provider."""
+async def provider_narrative(npi: str, enhance: str = "auto"):
+    """
+    Generate an investigation-ready case narrative for this provider.
+
+    Query params:
+      enhance=auto    use LLM enrichment if NARRATIVE_LLM_ENABLED + BAA ack are set (default)
+      enhance=off     force the deterministic template (useful for diffing / audits)
+    """
     npi = _validate_npi(npi)
-    from services.narrative_generator import generate_narrative
+    from services.narrative_llm import generate_narrative_enhanced
+    force_template = enhance.lower() in ("off", "false", "0", "template")
     try:
-        return generate_narrative(npi)
+        return generate_narrative_enhanced(npi, force_template=force_template)
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 
