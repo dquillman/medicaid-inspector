@@ -106,11 +106,15 @@ async def geography_by_city():
     return {"by_city": results[:100]}
 
 
+HOTSPOT_AVG_RISK_FLOOR = 30.0  # bar for calling a ZIP3 a "hotspot" — stricter than the
+# review-queue threshold (settings.RISK_THRESHOLD=10) which fires on any anomaly
+
+
 @router.get("/hotspots")
 async def geography_hotspots():
     """
     Find geographic clusters that are fraud hotspots:
-    ZIP prefixes with >= 5 flagged providers AND avg risk score > 30.
+    ZIP prefixes with >= 5 flagged providers AND avg risk score >= 30.
     """
     prescanned = get_prescanned()
     zip_map: dict[str, dict] = {}
@@ -149,7 +153,7 @@ async def geography_hotspots():
     for bucket in zip_map.values():
         scores = bucket["risk_scores"]
         avg_risk = sum(scores) / len(scores) if scores else 0
-        if bucket["flagged_count"] >= 5 and avg_risk > settings.RISK_THRESHOLD:
+        if bucket["flagged_count"] >= 5 and avg_risk >= HOTSPOT_AVG_RISK_FLOOR:
             hotspots.append({
                 "zip3": bucket["zip3"],
                 "provider_count": bucket["provider_count"],
