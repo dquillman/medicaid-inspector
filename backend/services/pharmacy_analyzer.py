@@ -178,9 +178,16 @@ async def get_high_risk_providers(limit: int = 50) -> dict:
     cached = _cache_get(f"pharmacy_high_risk:{limit}")
     if cached is not None:
         return cached
+    from services.slim_cache_enricher import has_hcpcs_detail, enrich_top_providers
     providers = get_prescanned()
     if not providers:
         return {"available": True, "providers": [], "total": 0, "kpis": _empty_kpis()}
+    if not has_hcpcs_detail():
+        import asyncio as _asyncio
+        # Pharmacy doesn't need timeline data for the high-risk list — only HCPCS J-codes
+        providers = await _asyncio.to_thread(enrich_top_providers, 500, False)
+        if not providers:
+            return {"available": True, "providers": [], "total": 0, "kpis": _empty_kpis()}
 
     result = []
     for p in providers:

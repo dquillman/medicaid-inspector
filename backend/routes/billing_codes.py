@@ -41,16 +41,13 @@ def _cache_set(key: str, value: Any) -> None:
 
 
 def _has_hcpcs_in_cache() -> bool:
-    """True if at least one provider in the slim cache carries a populated hcpcs list.
+    """True if at least one provider in the cache carries a populated hcpcs list.
 
-    Used to decide whether to use the in-memory path (fast, works with the
-    1.5 GB full cache) or fall back to DuckDB-on-demand (works with the slim
-    cache where per-HCPCS detail was stripped).
+    Used to decide whether to use the in-memory path (full cache) or fall back
+    to DuckDB-on-demand (slim cache).
     """
-    for p in get_prescanned()[:200]:
-        if p.get("hcpcs"):
-            return True
-    return False
+    from services.slim_cache_enricher import has_hcpcs_detail
+    return has_hcpcs_detail()
 
 
 def _npi_enrichment_map() -> dict[str, dict]:
