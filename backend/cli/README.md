@@ -38,6 +38,7 @@ The CLI reads a few environment variables:
 | `MFI_GCLOUD_SERVICE` | `medicaid-inspector-api` | Cloud Run service name for `deploy backend`. |
 | `MFI_GCLOUD_REGION` | `us-central1` | Cloud Run region. |
 | `MFI_ADMIN_PASSWORD_SECRET` | `admin-password` | Secret Manager secret mounted as `ADMIN_PASSWORD` on the deployed revision. |
+| `CLOUDSDK_PYTHON` / `MFI_GCLOUD_PYTHON` | unset | If set, `mfi deploy backend` propagates it to gcloud AND sets `CLOUDSDK_PYTHON_SITEPACKAGES=1`. Needed on machines where the bundled Cloud SDK Python ships with a corrupted `pyasn1` (cannot import `pyasn1.type.univ`). Workaround: `pip install pyasn1 cryptography` into the chosen Python, then point CLOUDSDK_PYTHON at it. |
 | `NEWS_LLM_ENABLED` | unset | When `true` (and `ANTHROPIC_API_KEY` is set), `news scan-hhs` and `news enrich-url` use Claude for classification. Falls back to keyword heuristics otherwise. |
 | `NARRATIVE_LLM_ENABLED` + `ANTHROPIC_BAA_ACK` | unset | Both required to enable LLM enrichment of provider narratives. Routes still serve the template version when off. PHI guardrail — do not flip without a BAA. |
 

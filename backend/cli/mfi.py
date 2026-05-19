@@ -71,14 +71,25 @@ def _err(msg: str) -> int:
     return 1
 
 
-def _run_shell(cmd: list[str], *, cwd: str | None = None) -> int:
+def _platform_exe(name: str) -> str:
+    """Append `.cmd` on Windows so subprocess can find shell wrappers
+    (npm, firebase, gcloud all ship as .cmd shims on Windows)."""
+    if os.name == "nt" and not name.lower().endswith((".cmd", ".bat", ".exe")):
+        return f"{name}.cmd"
+    return name
+
+
+def _run_shell(cmd: list[str], *, cwd: str | None = None, env: dict | None = None) -> int:
     """Run a subprocess command and stream output; return exit code."""
     _log(f"$ {' '.join(cmd)}")
     try:
-        result = subprocess.run(cmd, cwd=cwd, check=False)
+        result = subprocess.run(cmd, cwd=cwd, env=env, check=False)
         return result.returncode
     except FileNotFoundError as exc:
-        return _err(f"command not found: {exc.filename}")
+        # On Windows, FileNotFoundError.filename is often None for failed PATH
+        # lookups — fall back to the cmd[0] so the error is actionable.
+        missing = exc.filename or (cmd[0] if cmd else "unknown")
+        return _err(f"command not found: {missing}")
 
 
 def _http_get(url: str, timeout: float = 10.0) -> tuple[int, str]:
@@ -183,8 +194,20 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
     repo_root = _BACKEND_DIR.parent
     secret_name = os.environ.get("MFI_ADMIN_PASSWORD_SECRET", "admin-password")
 
+    # gcloud's bundled `third_party/pyasn1` is corrupted in some Cloud SDK
+    # installs (missing `pyasn1.type.univ`). Setting CLOUDSDK_PYTHON_SITEPACKAGES=1
+    # lets gcloud fall back to the system Python's site-packages, where pyasn1
+    # and cryptography are installable via pip. We only set these if the user
+    # has not overridden them, and only if CLOUDSDK_PYTHON exists — never force
+    # a broken Python on a known-good gcloud install.
+    deploy_env = os.environ.copy()
+    cloudsdk_python = os.environ.get("CLOUDSDK_PYTHON") or os.environ.get("MFI_GCLOUD_PYTHON")
+    if cloudsdk_python:
+        deploy_env.setdefault("CLOUDSDK_PYTHON", cloudsdk_python)
+        deploy_env.setdefault("CLOUDSDK_PYTHON_SITEPACKAGES", "1")
+
     cmd = [
-        "gcloud", "run", "deploy", _DEFAULT_GCLOUD_SERVICE,
+        _platform_exe("gcloud"), "run", "deploy", _DEFAULT_GCLOUD_SERVICE,
         "--source", str(repo_root),
         "--region", _DEFAULT_GCLOUD_REGION,
         "--allow-unauthenticated",
@@ -192,7 +215,7 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
         "--update-secrets", f"ADMIN_PASSWORD={secret_name}:latest",
         "--quiet",
     ]
-    rc = _run_shell(cmd)
+    rc = _run_shell(cmd, env=deploy_env)
     if rc != 0:
         return _err(
             f"gcloud run deploy failed with exit code {rc}. "
@@ -225,14 +248,11 @@ def cmd_deploy_frontend(args: argparse.Namespace) -> int:
     _log(f"declared frontend version: {declared_version}")
 
     if not args.skip_build:
-        # npm.cmd on Windows, npm elsewhere
-        npm = "npm.cmd" if os.name == "nt" else "npm"
-        rc = _run_shell([npm, "run", "build"], cwd=str(frontend_dir))
+        rc = _run_shell([_platform_exe("npm"), "run", "build"], cwd=str(frontend_dir))
         if rc != 0:
             return _err(f"npm run build failed with exit code {rc}")
 
-    firebase = "firebase.cmd" if os.name == "nt" else "firebase"
-    rc = _run_shell([firebase, "deploy", "--only", "hosting"], cwd=str(frontend_dir))
+    rc = _run_shell([_platform_exe("firebase"), "deploy", "--only", "hosting"], cwd=str(frontend_dir))
     if rc != 0:
         return _err(f"firebase deploy failed with exit code {rc}")
 
