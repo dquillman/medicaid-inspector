@@ -82,28 +82,59 @@ async def detect_doctor_shopping(limit: int = 100) -> dict:
     cached = _cache_get(f"doctor_shopping:{limit}")
     if cached is not None:
         return cached
+    from services.slim_cache_enricher import has_hcpcs_detail, enrich_top_providers
     providers = get_prescanned()
     if not providers:
         return {"flagged": [], "total_flagged": 0, "note": "No providers in cache"}
 
-    # Build code popularity: how many NPIs bill each HCPCS code
     code_npi_count: dict[str, int] = defaultdict(int)
     npi_codes: dict[str, list[dict]] = {}
 
-    for p in providers:
-        npi = p["npi"]
-        hcpcs_list = p.get("hcpcs") or []
-        codes_for_npi = []
-        for h in hcpcs_list:
-            code = h.get("hcpcs_code", "")
-            if code:
-                code_npi_count[code] += 1
-                codes_for_npi.append({
-                    "code": code,
-                    "paid": h.get("total_paid", 0) or 0,
-                    "claims": h.get("total_claims", 0) or 0,
-                })
-        npi_codes[npi] = codes_for_npi
+    if not has_hcpcs_detail():
+        # Slim cache path: pull two aggregations from Parquet — the per-NPI
+        # HCPCS lists for the riskiest 500 providers (the candidates we'll
+        # score), and the global code popularity (HCPCS -> distinct NPI count)
+        # so avg_competing_providers reflects the whole population.
+        import asyncio as _asyncio
+        from data.duckdb_client import get_parquet_path, query_async
+        providers = await _asyncio.to_thread(enrich_top_providers, 500, False)
+        if not providers:
+            return {"flagged": [], "total_flagged": 0, "note": "No providers after enrichment"}
+        popularity_sql = f"""
+        SELECT
+            HCPCS_CODE                                  AS code,
+            COUNT(DISTINCT BILLING_PROVIDER_NPI_NUM)    AS npi_count
+        FROM read_parquet('{get_parquet_path()}')
+        WHERE HCPCS_CODE IS NOT NULL
+        GROUP BY HCPCS_CODE
+        """
+        pop_rows = await query_async(popularity_sql)
+        for r in pop_rows:
+            code_npi_count[r["code"]] = int(r["npi_count"] or 0)
+        for p in providers:
+            npi = p["npi"]
+            npi_codes[npi] = [
+                {"code": h["hcpcs_code"],
+                 "paid": h.get("total_paid", 0) or 0,
+                 "claims": h.get("total_claims", 0) or 0}
+                for h in (p.get("hcpcs") or []) if h.get("hcpcs_code")
+            ]
+    else:
+        # Full cache path: code popularity computed in-memory across all providers
+        for p in providers:
+            npi = p["npi"]
+            hcpcs_list = p.get("hcpcs") or []
+            codes_for_npi = []
+            for h in hcpcs_list:
+                code = h.get("hcpcs_code", "")
+                if code:
+                    code_npi_count[code] += 1
+                    codes_for_npi.append({
+                        "code": code,
+                        "paid": h.get("total_paid", 0) or 0,
+                        "claims": h.get("total_claims", 0) or 0,
+                    })
+            npi_codes[npi] = codes_for_npi
 
     # Score each provider
     scored = []

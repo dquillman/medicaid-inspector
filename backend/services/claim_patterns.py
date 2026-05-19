@@ -130,12 +130,22 @@ def _compute_all_from_cache(limit: int = 100) -> dict[str, list[dict]]:
     """
     Compute all 5 claim-level analyses from the in-memory prescan provider cache.
     This is ~1000x faster than querying the Parquet file.
+
+    When the slim cache is loaded (no per-HCPCS / per-timeline arrays),
+    falls back to enriching the riskiest providers via two batched DuckDB
+    queries — see services/slim_cache_enricher.py.
     """
     from core.store import get_prescanned
+    from services.slim_cache_enricher import has_hcpcs_detail, enrich_top_providers
 
     providers = get_prescanned()
     if not providers:
         return {"unbundling": [], "duplicates": [], "pos": [], "modifiers": [], "impossible": []}
+
+    if not has_hcpcs_detail():
+        providers = enrich_top_providers(include_timeline=True)
+        if not providers:
+            return {"unbundling": [], "duplicates": [], "pos": [], "modifiers": [], "impossible": []}
 
     t0 = _time.time()
     unbundling_results: list[dict] = []

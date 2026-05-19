@@ -218,9 +218,15 @@ async def get_high_risk_providers(limit: int = 50) -> dict:
     cached = _cache_get(f"dme_high_risk:{limit}")
     if cached is not None:
         return cached
+    from services.slim_cache_enricher import has_hcpcs_detail, enrich_top_providers
     providers = get_prescanned()
     if not providers:
         return {"available": True, "providers": [], "total": 0, "kpis": _empty_kpis()}
+    if not has_hcpcs_detail():
+        import asyncio as _asyncio
+        providers = await _asyncio.to_thread(enrich_top_providers, 500, False)
+        if not providers:
+            return {"available": True, "providers": [], "total": 0, "kpis": _empty_kpis()}
 
     # Single pass: compute DME stats for all providers
     all_dme_paid = []
