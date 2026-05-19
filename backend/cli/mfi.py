@@ -58,6 +58,11 @@ _DEFAULT_BACKEND_URL = os.environ.get(
 )
 _DEFAULT_GCLOUD_SERVICE = os.environ.get("MFI_GCLOUD_SERVICE", "medicaid-inspector-api")
 _DEFAULT_GCLOUD_REGION = os.environ.get("MFI_GCLOUD_REGION", "us-central1")
+# Default to the production project. Override with MFI_GCLOUD_PROJECT for
+# staging / dev. Passing --project explicitly to gcloud means a stale
+# `gcloud config set project ...` cannot redirect a deploy to the wrong
+# project (which has happened once — see commit log).
+_DEFAULT_GCLOUD_PROJECT = os.environ.get("MFI_GCLOUD_PROJECT", "medicaid-inspector")
 _HEALTH_TIMEOUT_SECONDS = 60
 
 
@@ -209,6 +214,7 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
     cmd = [
         _platform_exe("gcloud"), "run", "deploy", _DEFAULT_GCLOUD_SERVICE,
         "--source", str(repo_root),
+        "--project", _DEFAULT_GCLOUD_PROJECT,
         "--region", _DEFAULT_GCLOUD_REGION,
         "--allow-unauthenticated",
         "--set-env-vars", "PYTHONUNBUFFERED=1",
