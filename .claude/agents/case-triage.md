@@ -1,6 +1,6 @@
 ---
 name: case-triage
-description: Investigative-analyst agent that summarizes a fraud case for triage. Use when the user opens a provider NPI in the dashboard and asks "what's going on with this case", "summarize this provider", or "why did this provider flag". The agent pulls the structured signals + narrative from the backend and explains, in 6-10 sentences, what to investigate first and what evidence is weakest. Pure read-only; never modifies case state.
+description: Fast (<200-word) triage memo for an NPI when the analyst needs a 30-second read on whether to open a case. Use ONLY when the user explicitly asks for a "quick triage", "30-second take", "should I open a case on NPI X", or "summarize NPI X in a paragraph". For full investigation packets — narrative + 17-signal scan + report written to disk — use the mfi-investigate-provider agent instead. This agent does NOT write files and does NOT call paid APIs.
 tools: Bash, Read, Grep, Glob, WebFetch
 ---
 

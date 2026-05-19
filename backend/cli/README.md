@@ -15,6 +15,12 @@ without going through the web UI.
 ./mfi backup list
 ./mfi backup restore backup_20260519_143022
 ./mfi sync-exclusions
+./mfi nppes-enrich                          # fill in missing NPPES data
+./mfi nppes-enrich --all --limit 5000       # re-enrich the first 5000
+./mfi news scan-hhs                         # OIG RSS -> classified alerts
+./mfi news enrich-url https://oig.hhs.gov/...
+./mfi user list
+./mfi user reset-password --user admin      # generates a strong password
 ./mfi deploy backend
 ./mfi deploy frontend
 ```
@@ -31,6 +37,9 @@ The CLI reads a few environment variables:
 | `MFI_HOSTING_URL` | `https://medicaid-inspector.web.app` | Used to verify the deployed frontend bundle version. |
 | `MFI_GCLOUD_SERVICE` | `medicaid-inspector-api` | Cloud Run service name for `deploy backend`. |
 | `MFI_GCLOUD_REGION` | `us-central1` | Cloud Run region. |
+| `MFI_ADMIN_PASSWORD_SECRET` | `admin-password` | Secret Manager secret mounted as `ADMIN_PASSWORD` on the deployed revision. |
+| `NEWS_LLM_ENABLED` | unset | When `true` (and `ANTHROPIC_API_KEY` is set), `news scan-hhs` and `news enrich-url` use Claude for classification. Falls back to keyword heuristics otherwise. |
+| `NARRATIVE_LLM_ENABLED` + `ANTHROPIC_BAA_ACK` | unset | Both required to enable LLM enrichment of provider narratives. Routes still serve the template version when off. PHI guardrail — do not flip without a BAA. |
 
 ## Suggested cron / Task Scheduler entries
 
@@ -43,6 +52,12 @@ The CLI reads a few environment variables:
 
 # Daily backup (1 AM, before scan)
 0 1 * * *  cd /path/to/repo && ./mfi backup create >> logs/mfi-backup.log 2>&1
+
+# Hourly news ingest (pull HHS OIG enforcement RSS)
+30 * * * * cd /path/to/repo && ./mfi news scan-hhs >> logs/mfi-news.log 2>&1
+
+# Weekly NPPES enrichment for any new providers (Sunday 3 AM)
+0 3 * * 0  cd /path/to/repo && ./mfi nppes-enrich >> logs/mfi-nppes.log 2>&1
 ```
 
 ## Architecture
