@@ -119,6 +119,7 @@ function StateDrilldownPanel({
   const { data, isLoading, isError } = useQuery<StateDrilldown>({
     queryKey: ['beneficiary-density-state', state],
     queryFn: () => api.beneficiaryDensityState(state),
+    staleTime: 300_000,
   })
 
   return (
@@ -230,6 +231,7 @@ export default function BeneficiaryDensity() {
     queryKey: ['beneficiary-density'],
     queryFn: api.beneficiaryDensity,
     refetchInterval: 120_000,
+    staleTime: 60_000,
   })
 
   const handleSort = (key: SortKey) => {

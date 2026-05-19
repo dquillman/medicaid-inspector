@@ -133,8 +133,9 @@ export default function MLModel() {
         </div>
         <button
           onClick={() => trainMutation.mutate()}
-          disabled={trainMutation.isPending}
-          className="btn-primary px-5 py-2.5 flex items-center gap-2"
+          disabled={trainMutation.isPending || status?.can_train === false}
+          title={status?.train_blocker || undefined}
+          className="btn-primary px-5 py-2.5 flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {trainMutation.isPending ? (
             <>
@@ -154,6 +155,13 @@ export default function MLModel() {
           )}
         </button>
       </div>
+
+      {/* Pre-train readiness banner (shows progress toward the label minimum) */}
+      {status?.can_train === false && status.train_blocker && !trainMutation.data && (
+        <div className="border border-yellow-800 bg-yellow-950/30 rounded-lg p-4 text-yellow-300 text-sm">
+          <strong>Cannot train yet:</strong> {status.train_blocker}
+        </div>
+      )}
 
       {/* Training result message */}
       {trainMutation.data && !trainMutation.data.trained && trainMutation.data.error && (
@@ -436,8 +444,9 @@ export default function MLModel() {
             </Link>
             <button
               onClick={() => trainMutation.mutate()}
-              disabled={trainMutation.isPending}
-              className="btn-primary text-sm"
+              disabled={trainMutation.isPending || status?.can_train === false}
+              title={status?.train_blocker || undefined}
+              className="btn-primary text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {trainMutation.isPending ? 'Training...' : 'Try Training'}
             </button>

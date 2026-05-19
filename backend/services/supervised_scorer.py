@@ -363,19 +363,74 @@ def predict_fraud_probability(npi: str) -> Optional[dict]:
         return {"error": str(e)}
 
 
+def _label_readiness() -> dict:
+    """Inspect the review queue for labeled samples without running training.
+
+    Returns label counts and a can_train flag with a human-readable reason.
+    Used by GET /api/ml/supervised/status so the UI can show progress toward
+    the minimum training prerequisites before the user clicks Train.
+    """
+    from core.review_store import get_review_queue
+    positive_statuses = {"confirmed_fraud", "referred"}
+    negative_statuses = {"dismissed"}
+    positive = 0
+    negative = 0
+    for item in get_review_queue():
+        status = item.get("status", "")
+        if not item.get("npi"):
+            continue
+        if status in positive_statuses:
+            positive += 1
+        elif status in negative_statuses:
+            negative += 1
+    total = positive + negative
+    if total < 10:
+        return {
+            "total_labeled": total,
+            "positive_count": positive,
+            "negative_count": negative,
+            "can_train": False,
+            "train_blocker": (
+                f"Need at least 10 labeled providers, have {total}. "
+                "Mark providers as 'confirmed_fraud'/'referred' or 'dismissed' in the Review Queue."
+            ),
+        }
+    if positive < 2 or negative < 2:
+        return {
+            "total_labeled": total,
+            "positive_count": positive,
+            "negative_count": negative,
+            "can_train": False,
+            "train_blocker": (
+                f"Need at least 2 samples per class. "
+                f"Currently {positive} fraud / {negative} cleared."
+            ),
+        }
+    return {
+        "total_labeled": total,
+        "positive_count": positive,
+        "negative_count": negative,
+        "can_train": True,
+        "train_blocker": None,
+    }
+
+
 def get_model_status() -> dict:
     """Return current model status and metrics."""
     with _lock:
         metrics_snapshot = dict(_training_metrics)
         preds_len = len(_predictions)
+    readiness = _label_readiness()
     if not metrics_snapshot:
         return {
             "trained": False,
             "message": "Supervised model not trained yet. Call POST /api/ml/supervised/train.",
+            **readiness,
         }
     return {
         **metrics_snapshot,
         "providers_scored": preds_len,
+        **readiness,
     }
 
 

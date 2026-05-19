@@ -1633,6 +1633,8 @@ export interface SupervisedModelStatus {
   providers_scored?: number
   message?: string
   error?: string
+  can_train?: boolean
+  train_blocker?: string | null
 }
 
 export interface SupervisedFeatureImportance {
