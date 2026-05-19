@@ -18,6 +18,11 @@ Subcommands:
     deploy backend      gcloud run deploy (with health check)
     deploy frontend     npm build + firebase deploy --only hosting
     sync-exclusions     Refresh OIG + SAM + NPI exclusion data
+    nppes-enrich        Enrich cached providers from the NPPES registry
+    news scan-hhs       Pull HHS-OIG RSS feed and add classified alerts
+    news enrich-url     Classify a single press-release URL (prints JSON draft)
+    user list           List configured users
+    user reset-password Reset a user's password (generates one if omitted)
     version             Print version and exit
 
 Exit codes:
@@ -165,18 +170,32 @@ def cmd_backup(args: argparse.Namespace) -> int:
 
 # ── Subcommand: deploy ───────────────────────────────────────────────────────
 def cmd_deploy_backend(args: argparse.Namespace) -> int:
-    """Deploy backend to Cloud Run, then smoke-test /health."""
+    """Deploy backend to Cloud Run, then smoke-test /health.
+
+    ADMIN_PASSWORD must be set on the deployed revision — otherwise each cold
+    start picks a random one and locks everyone out (see deploy-backend.sh).
+    We mount it as a Cloud Run secret via --update-secrets so the value
+    never crosses the shell boundary or appears in logs.
+    """
     repo_root = _BACKEND_DIR.parent
+    secret_name = os.environ.get("MFI_ADMIN_PASSWORD_SECRET", "admin-password")
+
     cmd = [
         "gcloud", "run", "deploy", _DEFAULT_GCLOUD_SERVICE,
         "--source", str(repo_root),
         "--region", _DEFAULT_GCLOUD_REGION,
         "--allow-unauthenticated",
+        "--set-env-vars", "PYTHONUNBUFFERED=1",
+        "--update-secrets", f"ADMIN_PASSWORD={secret_name}:latest",
         "--quiet",
     ]
     rc = _run_shell(cmd)
     if rc != 0:
-        return _err(f"gcloud run deploy failed with exit code {rc}")
+        return _err(
+            f"gcloud run deploy failed with exit code {rc}. "
+            f"If the failure mentions secret access, grant the Cloud Run service account "
+            f"the 'Secret Manager Secret Accessor' role on the {secret_name!r} secret."
+        )
 
     # Smoke test
     _log(f"smoke-testing {_DEFAULT_BACKEND_URL}/health …")
@@ -258,6 +277,172 @@ def cmd_sync_exclusions(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── Subcommand: nppes-enrich ─────────────────────────────────────────────────
+def cmd_nppes_enrich(args: argparse.Namespace) -> int:
+    """Enrich providers in the prescan cache with NPPES registry data."""
+    try:
+        from core.store import load_prescanned_from_disk, get_prescanned
+        from services.nppes_enricher import enrich_batch_with_nppes
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"failed to import nppes enricher: {exc}")
+
+    load_prescanned_from_disk()
+    providers = get_prescanned()
+    if args.all:
+        targets = [p["npi"] for p in providers]
+    else:
+        targets = [
+            p["npi"] for p in providers
+            if not p.get("nppes") or not (p.get("nppes") or {}).get("enumeration_date")
+        ]
+
+    if args.limit:
+        targets = targets[: args.limit]
+
+    if not targets:
+        _log("nothing to enrich")
+        return 0
+
+    _log(f"enriching {len(targets)} providers from NPPES…")
+    t0 = time.time()
+    try:
+        asyncio.run(enrich_batch_with_nppes(targets))
+    except KeyboardInterrupt:
+        return _err("interrupted")
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"nppes enrichment failed: {exc}")
+    _log(f"nppes enrichment complete in {time.time() - t0:.1f}s")
+    return 0
+
+
+# ── Subcommand: news ─────────────────────────────────────────────────────────
+def cmd_news_scan_hhs(args: argparse.Namespace) -> int:
+    """Pull HHS-OIG RSS feed and add classified alerts."""
+    try:
+        import httpx
+        import xml.etree.ElementTree as ET
+        from email.utils import parsedate_to_datetime
+        from core.news_store import add_alert, load_news_from_disk
+        from services.news_enrichment import classify_item
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"failed to import news modules: {exc}")
+
+    load_news_from_disk()
+    feed_url = "https://oig.hhs.gov/rss/enforcement.xml"
+    _log(f"fetching {feed_url}…")
+    try:
+        resp = httpx.get(feed_url, timeout=15.0)
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"feed fetch failed: {exc}")
+
+    root = ET.fromstring(resp.text)
+    channel = root.find("channel")
+    items = (channel.findall("item") if channel is not None else root.findall("item")) or []
+
+    added = 0
+    for item in items[:50]:
+        title = (item.findtext("title") or "Untitled").strip()
+        link = (item.findtext("link") or "").strip()
+        summary = (item.findtext("description") or "").strip()
+        pub = item.findtext("pubDate")
+        date_str = None
+        if pub:
+            try:
+                date_str = parsedate_to_datetime(pub).strftime("%Y-%m-%d")
+            except Exception:  # noqa: BLE001
+                date_str = pub[:10] if len(pub) >= 10 else None
+
+        classified = classify_item(title, summary)
+        try:
+            add_alert(
+                title=title,
+                source="HHS OIG",
+                url=link,
+                category=classified["category"],
+                summary=classified["summary"],
+                severity=classified["severity"],
+                npi=classified["npi"],
+                date=date_str,
+            )
+            added += 1
+        except Exception as exc:  # noqa: BLE001
+            _log(f"WARNING: failed to store alert {title!r}: {exc}")
+
+    _log(f"added {added} alerts")
+    return 0
+
+
+def cmd_news_enrich_url(args: argparse.Namespace) -> int:
+    """Classify a single press-release URL — prints a JSON draft alert."""
+    try:
+        import httpx
+        import re as _re
+        from services.news_enrichment import enrich_from_text
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"failed to import news_enrichment: {exc}")
+
+    try:
+        resp = httpx.get(args.url, timeout=15.0, follow_redirects=True)
+        resp.raise_for_status()
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"URL fetch failed: {exc}")
+
+    html = resp.text
+    text = _re.sub(r"<script[\s\S]*?</script>", " ", html, flags=_re.I)
+    text = _re.sub(r"<style[\s\S]*?</style>", " ", text, flags=_re.I)
+    text = _re.sub(r"<[^>]+>", " ", text)
+    text = _re.sub(r"\s+", " ", text).strip()
+    title_match = _re.search(r"<title>([^<]+)</title>", html, flags=_re.I)
+    title = title_match.group(1).strip() if title_match else text[:120]
+
+    draft = enrich_from_text(
+        title=title, source=args.source, url=args.url, summary=text[:2000]
+    )
+    print(json.dumps(draft, indent=2))
+    return 0
+
+
+# ── Subcommand: user ─────────────────────────────────────────────────────────
+def cmd_user_list(args: argparse.Namespace) -> int:
+    """List configured users."""
+    try:
+        from core.auth_store import init_auth_store, list_users
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"failed to import auth_store: {exc}")
+    init_auth_store()
+    for u in list_users():
+        print(f"{u['username']:24s}  role={u['role']:8s}  name={u.get('display_name', '')}")
+    return 0
+
+
+def cmd_user_reset_password(args: argparse.Namespace) -> int:
+    """Reset a user password — generates a strong one if --password is omitted."""
+    try:
+        from core.auth_store import init_auth_store, get_user, update_user
+    except Exception as exc:  # noqa: BLE001
+        return _err(f"failed to import auth_store: {exc}")
+
+    init_auth_store()
+    if not get_user(args.user):
+        return _err(f"user {args.user!r} not found")
+
+    new_pw = args.password
+    if not new_pw:
+        import secrets
+        import string
+        alphabet = string.ascii_letters + string.digits + "-_"
+        new_pw = "".join(secrets.choice(alphabet) for _ in range(20))
+
+    update_user(args.user, {"password": new_pw})
+    _log(f"password reset for {args.user!r}")
+    if not args.password:
+        # Only echo if we generated it. If the caller supplied --password
+        # they already have the value and we shouldn't print it.
+        print(f"New password: {new_pw}")
+    return 0
+
+
 # ── Subcommand: version ──────────────────────────────────────────────────────
 def cmd_version(args: argparse.Namespace) -> int:
     repo_root = _BACKEND_DIR.parent
@@ -309,6 +494,32 @@ def _build_parser() -> argparse.ArgumentParser:
     # sync-exclusions
     p_sync = sub.add_parser("sync-exclusions", help="Refresh OIG + SAM + NPI exclusion data")
     p_sync.set_defaults(func=cmd_sync_exclusions)
+
+    # nppes-enrich
+    p_npp = sub.add_parser("nppes-enrich", help="Enrich cached providers from the NPPES registry")
+    p_npp.add_argument("--all", action="store_true", help="Re-enrich every provider, not just those missing NPPES data")
+    p_npp.add_argument("--limit", type=int, default=0, help="Cap number of providers to enrich (0 = no cap)")
+    p_npp.set_defaults(func=cmd_nppes_enrich)
+
+    # news
+    p_news = sub.add_parser("news", help="News-alert ingestion")
+    news_sub = p_news.add_subparsers(dest="news_cmd", required=True)
+    p_news_hhs = news_sub.add_parser("scan-hhs", help="Pull HHS-OIG RSS and add classified alerts")
+    p_news_hhs.set_defaults(func=cmd_news_scan_hhs)
+    p_news_url = news_sub.add_parser("enrich-url", help="Classify a single press-release URL (prints JSON draft)")
+    p_news_url.add_argument("url", help="URL of the press release to classify")
+    p_news_url.add_argument("--source", default="Manual", help="Source name for the draft alert")
+    p_news_url.set_defaults(func=cmd_news_enrich_url)
+
+    # user
+    p_user = sub.add_parser("user", help="User administration")
+    user_sub = p_user.add_subparsers(dest="user_cmd", required=True)
+    p_user_ls = user_sub.add_parser("list", help="List configured users")
+    p_user_ls.set_defaults(func=cmd_user_list)
+    p_user_rp = user_sub.add_parser("reset-password", help="Reset a user's password")
+    p_user_rp.add_argument("--user", required=True, help="Username to reset")
+    p_user_rp.add_argument("--password", default=None, help="New password (generated if omitted)")
+    p_user_rp.set_defaults(func=cmd_user_reset_password)
 
     # version
     p_version = sub.add_parser("version", help="Print version and exit")
