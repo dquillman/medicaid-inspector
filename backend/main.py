@@ -216,6 +216,21 @@ async def lifespan(app: FastAPI):
         set_prescan_status(0, "Ready — use Scan to populate provider cache")
         log.info("No prescan cache found")
 
+    # Startup diagnostic: log cache state so empty-data bugs are visible in logs
+    from core.store import get_cache_status as _get_cache_status
+    _cs = _get_cache_status()
+    log.info(
+        "[startup] prescan cache: providers=%d cloud_run=%s slim=%.1fMB(exists=%s) full=%.1fMB(exists=%s)",
+        _cs["loaded_providers"],
+        _cs["cloud_run"],
+        _cs["slim_file"]["size_mb"],
+        _cs["slim_file"]["exists"],
+        _cs["full_file"]["size_mb"],
+        _cs["full_file"]["exists"],
+    )
+    if _cs["loaded_providers"] == 0:
+        log.warning("[startup] prescan cache is EMPTY — geo/state/trends charts will render blank")
+
     # NOTE: Parquet stays remote (read via DuckDB httpfs) — no local download on Cloud Run.
     # The 2.8GB file is too large to download reliably in a container.
 

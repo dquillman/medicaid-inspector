@@ -15,6 +15,8 @@ _CACHE_FILE = pathlib.Path(__file__).parent.parent / "prescan_cache.json"
 _store_lock = threading.Lock()
 prescanned_providers: list[dict] = []
 _npi_index: dict[str, dict] = {}
+_last_loaded_at: float | None = None
+_last_loaded_filename: str | None = None
 prescan_status: dict = {"phase": 0, "message": "Idle — use the Scan button to begin", "started_at": None}
 scan_progress: dict = {
     "offset": 0,
@@ -42,7 +44,7 @@ def save_to_disk() -> None:
 
 def load_from_disk(filename: str = "prescan_cache.json") -> bool:
     from core.config import settings
-    global prescanned_providers, scan_progress, _npi_index
+    global prescanned_providers, scan_progress, _npi_index, _last_loaded_at, _last_loaded_filename
     try:
         cache_file = pathlib.Path(__file__).parent.parent / filename
         if not cache_file.exists():
@@ -60,6 +62,8 @@ def load_from_disk(filename: str = "prescan_cache.json") -> bool:
         with _store_lock:
             prescanned_providers = loaded_providers
             _npi_index = loaded_index
+            _last_loaded_at = time.time()
+            _last_loaded_filename = filename
         scan_progress.update({
             "offset": saved_prog.get("offset", 0),
             "total_provider_count": saved_prog.get("total_provider_count"),
@@ -160,6 +164,31 @@ def set_prescan_status(phase: int, message: str) -> None:
         "phase": phase,
         "message": message,
         "started_at": started_at,
+    }
+
+
+def get_cache_status() -> dict:
+    """Snapshot of slim/full prescan cache state for diagnostics."""
+    slim_path = pathlib.Path(__file__).parent.parent / "prescan_slim.json"
+    full_path = pathlib.Path(__file__).parent.parent / "prescan_cache.json"
+
+    def _file_info(p: pathlib.Path) -> dict:
+        if not p.exists():
+            return {"exists": False, "size_mb": 0.0, "mtime": None}
+        st = p.stat()
+        return {"exists": True, "size_mb": round(st.st_size / (1024 * 1024), 2), "mtime": st.st_mtime}
+
+    with _store_lock:
+        provider_count = len(prescanned_providers)
+        loaded_at = _last_loaded_at
+        loaded_from = _last_loaded_filename
+    return {
+        "loaded_providers": provider_count,
+        "loaded_at": loaded_at,
+        "loaded_from": loaded_from,
+        "slim_file": _file_info(slim_path),
+        "full_file": _file_info(full_path),
+        "cloud_run": bool(__import__("os").environ.get("K_SERVICE")),
     }
 
 
