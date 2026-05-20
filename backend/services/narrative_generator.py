@@ -338,8 +338,13 @@ def _build_billing_section(provider: dict) -> dict:
     total_paid = provider.get("total_paid", 0)
     total_claims = provider.get("total_claims", 0)
     total_bene = provider.get("total_beneficiaries", 0)
-    rpb = provider.get("revenue_per_beneficiary", 0)
-    cpb = provider.get("claims_per_beneficiary", 0)
+    # Prefer pre-computed values but compute inline if missing/zero
+    rpb = provider.get("revenue_per_beneficiary") or (
+        total_paid / total_bene if total_bene > 0 else 0
+    )
+    cpb = provider.get("claims_per_beneficiary") or (
+        total_claims / total_bene if total_bene > 0 else 0
+    )
     first = provider.get("first_month", "unknown")
     last = provider.get("last_month", "unknown")
     active = provider.get("active_months", 0)

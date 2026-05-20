@@ -68,8 +68,8 @@ async def generate_referral_packet(npi: str):
     tc = cached.get("total_claims") or 0
     tb = cached.get("total_beneficiaries") or 0
     am = cached.get("active_months") or 0
-    rpb = cached.get("revenue_per_beneficiary") or 0
-    cpb = cached.get("claims_per_beneficiary") or 0
+    rpb = cached.get("revenue_per_beneficiary") or (tp / tb if tb > 0 else 0)
+    cpb = cached.get("claims_per_beneficiary") or (tc / tb if tb > 0 else 0)
     fm = _esc(cached.get("first_month") or "—")
     lm = _esc(cached.get("last_month") or "—")
     avg_per_claim = tp / tc if tc else 0
