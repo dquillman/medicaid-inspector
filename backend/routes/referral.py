@@ -42,6 +42,24 @@ async def generate_referral_packet(npi: str):
     if not cached:
         raise HTTPException(404, f"Provider {npi} not found in scan cache — run a scan first")
 
+    # ── Enrich billing data from DuckDB if slim cache has gaps ───────────────
+    tp = cached.get("total_paid") or 0
+    tc = cached.get("total_claims") or 0
+    tb = cached.get("total_beneficiaries") or 0
+    if tp == 0 or tb == 0 or tc == 0:
+        try:
+            from data.duckdb_client import query_async as _ddb_query, provider_aggregate_sql as _ddb_agg
+            rows = await _ddb_query(_ddb_agg(
+                where=f"BILLING_PROVIDER_NPI_NUM = '{npi}'", limit=1,
+            ))
+            if rows:
+                agg = rows[0]
+                tp = agg.get("total_paid") or tp
+                tc = agg.get("total_claims") or tc
+                tb = agg.get("total_beneficiaries") or tb
+        except Exception:
+            logger.debug("DuckDB enrichment failed for referral NPI %s", npi, exc_info=True)
+
     # ── NPPES data ───────────────────────────────────────────────────────────
     nppes = cached.get("nppes") or {}
     if not nppes:
@@ -58,15 +76,12 @@ async def generate_referral_packet(npi: str):
 
     # ── Risk & signals ───────────────────────────────────────────────────────
     risk_score = cached.get("risk_score") or 0
-    signals = cached.get("signal_results") or []
+    signals = cached.get("signal_results") or cached.get("flags") or []
     flagged = [s for s in signals if s.get("flagged")]
 
     risk_label, risk_color = classify_risk(risk_score)
 
     # ── Billing stats ────────────────────────────────────────────────────────
-    tp = cached.get("total_paid") or 0
-    tc = cached.get("total_claims") or 0
-    tb = cached.get("total_beneficiaries") or 0
     am = cached.get("active_months") or 0
     rpb = cached.get("revenue_per_beneficiary") or (tp / tb if tb > 0 else 0)
     cpb = cached.get("claims_per_beneficiary") or (tc / tb if tb > 0 else 0)

@@ -335,6 +335,7 @@ def _build_subject_section(provider: dict) -> dict:
 
 def _build_billing_section(provider: dict) -> dict:
     """Section (b): Billing Summary."""
+    import logging as _log
     total_paid = provider.get("total_paid", 0)
     total_claims = provider.get("total_claims", 0)
     total_bene = provider.get("total_beneficiaries", 0)
@@ -344,6 +345,13 @@ def _build_billing_section(provider: dict) -> dict:
     )
     cpb = provider.get("claims_per_beneficiary") or (
         total_claims / total_bene if total_bene > 0 else 0
+    )
+    _log.getLogger(__name__).info(
+        "[narrative] npi=%s tp=%.2f tc=%d tb=%d rpb=%.2f cpb=%.2f has_rpb=%s has_sig=%s flags=%d",
+        provider.get("npi"), total_paid, total_claims, total_bene, rpb, cpb,
+        "revenue_per_beneficiary" in provider,
+        "signal_results" in provider,
+        len(provider.get("flags") or []),
     )
     first = provider.get("first_month", "unknown")
     last = provider.get("last_month", "unknown")
@@ -758,9 +766,16 @@ _narrative_cache: dict[str, dict] = {}
 _CACHE_TTL = 300  # 5 minutes
 
 
-def generate_narrative(npi: str) -> dict:
+def generate_narrative(npi: str, *, provider_override: dict | None = None) -> dict:
     """
     Generate a complete investigation narrative for a provider.
+
+    Args:
+        npi: The provider's National Provider Identifier.
+        provider_override: If provided, use this dict instead of looking up
+            the prescan cache.  The narrative route passes an enriched dict
+            (slim-cache merged with live DuckDB aggregates) so the narrative
+            always has complete billing data even on Cloud Run.
 
     Returns:
         {
@@ -772,18 +787,20 @@ def generate_narrative(npi: str) -> dict:
 
     Raises ValueError if NPI is not found in the prescan cache.
     """
-    # Check cache
+    # Check cache (skip if caller provided a fresh provider dict)
     now = time.time()
-    cached = _narrative_cache.get(npi)
-    if cached and (now - cached["generated_at_ts"]) < _CACHE_TTL:
-        return cached["result"]
+    if not provider_override:
+        cached = _narrative_cache.get(npi)
+        if cached and (now - cached["generated_at_ts"]) < _CACHE_TTL:
+            return cached["result"]
 
-    # Find provider in prescan cache
-    provider = None
-    for p in get_prescanned():
-        if p["npi"] == npi:
-            provider = p
-            break
+    # Use override or find provider in prescan cache
+    provider = provider_override
+    if not provider:
+        for p in get_prescanned():
+            if p["npi"] == npi:
+                provider = p
+                break
 
     if not provider:
         raise ValueError(f"Provider {npi} not found in scan data")

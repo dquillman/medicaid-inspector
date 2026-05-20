@@ -2202,15 +2202,113 @@ async def provider_narrative(npi: str, enhance: str = "auto"):
     """
     Generate an investigation-ready case narrative for this provider.
 
+    On Cloud Run the slim prescan cache omits computed fields like
+    revenue_per_beneficiary, claims_per_beneficiary, and signal_results.
+    This route enriches the provider dict from DuckDB before passing it
+    to the narrative generator, so narratives always show real numbers.
+
     Query params:
       enhance=auto    use LLM enrichment if NARRATIVE_LLM_ENABLED + BAA ack are set (default)
       enhance=off     force the deterministic template (useful for diffing / audits)
     """
     npi = _validate_npi(npi)
+
+    # ── Build a complete provider dict (slim cache + DuckDB fallback) ──
+    cached = get_provider_by_npi(npi)
+    enriched: dict | None = None
+
+    if cached:
+        enriched = dict(cached)  # shallow copy — don't mutate the cache
+
+        # Slim cache strips revenue_per_beneficiary, claims_per_beneficiary,
+        # and signal_results.  total_beneficiaries may also be 0 due to CMS
+        # suppression.  Query DuckDB to fill in anything the slim cache lacks.
+        tp = enriched.get("total_paid") or 0
+        tb = enriched.get("total_beneficiaries") or 0
+        tc = enriched.get("total_claims") or 0
+
+        needs_ddb = (
+            tp == 0 or tb == 0 or tc == 0
+            or not enriched.get("revenue_per_beneficiary")
+            or not enriched.get("claims_per_beneficiary")
+        )
+        if needs_ddb:
+            try:
+                agg_sql = provider_aggregate_sql(
+                    where=f"BILLING_PROVIDER_NPI_NUM = '{npi}'",
+                    limit=1,
+                )
+                rows = await query_async(agg_sql)
+                if rows:
+                    agg = rows[0]
+                    # Merge DuckDB values — prefer non-zero DuckDB over stale cache
+                    for key in (
+                        "total_paid", "total_claims", "total_beneficiaries",
+                        "distinct_hcpcs", "active_months", "first_month",
+                        "last_month", "revenue_per_beneficiary",
+                        "claims_per_beneficiary",
+                    ):
+                        ddb_val = agg.get(key)
+                        if ddb_val and (not enriched.get(key)):
+                            enriched[key] = ddb_val
+                    # Recompute rpb/cpb if still missing
+                    tb2 = enriched.get("total_beneficiaries") or 0
+                    tp2 = enriched.get("total_paid") or 0
+                    tc2 = enriched.get("total_claims") or 0
+                    if not enriched.get("revenue_per_beneficiary") and tb2 > 0:
+                        enriched["revenue_per_beneficiary"] = tp2 / tb2
+                    if not enriched.get("claims_per_beneficiary") and tb2 > 0:
+                        enriched["claims_per_beneficiary"] = tc2 / tb2
+            except Exception as _ddb_err:
+                import logging as _logging
+                _logging.getLogger(__name__).warning(
+                    "[narrative] DuckDB enrichment failed for NPI %s: %s", npi, _ddb_err,
+                    exc_info=True,
+                )
+
+        # Ensure signal_results exists (slim cache only has "flags")
+        if not enriched.get("signal_results"):
+            enriched["signal_results"] = enriched.get("flags") or []
+
+    else:
+        # Provider not in cache at all — build entirely from DuckDB
+        try:
+            import asyncio as _asyncio
+            from services.nppes import get_provider
+            from services.risk_scorer import score_provider
+
+            nppes_task = get_provider(npi)
+            agg_sql = provider_aggregate_sql(
+                where=f"BILLING_PROVIDER_NPI_NUM = '{npi}'",
+                limit=1,
+            )
+            agg_task = query_async(agg_sql)
+            nppes_data, agg_rows = await _asyncio.gather(nppes_task, agg_task)
+
+            if not agg_rows:
+                raise HTTPException(404, f"NPI {npi} not found in Medicaid dataset")
+
+            agg = agg_rows[0]
+            risk_data = await score_provider(npi, agg)
+            enriched = {
+                "npi": npi,
+                "nppes": nppes_data,
+                **agg,
+                **risk_data,
+            }
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(404, f"Provider {npi} not found")
+
     from services.narrative_llm import generate_narrative_enhanced
     force_template = enhance.lower() in ("off", "false", "0", "template")
     try:
-        return generate_narrative_enhanced(npi, force_template=force_template)
+        return generate_narrative_enhanced(
+            npi,
+            force_template=force_template,
+            provider_override=enriched,
+        )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
 

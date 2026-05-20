@@ -132,7 +132,11 @@ def _call_claude(sections: list[dict], npi: str) -> str:
     return "\n".join(text_parts).strip()
 
 
-def generate_narrative_enhanced(npi: str, force_template: bool = False) -> dict:
+def generate_narrative_enhanced(
+    npi: str,
+    force_template: bool = False,
+    provider_override: dict | None = None,
+) -> dict:
     """
     Generate a narrative, optionally enriched by Claude.
 
@@ -140,8 +144,14 @@ def generate_narrative_enhanced(npi: str, force_template: bool = False) -> dict:
     `source` field ("template" or "llm") so the caller can tell what
     happened. The deterministic `sections` list is always present and
     unchanged.
+
+    Args:
+        provider_override: Pre-enriched provider dict (slim cache merged
+            with live DuckDB aggregates).  Passed through to the template
+            generator so narratives are accurate even on Cloud Run where
+            the slim cache lacks computed fields.
     """
-    base = _generate_template(npi)
+    base = _generate_template(npi, provider_override=provider_override)
     base = {**base, "source": "template"}
 
     if force_template:
