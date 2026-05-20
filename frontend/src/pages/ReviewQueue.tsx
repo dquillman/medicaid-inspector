@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import type { ReviewItem, ReviewCounts, AuditEntry } from '../lib/types'
 import { fmt } from '../lib/format'
 import EmptyState from '../components/EmptyState'
+import QuickTriagePanel from '../components/QuickTriagePanel'
 
 type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
 
@@ -204,9 +205,11 @@ function ReviewRow({
   item,
   selected,
   expanded,
+  triageOpen,
   rowIndex,
   onToggleSelect,
   onToggleExpand,
+  onToggleTriage,
   onStatusChange,
   onNotesSave,
   onAssignedToSave,
@@ -214,9 +217,11 @@ function ReviewRow({
   item: ReviewItem
   selected: boolean
   expanded: boolean
+  triageOpen: boolean
   rowIndex: number
   onToggleSelect: (npi: string) => void
   onToggleExpand: (npi: string) => void
+  onToggleTriage: (npi: string) => void
   onStatusChange: (npi: string, status: string) => void
   onNotesSave: (npi: string, notes: string) => void
   onAssignedToSave: (npi: string, assignedTo: string) => void
@@ -271,19 +276,35 @@ function ReviewRow({
           {formatTimestamp(item.updated_at)}
         </td>
         <td className="px-4 py-3">
-          <button
-            onClick={() => onToggleExpand(item.npi)}
-            title="View audit history"
-            className={`px-2 py-1 text-xs rounded transition-colors ${
-              expanded
-                ? 'bg-blue-600 text-white'
-                : 'bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200'
-            }`}
-          >
-            {expanded ? 'Hide' : 'History'}
-          </button>
+          <div className="flex gap-1">
+            <button
+              onClick={() => onToggleTriage(item.npi)}
+              title="Quick triage memo"
+              className={`px-2 py-1 text-xs rounded transition-colors ${
+                triageOpen
+                  ? 'bg-green-600 text-white'
+                  : 'bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              {triageOpen ? 'Close' : 'Triage'}
+            </button>
+            <button
+              onClick={() => onToggleExpand(item.npi)}
+              title="View audit history"
+              className={`px-2 py-1 text-xs rounded transition-colors ${
+                expanded
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-gray-800 hover:bg-gray-700 text-gray-400 hover:text-gray-200'
+              }`}
+            >
+              {expanded ? 'Hide' : 'History'}
+            </button>
+          </div>
         </td>
       </tr>
+      {triageOpen && (
+        <QuickTriagePanel item={item} onClose={() => onToggleTriage(item.npi)} />
+      )}
       {expanded && (
         <tr className="bg-gray-900/50">
           <td colSpan={12} className="p-0">
@@ -408,6 +429,7 @@ export default function ReviewQueue() {
   useEffect(() => { setSelectedNpis(new Set()) }, [statusFilter, page])
 
   const [expandedNpis, setExpandedNpis] = useState<Set<string>>(new Set())
+  const [triageNpis, setTriageNpis] = useState<Set<string>>(new Set())
 
   const updateMutation = useMutation({
     mutationFn: ({ npi, update }: { npi: string; update: { status?: string; notes?: string; assigned_to?: string | null } }) =>
@@ -441,6 +463,14 @@ export default function ReviewQueue() {
 
   const handleToggleExpand = (npi: string) => {
     setExpandedNpis(prev => {
+      const next = new Set(prev)
+      next.has(npi) ? next.delete(npi) : next.add(npi)
+      return next
+    })
+  }
+
+  const handleToggleTriage = (npi: string) => {
+    setTriageNpis(prev => {
       const next = new Set(prev)
       next.has(npi) ? next.delete(npi) : next.add(npi)
       return next
@@ -688,7 +718,7 @@ export default function ReviewQueue() {
                 <th className="px-4 py-3">Assigned To</th>
                 <th className="px-4 py-3">Notes</th>
                 <SortHeader label="Last Updated" field="updated_at" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
-                <th className="px-4 py-3">Audit</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -699,8 +729,10 @@ export default function ReviewQueue() {
                   rowIndex={idx}
                   selected={selectedNpis.has(item.npi)}
                   expanded={expandedNpis.has(item.npi)}
+                  triageOpen={triageNpis.has(item.npi)}
                   onToggleSelect={handleToggleSelect}
                   onToggleExpand={handleToggleExpand}
+                  onToggleTriage={handleToggleTriage}
                   onStatusChange={handleStatusChange}
                   onNotesSave={handleNotesSave}
                   onAssignedToSave={handleAssignedToSave}

@@ -33,6 +33,9 @@ import UserManagement from './pages/UserManagement'
 import Landing from './pages/Landing'
 import Breadcrumbs from './components/Breadcrumbs'
 import BillingCodeSearch from './pages/BillingCodeSearch'
+import InvestigatePage from './pages/InvestigatePage'
+import OwnershipTracePage from './pages/OwnershipTracePage'
+import MFCUReferralPage from './pages/MFCUReferralPage'
 import Login from './pages/Login'
 import NotificationBell from './components/NotificationBell'
 import CommandPalette from './components/CommandPalette'
@@ -172,6 +175,9 @@ function AnimatedRoutes() {
           <Route path="/"                  element={<Overview />} />
           <Route path="/providers"         element={<ProviderExplorer />} />
           <Route path="/providers/:npi"    element={<ProviderDetail />} />
+          <Route path="/providers/:npi/investigate" element={<InvestigatePage />} />
+          <Route path="/providers/:npi/ownership" element={<OwnershipTracePage />} />
+          <Route path="/providers/:npi/referral" element={<MFCUReferralPage />} />
           <Route path="/anomalies"         element={<AnomalyDashboard />} />
           <Route path="/network"           element={<NetworkGraph />} />
           <Route path="/review"            element={<ReviewQueue />} />

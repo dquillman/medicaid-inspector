@@ -430,6 +430,30 @@ export default function ProviderDetail() {
               <RiskScoreModal />
             </div>
           </div>
+          {/* ── Investigator Action Buttons ─────────────────────── */}
+          <div className="flex gap-2">
+            <Link
+              to={`/providers/${npi}/investigate`}
+              className="px-4 py-2 bg-blue-700 hover:bg-blue-600 border border-blue-500 hover:border-blue-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-blue-900/30"
+              title="Generate a full investigation narrative with signals, statutes, and recommendations"
+            >
+              <span>&#128269;</span> Investigate
+            </Link>
+            <Link
+              to={`/providers/${npi}/ownership`}
+              className="px-4 py-2 bg-purple-700 hover:bg-purple-600 border border-purple-500 hover:border-purple-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-purple-900/30"
+              title="Trace ownership network, shared addresses, and co-located providers"
+            >
+              <span>&#128279;</span> Trace Ownership
+            </Link>
+            <Link
+              to={`/providers/${npi}/referral`}
+              className="px-4 py-2 bg-red-700 hover:bg-red-600 border border-red-500 hover:border-red-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-red-900/30"
+              title="Refer this provider to the Medicaid Fraud Control Unit"
+            >
+              <span>&#9888;</span> Refer to MFCU
+            </Link>
+          </div>
           <button
             onClick={async () => {
               setExportStatus('loading'); setExportError('')
@@ -437,7 +461,7 @@ export default function ProviderDetail() {
               catch (e) { setExportStatus('error'); setExportError(e instanceof Error ? e.message : 'Failed') }
             }}
             disabled={exportStatus === 'loading'}
-            className="px-4 py-2 bg-red-700 hover:bg-red-600 border border-red-500 hover:border-red-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-red-900/30 disabled:opacity-50"
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2 disabled:opacity-50"
             title="Generate a comprehensive HTML referral packet for this provider"
           >
             <span>&#128196;</span> {exportStatus === 'loading' ? 'Generating...' : 'Generate Referral Packet'}
@@ -1121,6 +1145,7 @@ export default function ProviderDetail() {
           View Network →
         </Link>
       </div>
+
     </div>
   )
 }
