@@ -96,11 +96,13 @@ export default function InvestigatePage() {
       {/* Content */}
       {narrative && !isLoading && (
         <div className="space-y-5">
-          {/* Summary card */}
-          <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-5">
-            <h2 className="text-gray-200 font-semibold text-sm mb-3">Summary</h2>
-            <p className="text-gray-300 text-sm leading-relaxed whitespace-pre-line">
-              {narrative.narrative}
+          {/* Classification header */}
+          <div className="bg-gray-800/60 border border-gray-700 rounded-xl px-5 py-3 text-center">
+            <p className="text-gray-400 text-xs uppercase tracking-widest font-bold">
+              Medicaid Program Integrity &mdash; Investigation Narrative
+            </p>
+            <p className="text-gray-500 text-[10px] mt-1">
+              Classification: FOR OFFICIAL USE ONLY &middot; NPI {npi}
             </p>
           </div>
 
@@ -111,7 +113,10 @@ export default function InvestigatePage() {
                 key={i}
                 className="bg-gray-800/50 border border-gray-700 rounded-xl p-5"
               >
-                <h2 className="text-gray-200 font-semibold mb-3">{section.title}</h2>
+                <h2 className="text-gray-200 font-semibold mb-3">
+                  <span className="text-gray-500 mr-2">{i + 1}.</span>
+                  {section.title}
+                </h2>
                 <p className="text-gray-400 text-sm leading-relaxed whitespace-pre-line">
                   {section.content}
                 </p>

@@ -386,7 +386,7 @@ def _build_risk_section(provider: dict) -> dict:
     score = provider.get("risk_score", 0)
     tier = _risk_tier(score)
     tier_desc = _risk_tier_description(score)
-    signals = provider.get("signal_results") or []
+    signals = provider.get("signal_results") or provider.get("flags") or []
     flags = [s for s in signals if s.get("flagged")]
     total_signals = len(signals)
 
@@ -411,7 +411,7 @@ def _build_risk_section(provider: dict) -> dict:
 
 def _build_signal_findings_section(provider: dict) -> dict:
     """Section (d): Detailed signal findings for each flagged signal."""
-    signals = provider.get("signal_results") or []
+    signals = provider.get("signal_results") or provider.get("flags") or []
     flags = [s for s in signals if s.get("flagged")]
 
     if not flags:
@@ -448,7 +448,7 @@ def _build_signal_findings_section(provider: dict) -> dict:
 
 def _build_patterns_section(provider: dict) -> dict:
     """Section (e): Cross-signal pattern synthesis."""
-    signals = provider.get("signal_results") or []
+    signals = provider.get("signal_results") or provider.get("flags") or []
     flags = [s for s in signals if s.get("flagged")]
     flag_names = {s["signal"] for s in flags}
 
@@ -582,7 +582,7 @@ def _build_patterns_section(provider: dict) -> dict:
 def _build_actions_section(provider: dict) -> dict:
     """Section (f): Recommended actions based on risk tier and flags."""
     score = provider.get("risk_score", 0)
-    signals = provider.get("signal_results") or []
+    signals = provider.get("signal_results") or provider.get("flags") or []
     flags = [s for s in signals if s.get("flagged")]
     flag_names = {s["signal"] for s in flags}
 
@@ -674,7 +674,7 @@ def _build_actions_section(provider: dict) -> dict:
 
 def _build_citations_section(provider: dict) -> dict:
     """Section (g): Consolidated regulatory citations."""
-    signals = provider.get("signal_results") or []
+    signals = provider.get("signal_results") or provider.get("flags") or []
     flags = [s for s in signals if s.get("flagged")]
 
     # Always include general citations
