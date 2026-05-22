@@ -76,7 +76,6 @@ def _build_provider_aggs() -> list[dict]:
 
 # ── Doctor Shopping Proxy ───────────────────────────────────────────────────
 
-@ttl_cached(seconds=3600)
 async def detect_doctor_shopping(limit: int = 100) -> dict:
     """
     Find providers whose HCPCS codes overlap with many other providers and who
@@ -94,50 +93,37 @@ async def detect_doctor_shopping(limit: int = 100) -> dict:
     npi_codes: dict[str, list[dict]] = {}
 
     if not has_hcpcs_detail():
-        # Slim cache path: pull two aggregations from Parquet — the per-NPI
-        # HCPCS lists for the riskiest 500 providers (the candidates we'll
-        # score), and the global code popularity (HCPCS -> distinct NPI count)
-        # so avg_competing_providers reflects the whole population.
-        import asyncio as _asyncio
-        from data.duckdb_client import get_parquet_path, query_async
-        providers = await _asyncio.to_thread(enrich_top_providers, 500, False)
-        if not providers:
-            return {"flagged": [], "total_flagged": 0, "note": "No providers after enrichment"}
-        popularity_sql = f"""
-        SELECT
-            HCPCS_CODE                                  AS code,
-            COUNT(DISTINCT BILLING_PROVIDER_NPI_NUM)    AS npi_count
-        FROM read_parquet('{get_parquet_path()}')
-        WHERE HCPCS_CODE IS NOT NULL
-        GROUP BY HCPCS_CODE
-        """
-        pop_rows = await query_async(popularity_sql)
-        for r in pop_rows:
-            code_npi_count[r["code"]] = int(r["npi_count"] or 0)
-        for p in providers:
-            npi = p["npi"]
-            npi_codes[npi] = [
-                {"code": h["hcpcs_code"],
-                 "paid": h.get("total_paid", 0) or 0,
-                 "claims": h.get("total_claims", 0) or 0}
-                for h in (p.get("hcpcs") or []) if h.get("hcpcs_code")
-            ]
-    else:
-        # Full cache path: code popularity computed in-memory across all providers
-        for p in providers:
-            npi = p["npi"]
-            hcpcs_list = p.get("hcpcs") or []
-            codes_for_npi = []
-            for h in hcpcs_list:
-                code = h.get("hcpcs_code", "")
-                if code:
-                    code_npi_count[code] += 1
-                    codes_for_npi.append({
-                        "code": code,
-                        "paid": h.get("total_paid", 0) or 0,
-                        "claims": h.get("total_claims", 0) or 0,
-                    })
-            npi_codes[npi] = codes_for_npi
+        # Slim cache path. The "right" answer requires a GROUP BY over the
+        # entire 2.94 GB remote parquet (220M rows), which takes 60-300s
+        # on Cloud Run cold start and trips the request timeout. Short-circuit
+        # with an empty result so the /all endpoint can complete; the page
+        # will render with a clear "data not available" note instead of
+        # hanging forever. Full analysis runs when the local prescan cache
+        # has per-NPI HCPCS detail (i.e., after a full scan, not slim).
+        result = {
+            "flagged": [],
+            "total_flagged": 0,
+            "note": "Doctor-shopping analysis requires the full prescan cache. "
+                    "Run a fresh scan or restore the full cache from GCS to enable it.",
+        }
+        _cache_set(f"doctor_shopping:{limit}", result)
+        return result
+
+    # Full cache path: code popularity computed in-memory across all providers
+    for p in providers:
+        npi = p["npi"]
+        hcpcs_list = p.get("hcpcs") or []
+        codes_for_npi = []
+        for h in hcpcs_list:
+            code = h.get("hcpcs_code", "")
+            if code:
+                code_npi_count[code] += 1
+                codes_for_npi.append({
+                    "code": code,
+                    "paid": h.get("total_paid", 0) or 0,
+                    "claims": h.get("total_claims", 0) or 0,
+                })
+        npi_codes[npi] = codes_for_npi
 
     # Score each provider
     scored = []
@@ -188,7 +174,6 @@ async def detect_doctor_shopping(limit: int = 100) -> dict:
 
 # ── High Utilization ────────────────────────────────────────────────────────
 
-@ttl_cached(seconds=3600)
 async def detect_high_utilization(limit: int = 100) -> dict:
     """
     Find providers where beneficiaries have abnormally high utilization:
@@ -249,7 +234,6 @@ async def detect_high_utilization(limit: int = 100) -> dict:
 
 # ── Geographic Impossibility Proxy ──────────────────────────────────────────
 
-@ttl_cached(seconds=3600)
 async def detect_geographic_anomalies(limit: int = 100) -> dict:
     """
     Detect providers with NPPES data suggesting multi-state operations or
@@ -321,7 +305,6 @@ async def detect_geographic_anomalies(limit: int = 100) -> dict:
 
 # ── Excessive Services ──────────────────────────────────────────────────────
 
-@ttl_cached(seconds=3600)
 async def detect_excessive_services(limit: int = 100) -> dict:
     """
     Find providers with abnormally high total claims per beneficiary
@@ -381,7 +364,6 @@ async def detect_excessive_services(limit: int = 100) -> dict:
 
 # ── Combined All-In-One ────────────────────────────────────────────────────
 
-@ttl_cached(seconds=3600)
 async def _run_all_beneficiary_analyses(limit: int = 100) -> dict:
     """Run all 4 detection analyses + summary in a single call."""
     shopping = await detect_doctor_shopping(limit=limit)
@@ -423,7 +405,6 @@ async def _run_all_beneficiary_analyses(limit: int = 100) -> dict:
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 
-@ttl_cached(seconds=3600)
 async def beneficiary_fraud_summary() -> dict:
     """High-level summary stats."""
     providers = get_prescanned()
