@@ -12,6 +12,8 @@ const US_STATES = [
 
 function DataSourceCard() {
   const queryClient = useQueryClient()
+  const [checking, setChecking] = useState(false)
+  const [remoteInfo, setRemoteInfo] = useState<Awaited<ReturnType<typeof api.dataRemoteInfo>> | null>(null)
 
   const { data: ds, isLoading } = useQuery({
     queryKey: ['data-status'],
@@ -25,19 +27,92 @@ function DataSourceCard() {
     queryClient.invalidateQueries({ queryKey: ['data-status'] })
   }
 
+  const handleCheckUpdate = async () => {
+    setChecking(true)
+    try {
+      const info = await api.dataRemoteInfo()
+      setRemoteInfo(info)
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const handleUpdateNow = async () => {
+    if (!confirm('Re-download the dataset? The old file stays in place until the new one finishes, then it is atomically replaced.')) return
+    await api.startDownload(true)
+    setRemoteInfo(null)
+    queryClient.invalidateQueries({ queryKey: ['data-status'] })
+  }
+
   if (isLoading || !ds) return null
 
   const dl = ds.download
 
   if (ds.is_local) {
-    return (
-      <div className="card border-green-800 bg-green-950/20 flex items-center justify-between py-3">
-        <div className="flex items-center gap-2 text-sm">
-          <span className="text-green-400 font-bold">●</span>
-          <span className="text-green-300 font-semibold">Local dataset active</span>
-          <span className="text-gray-500">— {ds.file_size_gb} GB on disk · queries run in milliseconds</span>
+    const localDate = ds.local_mtime ? new Date(ds.local_mtime * 1000).toLocaleDateString() : null
+    const remoteDate = remoteInfo?.remote_mtime ? new Date(remoteInfo.remote_mtime * 1000).toLocaleDateString() : null
+
+    if (dl.active) {
+      const gb_done = (dl.bytes_done / 1_073_741_824).toFixed(2)
+      const gb_total = (dl.bytes_total / 1_073_741_824).toFixed(2)
+      return (
+        <div className="card border-blue-800 bg-blue-950/20 space-y-2 py-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm">
+              <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+              <span className="text-blue-300 font-semibold">Updating dataset…</span>
+              <span className="text-gray-400 font-mono text-xs">{gb_done} / {gb_total} GB</span>
+            </div>
+            <span className="text-blue-400 font-mono text-sm">{dl.pct}%</span>
+          </div>
+          <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${dl.pct}%` }} />
+          </div>
+          <p className="text-xs text-gray-500">The current file stays active until the download completes, then it's atomically replaced.</p>
         </div>
-        <span className="text-xs text-gray-600 font-mono truncate max-w-xs">{ds.local_path}</span>
+      )
+    }
+
+    return (
+      <div className="card border-green-800 bg-green-950/20 space-y-2 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-green-400 font-bold">●</span>
+            <span className="text-green-300 font-semibold">Local dataset active</span>
+            <span className="text-gray-500">— {ds.file_size_gb} GB · {localDate ? `dated ${localDate}` : 'queries run in ms'}</span>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              onClick={handleCheckUpdate}
+              disabled={checking}
+              className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-200 rounded transition-colors"
+            >
+              {checking ? 'Checking…' : 'Check for update'}
+            </button>
+            {remoteInfo?.update_available && (
+              <button
+                onClick={handleUpdateNow}
+                className="px-3 py-1 text-xs bg-blue-600 hover:bg-blue-500 text-white font-semibold rounded transition-colors"
+              >
+                Update now
+              </button>
+            )}
+          </div>
+        </div>
+        {remoteInfo && !remoteInfo.error && (
+          <div className="ml-5 text-xs">
+            {remoteInfo.update_available ? (
+              <span className="text-blue-300">
+                ⬆ Newer dataset available{remoteDate ? ` (remote dated ${remoteDate})` : ''} — click "Update now" to refresh
+              </span>
+            ) : (
+              <span className="text-gray-500">✓ Up to date{remoteDate ? ` — remote also dated ${remoteDate}` : ''}</span>
+            )}
+          </div>
+        )}
+        {remoteInfo?.error && (
+          <div className="ml-5 text-xs text-red-400">Could not check remote: {remoteInfo.error}</div>
+        )}
       </div>
     )
   }
@@ -108,6 +183,108 @@ function DataSourceCard() {
 }
 
 
+function MupCacheCard() {
+  const queryClient = useQueryClient()
+  const { data: mup, isLoading } = useQuery({
+    queryKey: ['mup-status'],
+    queryFn: api.mupStatus,
+    refetchInterval: (q) => q.state.data?.download?.active ? 2000 : 60000,
+  })
+
+  const handleRefresh = async () => {
+    if (!confirm('Download CMS MUP-by-Provider via parallel API pagination (~3 GB JSON → ~180 MB parquet, ~2-3 min)? Enables the diagnosis-procedure mismatch signal during batch scans.')) return
+    await api.mupRefresh()
+    queryClient.invalidateQueries({ queryKey: ['mup-status'] })
+  }
+
+  if (isLoading || !mup) return null
+
+  const dl = mup.download
+  const phase = dl.phase
+
+  if (dl.active) {
+    const rowsDone = dl.rows_done ?? 0
+    const rowsTotal = dl.rows_total ?? 1_260_000
+    const mb_done = (dl.bytes_done / 1_048_576).toFixed(0)
+    const pct = rowsTotal ? Math.min(Math.round((rowsDone / rowsTotal) * 100), 100) : 0
+    return (
+      <div className="card border-blue-800 bg-blue-950/20 space-y-2 py-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
+            <span className="text-blue-300 font-semibold">
+              {phase === 'converting' ? 'Converting JSONL → Parquet…' : 'Downloading MUP-by-Provider…'}
+            </span>
+            {phase !== 'converting' && (
+              <span className="text-gray-400 font-mono text-xs">
+                {rowsDone.toLocaleString()} / {rowsTotal.toLocaleString()} providers · {mb_done} MB
+              </span>
+            )}
+          </div>
+          {phase !== 'converting' && <span className="text-blue-400 font-mono text-sm">{pct}%</span>}
+        </div>
+        {phase !== 'converting' && (
+          <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+            <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+          </div>
+        )}
+        <p className="text-xs text-gray-500">
+          {phase === 'converting'
+            ? 'DuckDB is compressing ~3 GB JSON into a ~180 MB parquet — about 20 seconds.'
+            : '8 parallel API workers — ~25 MB/s, full dataset in 2-3 min.'}
+        </p>
+      </div>
+    )
+  }
+
+  if (mup.is_local) {
+    return (
+      <div className="card border-green-800 bg-green-950/20 space-y-1 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-sm">
+            <span className="text-green-400 font-bold">●</span>
+            <span className="text-green-300 font-semibold">MUP diagnosis cache active</span>
+            <span className="text-gray-500">
+              — {mup.file_size_mb ?? '?'} MB · {mup.row_count?.toLocaleString() ?? '?'} providers
+            </span>
+          </div>
+          <button
+            onClick={handleRefresh}
+            className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 rounded transition-colors"
+          >
+            Refresh
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 ml-5">
+          Powers the diagnosis_procedure_mismatch signal during batch scans.
+        </p>
+      </div>
+    )
+  }
+
+  return (
+    <div className="card border-gray-700 bg-gray-900/40 space-y-1 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm">
+          <span className="text-gray-300 font-semibold">MUP diagnosis cache: not downloaded</span>
+          <p className="text-xs text-gray-500 mt-0.5">
+            Download CMS Medicare diagnosis data to enable the diagnosis-procedure mismatch signal during scans.
+            Without it the signal only fires on the provider detail page (via the live CMS API).
+          </p>
+        </div>
+        <button
+          onClick={handleRefresh}
+          className="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white text-sm font-medium rounded transition-colors shrink-0"
+        >
+          Download
+        </button>
+      </div>
+      {dl.error && <p className="ml-1 text-xs text-red-400">Last error: {dl.error}</p>}
+    </div>
+  )
+}
+
+
 function ScanControl({
   status,
   cachedCount,
@@ -118,6 +295,8 @@ function ScanControl({
   onAutoStop,
   onRescore,
   onSmartScan,
+  rescoring,
+  rescoreResult,
 }: {
   status: PrescanStatus | undefined
   cachedCount: number
@@ -128,6 +307,8 @@ function ScanControl({
   onAutoStop: () => void
   onRescore: () => void
   onSmartScan: (stateFilter: string) => void
+  rescoring: boolean
+  rescoreResult: string | null
 }) {
   const [stateFilter, setStateFilter] = useState('')
   const isScanning = status ? status.phase > 0 : false
@@ -270,10 +451,13 @@ function ScanControl({
         {cachedCount > 0 && !isScanning && !isAutoMode && (
           <button
             onClick={onRescore}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-yellow-400 hover:text-yellow-300 text-sm rounded transition-colors border border-gray-700"
+            disabled={rescoring}
+            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-wait text-yellow-400 hover:text-yellow-300 text-sm rounded transition-colors border border-gray-700"
             title="Re-run fraud signals on all cached providers using updated logic"
           >
-            Re-score All ({cachedCount.toLocaleString()})
+            {rescoring
+              ? <span className="flex items-center gap-2"><span className="w-3 h-3 border-2 border-yellow-400 border-t-transparent rounded-full animate-spin" /> Rescoring {cachedCount.toLocaleString()}…</span>
+              : `Re-score All (${cachedCount.toLocaleString()})`}
           </button>
         )}
         {cachedCount > 0 && !isScanning && !isAutoMode && (
@@ -342,12 +526,28 @@ export default function AdminScan() {
     queryClient.invalidateQueries({ queryKey: ['prescan-status'] })
   }, [queryClient])
 
+  const [rescoring, setRescoring] = useState(false)
+  const [rescoreResult, setRescoreResult] = useState<string | null>(null)
+
   const handleRescore = useCallback(async () => {
-    await api.rescoreAll()
-    queryClient.invalidateQueries({ queryKey: ['summary'] })
-    queryClient.invalidateQueries({ queryKey: ['signal-summary'] })
-    queryClient.invalidateQueries({ queryKey: ['review-counts'] })
-    queryClient.invalidateQueries({ queryKey: ['review-queue'] })
+    if (!confirm('Re-run all 18 fraud signals against every cached provider? This may take several minutes — the request will hang until complete.')) return
+    setRescoring(true)
+    setRescoreResult(null)
+    try {
+      const r = await api.rescoreAll() as any
+      const rescored = r?.rescored ?? 0
+      const flagged = r?.flagged ?? 0
+      const added = r?.new_review_items ?? 0
+      setRescoreResult(`Rescored ${rescored.toLocaleString()} providers — ${flagged.toLocaleString()} flagged, ${added.toLocaleString()} added to review queue`)
+      queryClient.invalidateQueries({ queryKey: ['summary'] })
+      queryClient.invalidateQueries({ queryKey: ['signal-summary'] })
+      queryClient.invalidateQueries({ queryKey: ['review-counts'] })
+      queryClient.invalidateQueries({ queryKey: ['review-queue'] })
+    } catch (e: any) {
+      setRescoreResult(`Rescore failed: ${e?.message ?? String(e)}`)
+    } finally {
+      setRescoring(false)
+    }
   }, [queryClient])
 
   const handleSmartScan = useCallback(async (stateFilter: string) => {
@@ -373,6 +573,7 @@ export default function AdminScan() {
       </div>
 
       <DataSourceCard />
+      <MupCacheCard />
 
       <ScanControl
         status={prescanStatus}
@@ -384,7 +585,21 @@ export default function AdminScan() {
         onAutoStop={handleAutoStop}
         onRescore={handleRescore}
         onSmartScan={handleSmartScan}
+        rescoring={rescoring}
+        rescoreResult={rescoreResult}
       />
+
+      {rescoreResult && (
+        <div className="card border-green-800 bg-green-950/20 py-2 px-3 text-sm text-green-300 flex items-center justify-between">
+          <span>{rescoreResult}</span>
+          <button
+            onClick={() => setRescoreResult(null)}
+            className="text-xs text-gray-500 hover:text-gray-300"
+          >
+            dismiss
+          </button>
+        </div>
+      )}
 
       {/* ML Model Training */}
       <div className="card space-y-3">

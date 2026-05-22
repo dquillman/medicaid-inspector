@@ -57,7 +57,7 @@ def stop_auto_mode() -> None:
 # ── Shared signal scoring helper ─────────────────────────────────────────────
 
 def _import_signals():
-    """Lazy-import all 17 fraud signal detectors."""
+    """Lazy-import all fraud signal detectors."""
     from services.anomaly_detector import (
         billing_concentration,
         revenue_per_bene_outlier,
@@ -78,7 +78,9 @@ def _import_signals():
         dead_npi_billing,
         new_provider_explosion,
         geographic_impossibility,
+        diagnosis_procedure_mismatch,
     )
+    from services.mup_client import lookup_sync as mup_lookup_sync
     return {
         "billing_concentration": billing_concentration,
         "revenue_per_bene_outlier": revenue_per_bene_outlier,
@@ -99,6 +101,8 @@ def _import_signals():
         "dead_npi_billing": dead_npi_billing,
         "new_provider_explosion": new_provider_explosion,
         "geographic_impossibility": geographic_impossibility,
+        "diagnosis_procedure_mismatch": diagnosis_procedure_mismatch,
+        "mup_lookup_sync": mup_lookup_sync,
     }
 
 
@@ -127,8 +131,13 @@ def _score_provider(row: dict, hcpcs: list, timeline: list, npi: str,
     s15 = sig["dead_npi_billing"](row)
     s16 = sig["new_provider_explosion"](row)
     s17 = sig["geographic_impossibility"](row)
+    # New: diagnosis-procedure mismatch via local MUP cache. lookup_sync
+    # returns None when the cache is absent or the NPI has no Medicare data,
+    # and the detector returns score=0 in that case (no false positives).
+    mup_row = sig["mup_lookup_sync"](npi)
+    s18 = sig["diagnosis_procedure_mismatch"](row, hcpcs, mup_row)
 
-    signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17]
+    signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17, s18]
     risk_score = round(min(sum(s["score"] * s["weight"] for s in signals), 100.0), 1)
     flags = [s for s in signals if s["flagged"]]
 
@@ -450,18 +459,80 @@ async def rescore_cached_providers():
     cluster_sizes = sig["compute_address_clusters"]()
     auth_clusters = sig["compute_auth_official_clusters"]()
 
-    rescored = []
-    for p in providers:
-        hcpcs = p.get("hcpcs") or []
-        timeline = p.get("timeline") or []
-        npi = p["npi"]
-        code = p.get("top_hcpcs") or (hcpcs[0].get("hcpcs_code", "") if hcpcs else "")
+    # Pre-load MUP rows for every NPI in one bulk DuckDB scan instead of
+    # 106k per-row lookups. With ~106k providers × per-lookup parquet scan
+    # the rescore exceeded 10 minutes; this drops it to ~30s.
+    #
+    # NPI list is inserted via CSV (read_csv_auto in DuckDB) — executemany
+    # with 106k separate INSERTs takes 20+ minutes because each one is a
+    # separate implicit transaction in DuckDB.
+    mup_by_npi: dict[str, dict] = {}
+    try:
+        from services import mup_cache, mup_client
+        import pathlib as _pl
+        if mup_cache.is_local():
+            import duckdb as _ddb
+            import tempfile as _tf
+            con = _ddb.connect(database=":memory:")
+            target_npis = [p["npi"] for p in providers if p.get("npi")]
 
-        rescored.append(_score_provider(
-            p, hcpcs, timeline, npi, code,
-            peer_stats, cpb_stats_map, spend_mean, spend_std,
-            cluster_sizes, auth_clusters, sig,
-        ))
+            tmp_csv = _pl.Path(_tf.gettempdir()) / "rescore_npis.csv"
+            with open(tmp_csv, "w", encoding="utf-8") as _f:
+                _f.write("npi\n")
+                for n in target_npis:
+                    _f.write(f"{n}\n")
+            tmp_csv_str = str(tmp_csv).replace("\\", "/")
+            con.execute(f"""
+                CREATE TEMP TABLE t AS
+                SELECT npi FROM read_csv_auto('{tmp_csv_str}', header=true)
+            """)
+
+            mup_path = str(mup_cache.get_local_path()).replace("\\", "/")
+            rows = con.execute(f"""
+                SELECT m.*
+                FROM read_parquet('{mup_path}') m
+                INNER JOIN t ON m.Rndrng_NPI = t.npi
+            """).fetchall()
+            cols = [d[0] for d in con.description]
+            npi_idx = cols.index("Rndrng_NPI")
+            for row in rows:
+                mup_by_npi[row[npi_idx]] = dict(zip(cols, row))
+            try:
+                tmp_csv.unlink()
+            except OSError:
+                pass
+            log.info("Rescore: pre-loaded %d MUP rows", len(mup_by_npi))
+
+            # Swap mup_lookup_sync to read from this preloaded dict for the
+            # duration of the rescore — bypasses per-NPI DuckDB queries.
+            _original_lookup = mup_client.lookup_sync
+            mup_client.lookup_sync = lambda npi: mup_by_npi.get(npi)
+            sig["mup_lookup_sync"] = mup_client.lookup_sync
+        else:
+            _original_lookup = None
+    except Exception as e:
+        log.warning("Rescore: MUP pre-load failed, falling back to per-NPI: %s", e)
+        _original_lookup = None
+
+    rescored = []
+    try:
+        for p in providers:
+            hcpcs = p.get("hcpcs") or []
+            timeline = p.get("timeline") or []
+            npi = p["npi"]
+            code = p.get("top_hcpcs") or (hcpcs[0].get("hcpcs_code", "") if hcpcs else "")
+
+            rescored.append(_score_provider(
+                p, hcpcs, timeline, npi, code,
+                peer_stats, cpb_stats_map, spend_mean, spend_std,
+                cluster_sizes, auth_clusters, sig,
+            ))
+    finally:
+        # Restore the original mup_lookup_sync regardless of success/failure.
+        if _original_lookup is not None:
+            from services import mup_client
+            mup_client.lookup_sync = _original_lookup
+            sig["mup_lookup_sync"] = _original_lookup
 
     set_prescanned(rescored)
 
@@ -471,12 +542,10 @@ async def rescore_cached_providers():
 
     flagged = [p for p in rescored if p["risk_score"] > settings.RISK_THRESHOLD]
 
-    # Add flagged providers to review queue
-    from core.review_store import add_to_review
-    added = 0
-    for p in flagged:
-        if add_to_review(p):
-            added += 1
+    # Add flagged providers to review queue. The store API takes a list and
+    # returns the count of new additions (existing NPIs are skipped).
+    from core.review_store import add_to_review_queue
+    added = add_to_review_queue(flagged)
 
     log.info("Rescore complete: %d providers, %d flagged", len(rescored), len(flagged))
 

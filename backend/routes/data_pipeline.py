@@ -70,6 +70,34 @@ async def run_data_quality(sample_limit: int = Query(5000, ge=100, le=50000)):
     return await run_validation(sample_limit=sample_limit)
 
 
+# ── MUP-by-Provider local cache (#18 — diagnosis signal) ────────────────────
+
+@router.get("/mup-status")
+async def mup_status():
+    """Status of the local MUP-by-Provider parquet cache."""
+    from services import mup_cache
+    info = mup_cache.status()
+    if info["is_local"] and info["row_count"] is None:
+        info["row_count"] = mup_cache.row_count()
+    return info
+
+
+@router.post("/mup-refresh")
+async def mup_refresh():
+    """Download CMS MUP-by-Provider CSV → parquet (background task).
+
+    Powers the diagnosis_procedure_mismatch signal during batch scans.
+    Re-running this fetches the latest annual MUP release.
+    """
+    import asyncio
+    from services import mup_cache
+
+    if mup_cache._download_state["active"]:
+        return {"ok": False, "message": "MUP download already in progress"}
+    asyncio.create_task(mup_cache.download_and_convert())
+    return {"ok": True, "message": "MUP download started"}
+
+
 # ── Data Lineage (#11) ───────────────────────────────────────────────────────
 
 @router.get("/lineage")

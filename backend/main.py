@@ -71,6 +71,7 @@ from routes import mfcu_referral
 from routes import backup as backup_routes
 from routes import phi_admin
 from routes import billing_codes
+from routes import diagnoses
 from core.metrics import record_request, get_metrics, get_prometheus_text
 from core.phi_middleware import PHIAccessMiddleware
 from core.phi_logger import load_phi_log_from_disk, log_phi_access, PHI_PATH_PATTERNS
@@ -122,16 +123,45 @@ def _finish_prescan_load():
     log.info(msg)
 
     # Enrich providers missing NPPES data
-    missing_nppes = [
-        p["npi"] for p in get_prescanned()
-        if not p.get("nppes") or not (p.get("nppes") or {}).get("enumeration_date")
-    ]
+    # Filter to providers that genuinely lack any NPPES data. If a provider
+    # already has a name/state/city (e.g., from a previous run that landed in
+    # the slim cache and got carried into the rebuilt full cache), the lack of
+    # `enumeration_date` alone shouldn't trigger 106k re-enrichments — that
+    # froze the API on startup. Re-enrich only when we have no identity at all,
+    # AND only for valid 10-digit NPIs (NPPES will 0-hit on Medicaid provider
+    # IDs like 'A487405600' — wasted HTTP calls that saturate the event loop).
+    import re as _re_npi
+    _NPI_VALID = _re_npi.compile(r"^\d{10}$")
+
+    def _needs_nppes(p: dict) -> bool:
+        npi = p.get("npi") or ""
+        if not _NPI_VALID.match(npi):
+            return False  # not a real NPI — skip
+        nppes = p.get("nppes") or {}
+        if nppes.get("enumeration_date"):
+            return False
+        # If basic identity is already populated, skip — full NPPES backfill
+        # can be triggered manually via /api/admin/nppes-backfill if needed.
+        if p.get("provider_name") or p.get("state") or p.get("city"):
+            return False
+        return True
+
+    missing_nppes = [p["npi"] for p in get_prescanned() if _needs_nppes(p)]
     if missing_nppes:
         from services.nppes_enricher import enrich_batch_with_nppes
         from core.cache import invalidate_nppes_cache
         invalidate_nppes_cache()
-        asyncio.create_task(enrich_batch_with_nppes(missing_nppes))
-        log.info("Queued NPPES enrichment for %d providers", len(missing_nppes))
+
+        # Delay enrichment by 30s so the API is fully responsive before this
+        # background task starts hitting NPPES at concurrent rate.
+        async def _delayed_enrich():
+            await asyncio.sleep(30)
+            await enrich_batch_with_nppes(missing_nppes)
+
+        asyncio.create_task(_delayed_enrich())
+        log.info("Queued NPPES enrichment for %d providers (starts in 30s)", len(missing_nppes))
+    else:
+        log.info("NPPES enrichment skipped — all cached providers already have identity data")
 
 
 async def _bg_download_and_load_prescan():
@@ -294,6 +324,7 @@ app.include_router(referral.router)
 app.include_router(timeline.router)
 app.include_router(related.router)
 app.include_router(medicare.router)
+app.include_router(diagnoses.router)
 app.include_router(license.router)
 app.include_router(news.provider_news_router)
 app.include_router(providers.router)
@@ -579,12 +610,19 @@ async def data_status():
     if dl["bytes_total"] > 0:
         pct = round(dl["bytes_done"] / dl["bytes_total"] * 100, 1)
     resolved = get_local_path()
+    local_mtime = None
+    if is_local():
+        try:
+            local_mtime = resolved.stat().st_mtime
+        except OSError:
+            pass
     return {
         "is_local":        is_local(),
         "local_path":      str(resolved) if is_local() else None,
         "expected_path":   str(resolved),   # always shown so user knows where to put the file
         "remote_url":      settings.PARQUET_URL,
         "file_size_gb":    round(resolved.stat().st_size / 1_073_741_824, 2) if is_local() else 2.74,
+        "local_mtime":     local_mtime,
         "download": {
             "active":      dl["active"],
             "bytes_done":  dl["bytes_done"],
@@ -596,15 +634,69 @@ async def data_status():
     }
 
 
-@app.post("/api/data/download", dependencies=[Depends(require_admin)])
-async def start_download():
-    """Start downloading the dataset to local disk (runs in background)."""
+@app.get("/api/data/remote-info", dependencies=[Depends(require_user)])
+async def data_remote_info():
+    """HEAD the configured PARQUET_URL and report remote size + last-modified.
+
+    Used by the UI to show "update available" when the remote is newer than
+    the local file's mtime.
+    """
+    from email.utils import parsedate_to_datetime
+    resolved = get_local_path()
+    out: dict = {
+        "url":                settings.PARQUET_URL,
+        "remote_size_bytes":  None,
+        "remote_last_modified": None,
+        "remote_mtime":       None,
+        "local_size_bytes":   None,
+        "local_mtime":        None,
+        "update_available":   False,
+        "error":              None,
+    }
     if is_local():
-        return {"ok": False, "message": "Dataset already downloaded locally"}
+        try:
+            st = resolved.stat()
+            out["local_size_bytes"] = st.st_size
+            out["local_mtime"] = st.st_mtime
+        except OSError:
+            pass
+    try:
+        async with _httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.head(settings.PARQUET_URL, follow_redirects=True)
+            resp.raise_for_status()
+            cl = resp.headers.get("content-length")
+            lm = resp.headers.get("last-modified")
+            if cl:
+                out["remote_size_bytes"] = int(cl)
+            if lm:
+                out["remote_last_modified"] = lm
+                try:
+                    out["remote_mtime"] = parsedate_to_datetime(lm).timestamp()
+                except Exception:
+                    pass
+        if out["remote_mtime"] and out["local_mtime"]:
+            out["update_available"] = out["remote_mtime"] > out["local_mtime"] + 60
+        elif out["remote_size_bytes"] and out["local_size_bytes"]:
+            out["update_available"] = out["remote_size_bytes"] != out["local_size_bytes"]
+    except Exception as e:
+        out["error"] = str(e)
+    return out
+
+
+@app.post("/api/data/download", dependencies=[Depends(require_admin)])
+async def start_download(force: bool = False):
+    """Start downloading the dataset to local disk (runs in background).
+
+    Pass ?force=true to re-download even when a local file already exists —
+    used by the "Update now" UI flow. The atomic .tmp → rename keeps the
+    existing file intact until the download completes.
+    """
+    if is_local() and not force:
+        return {"ok": False, "message": "Dataset already downloaded locally — pass force=true to update"}
     if _download_state["active"]:
         return {"ok": False, "message": "Download already in progress"}
     asyncio.create_task(_do_download())
-    return {"ok": True, "message": "Download started"}
+    return {"ok": True, "message": "Update started" if force else "Download started"}
 
 
 # ── Serve frontend static files (production) ─────────────────────────────────

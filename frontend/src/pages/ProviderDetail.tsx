@@ -7,6 +7,7 @@ import { fmt } from '../lib/format'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 import SpendingTimeline from '../components/SpendingTimeline'
 import HcpcsBreakdown from '../components/HcpcsBreakdown'
+import DiagnosisMixCard from '../components/DiagnosisMixCard'
 import FraudFlagsTable from '../components/FraudFlagsTable'
 import RiskScoreModal from '../components/RiskScoreModal'
 import ProviderTimelineAnalysis from '../components/ProviderTimelineAnalysis'
@@ -539,6 +540,9 @@ export default function ProviderDetail() {
             <div className="h-40 flex items-center justify-center text-gray-600 text-sm">Loading…</div>
           )}
         </div>
+
+        {/* Diagnosis Mix (CMS MUP-by-Provider) */}
+        {npi && <DiagnosisMixCard npi={npi} />}
       </div>
 
       {/* Peer Comparison */}

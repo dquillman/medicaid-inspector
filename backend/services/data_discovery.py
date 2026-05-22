@@ -68,78 +68,69 @@ def _extract_date_from_url(url: str) -> Optional[str]:
 
 async def check_for_updates() -> dict:
     """
-    Check the CMS/HHS data catalog for a newer dataset URL.
-    Uses the Socrata/DKAN metadata API to find the latest Parquet release.
-    Returns a dict with status info and any new URL found.
+    Compare the local Parquet file (if any) against the configured remote URL.
+
+    Issues a single HEAD against PARQUET_URL and returns whether the remote
+    Last-Modified is newer than the local file's mtime. Replaces the older
+    Azure month-walk that probed dead URLs.
     """
     global _dataset_info
+    from email.utils import parsedate_to_datetime
+    from data.duckdb_client import is_local, get_local_path
 
     result = {
         "checked_at": time.time(),
-        "current_url": _dataset_info["url"],
-        "current_date": _dataset_info.get("detected_date") or _extract_date_from_url(_dataset_info["url"]),
-        "new_url": None,
-        "new_date": None,
+        "current_url": settings.PARQUET_URL,
+        "remote_size_bytes": None,
+        "remote_last_modified": None,
+        "remote_mtime": None,
+        "local_size_bytes": None,
+        "local_mtime": None,
         "update_available": False,
         "message": "",
     }
 
+    if is_local():
+        try:
+            st = get_local_path().stat()
+            result["local_size_bytes"] = st.st_size
+            result["local_mtime"] = st.st_mtime
+        except OSError:
+            pass
+
     try:
-        # Try checking the Azure blob storage path pattern for newer dates
-        # The URL pattern is: .../medicaid-provider-spending/{date}/medicaid-provider-spending.parquet
-        base_url = "https://stopendataprod.blob.core.windows.net/datasets/medicaid-provider-spending/"
-
         async with httpx.AsyncClient(timeout=15.0) as client:
-            # Try to HEAD the current URL to confirm it's still valid
-            try:
-                resp = await client.head(settings.PARQUET_URL)
-                if resp.status_code == 200:
-                    result["current_url_valid"] = True
-                    content_length = resp.headers.get("content-length")
-                    if content_length:
-                        result["current_size_bytes"] = int(content_length)
-                else:
-                    result["current_url_valid"] = False
-            except Exception:
-                result["current_url_valid"] = None
-
-            # Try common future date patterns (monthly releases)
-            current_date = _extract_date_from_url(settings.PARQUET_URL) or "2026-02-09"
-            from datetime import datetime, timedelta
-            try:
-                cur = datetime.strptime(current_date, "%Y-%m-%d")
-            except ValueError:
-                cur = datetime(2026, 2, 9)
-
-            # Check next 6 months of potential releases
-            newest_found = None
-            for month_offset in range(1, 7):
-                check_date = cur + timedelta(days=30 * month_offset)
-                candidate_date = check_date.strftime("%Y-%m-%d")
-                candidate_url = f"{base_url}{candidate_date}/medicaid-provider-spending.parquet"
+            resp = await client.head(settings.PARQUET_URL, follow_redirects=True)
+            resp.raise_for_status()
+            cl = resp.headers.get("content-length")
+            lm = resp.headers.get("last-modified")
+            if cl:
+                result["remote_size_bytes"] = int(cl)
+            if lm:
+                result["remote_last_modified"] = lm
                 try:
-                    head_resp = await client.head(candidate_url)
-                    if head_resp.status_code == 200:
-                        newest_found = (candidate_url, candidate_date)
+                    result["remote_mtime"] = parsedate_to_datetime(lm).timestamp()
                 except Exception:
-                    continue
+                    pass
 
-            if newest_found:
-                result["new_url"] = newest_found[0]
-                result["new_date"] = newest_found[1]
-                result["update_available"] = True
-                result["message"] = f"Newer dataset found: {newest_found[1]}"
-            else:
-                result["message"] = "No newer dataset found — current version is up to date"
+        if result["remote_mtime"] and result["local_mtime"]:
+            # 60s slack to ignore clock-skew false positives
+            result["update_available"] = result["remote_mtime"] > result["local_mtime"] + 60
+        elif result["remote_size_bytes"] and result["local_size_bytes"]:
+            result["update_available"] = result["remote_size_bytes"] != result["local_size_bytes"]
+        elif not is_local():
+            result["update_available"] = True
 
+        if result["update_available"]:
+            result["message"] = "Newer dataset available at the configured remote URL"
+        else:
+            result["message"] = "Local dataset is up to date"
     except Exception as e:
         result["message"] = f"Error checking for updates: {e}"
         _dataset_info["last_check_error"] = str(e)
 
     _dataset_info["last_checked"] = result["checked_at"]
-    _dataset_info["detected_date"] = result.get("current_date")
     _save_config()
-
     return result
 
 

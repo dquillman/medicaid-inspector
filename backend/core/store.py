@@ -50,12 +50,21 @@ def load_from_disk(filename: str = "prescan_cache.json") -> bool:
         if not cache_file.exists():
             return False
         raw = json.loads(cache_file.read_text(encoding="utf-8"))
-        # Invalidate only if a parquet_url is present AND it differs (new data release)
-        # If parquet_url is absent it's the old cache format — migrate it
-        cached_url = raw.get("parquet_url")
-        if cached_url and cached_url != settings.PARQUET_URL:
-            print(f"[store] Parquet URL changed — cache invalidated")
+        # Cache invalidation policy: only invalidate when the dataset _filename_
+        # changes (signaling a new data release). Different hosts (Azure vs GCS
+        # vs local file path) serving the same underlying dataset shouldn't
+        # discard 100k+ providers of scan state.
+        cached_url = raw.get("parquet_url") or ""
+        current_url = settings.PARQUET_URL or ""
+        def _dataset_key(url: str) -> str:
+            # Last path segment after the final '/', minus query string
+            tail = url.rsplit("/", 1)[-1].split("?", 1)[0].lower()
+            return tail
+        if cached_url and _dataset_key(cached_url) != _dataset_key(current_url):
+            print(f"[store] Dataset filename changed ({_dataset_key(cached_url)} -> {_dataset_key(current_url)}) — cache invalidated")
             return False
+        if cached_url and cached_url != current_url:
+            print(f"[store] Parquet host changed but dataset filename matches — keeping cache")
         loaded_providers = raw.get("providers", [])
         loaded_index = {p["npi"]: p for p in loaded_providers}
         saved_prog = raw.get("scan_progress", {})

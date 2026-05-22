@@ -1,15 +1,28 @@
 """
 Background NPPES enrichment: after each scan batch, fetch provider identity
 data (name, state, city) from NPPES and store it in the prescan cache.
-Runs concurrently up to 15 requests at a time so it doesn't bottleneck scans.
+
+Concurrency is capped at NPPES_CONCURRENCY (default 8) — set deliberately
+below the public-NPPES rate-limit threshold and well under the level that
+starves other API requests of event-loop time.
+
 Saves to disk every SAVE_CHUNK providers so names appear progressively.
 """
 import asyncio
 import logging
+import os
 
 log = logging.getLogger(__name__)
 
-SAVE_CHUNK = 200  # write to disk after every N providers enriched
+# Save to disk after every N providers. Higher = less I/O thrash but longer
+# delay before names visible in the UI. 200 was way too aggressive when the
+# cache file is 1.4 GB — every save took ~30s of sync I/O and starved the
+# event loop. 5000 means at most ~22 save events for a full enrichment.
+SAVE_CHUNK = int(os.environ.get("NPPES_SAVE_CHUNK", "5000"))
+# Concurrency 8 saturated the event loop with sub-second NPPES calls and
+# made user-facing API requests take 3+ seconds while enrichment ran.
+# 3 is enough to make progress without starving foreground requests.
+NPPES_CONCURRENCY = int(os.environ.get("NPPES_CONCURRENCY", "3"))
 
 
 async def enrich_batch_with_nppes(npis: list[str]) -> None:
@@ -24,7 +37,7 @@ async def enrich_batch_with_nppes(npis: list[str]) -> None:
     if not npis:
         return
 
-    sem = asyncio.Semaphore(15)
+    sem = asyncio.Semaphore(NPPES_CONCURRENCY)
 
     async def fetch_one(npi: str):
         async with sem:

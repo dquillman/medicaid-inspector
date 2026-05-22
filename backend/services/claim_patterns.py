@@ -14,6 +14,8 @@ Performance: all analyses run from the in-memory prescan cache (106k providers)
 
 from __future__ import annotations
 
+from core.ttl_cache import ttl_cached
+
 import asyncio
 import logging
 import time as _time
@@ -323,6 +325,7 @@ def _compute_all_from_cache(limit: int = 100) -> dict[str, list[dict]]:
 # Public API
 # ---------------------------------------------------------------------------
 
+@ttl_cached(seconds=3600)
 async def _run_all_analyses(limit: int = 100) -> dict[str, list[dict]]:
     cached = _cache_get(f"all_analyses:{limit}")
     if cached is not None:
@@ -338,26 +341,31 @@ async def _run_all_analyses(limit: int = 100) -> dict[str, list[dict]]:
         return result
 
 
+@ttl_cached(seconds=3600)
 async def detect_unbundling(limit: int = 100) -> list[dict]:
     all_data = await _run_all_analyses(limit)
     return all_data["unbundling"]
 
 
+@ttl_cached(seconds=3600)
 async def detect_duplicates(limit: int = 100) -> list[dict]:
     all_data = await _run_all_analyses(limit)
     return all_data["duplicates"]
 
 
+@ttl_cached(seconds=3600)
 async def detect_pos_violations(limit: int = 100) -> list[dict]:
     all_data = await _run_all_analyses(limit)
     return all_data["pos"]
 
 
+@ttl_cached(seconds=3600)
 async def detect_modifier_abuse(limit: int = 100) -> list[dict]:
     all_data = await _run_all_analyses(limit)
     return all_data["modifiers"]
 
 
+@ttl_cached(seconds=3600)
 async def detect_impossible_days(limit: int = 100) -> list[dict]:
     all_data = await _run_all_analyses(limit)
     return all_data["impossible"]
@@ -426,6 +434,7 @@ async def get_provider_claim_patterns(npi: str) -> dict:
     return {"npi": npi, "unbundling": unbundling, "duplicates": [], "impossible_days": impossible_days}
 
 
+@ttl_cached(seconds=3600)
 async def get_summary() -> dict:
     """Return counts and totals for each pattern type."""
     all_data = await _run_all_analyses(limit=500)

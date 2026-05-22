@@ -25,8 +25,10 @@ from services.anomaly_detector import (
     dead_npi_billing,
     new_provider_explosion,
     geographic_impossibility,
+    diagnosis_procedure_mismatch,
     SignalResult,
 )
+from services.mup_client import lookup_sync as _mup_lookup_sync
 
 
 async def score_provider(npi: str, provider_agg: dict) -> dict:
@@ -55,6 +57,10 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
     cluster_sizes = compute_address_clusters()
     auth_clusters = compute_auth_official_clusters()
 
+    # Optional MUP row from local parquet cache — None when cache absent or
+    # NPI not in Medicare. Detector returns score=0 on None.
+    mup_row = _mup_lookup_sync(npi)
+
     signals: list[SignalResult] = [
         billing_concentration(provider_agg, hcpcs_rows),
         revenue_per_bene_outlier(provider_agg, peer_mean, peer_std),
@@ -71,6 +77,7 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
         dead_npi_billing(provider_agg),
         new_provider_explosion(provider_agg),
         geographic_impossibility(provider_agg),
+        diagnosis_procedure_mismatch(provider_agg, hcpcs_rows, mup_row),
     ]
 
     composite = sum(s["score"] * s["weight"] for s in signals)

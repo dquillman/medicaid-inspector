@@ -36,7 +36,7 @@ References:
 from __future__ import annotations
 import math
 from datetime import datetime, date
-from typing import TypedDict
+from typing import TypedDict, Optional
 
 
 class SignalResult(TypedDict):
@@ -1178,6 +1178,204 @@ def compute_auth_official_clusters() -> dict[str, int]:
         result[npi] = len(name_groups[name])
 
     return result
+
+
+# ── 18. Diagnosis–procedure mismatch ──────────────────────────────────────────
+# HCPCS / CPT code → list of MUP chronic-condition columns that legitimately
+# justify billing that code. Signal fires only when a provider has ZERO
+# documented prevalence across ALL valid columns (a logical OR — any one of
+# them passing exonerates the provider).
+#
+# IMPORTANT: MUP suppresses cell counts below 11 beneficiaries (CMS privacy
+# rule), so the column is empty for tiny Medicare panels. The signal treats
+# "all columns suppressed" as insufficient evidence and returns score=0 —
+# only an explicit zero (numerically reported, meaning ≥11 benes but none
+# had the condition) fires the signal.
+_BH_ANY = [
+    "Bene_CC_BH_Anxiety_V1_Pct", "Bene_CC_BH_Depress_V1_Pct",
+    "Bene_CC_BH_PTSD_V1_Pct", "Bene_CC_BH_Bipolar_V1_Pct",
+    "Bene_CC_BH_Mood_V2_Pct",
+]
+_RESPIRATORY = ["Bene_CC_PH_COPD_V2_Pct", "Bene_CC_PH_Asthma_V2_Pct"]
+_DIABETES = ["Bene_CC_PH_Diabetes_V2_Pct"]
+_CANCER = ["Bene_CC_PH_Cancer6_V2_Pct"]
+_KIDNEY = ["Bene_CC_PH_CKD_V2_Pct"]
+
+_HCPCS_CONDITION_MAP: dict[str, list[str]] = {
+    # ── Diabetes-specific supplies / equipment ──────────────────────────────
+    "E0784": _DIABETES,   # External insulin pump
+    "E0607": _DIABETES,   # Home blood glucose monitor
+    "A4253": _DIABETES,   # Blood glucose test strips
+    "A4255": _DIABETES,   # Glucose monitor platforms
+    "A4258": _DIABETES,   # Lancet device
+    "A4259": _DIABETES,   # Lancets per box
+    "A9276": _DIABETES,   # CGM sensor
+    "A9277": _DIABETES,   # CGM transmitter
+    "A9278": _DIABETES,   # CGM receiver
+    "K0553": _DIABETES,   # CGM supply allowance
+    "J1815": _DIABETES,   # Insulin per 5 units
+    "J1817": _DIABETES,   # Insulin for pump (per 50 units)
+
+    # ── COPD / Asthma / respiratory ─────────────────────────────────────────
+    "E0431": _RESPIRATORY,   # Portable gaseous oxygen
+    "E0434": _RESPIRATORY,   # Portable liquid oxygen
+    "E0439": _RESPIRATORY,   # Stationary liquid oxygen
+    "E0441": _RESPIRATORY,   # Stationary gaseous oxygen contents
+    "E0442": _RESPIRATORY,   # Stationary liquid oxygen contents
+    "E0466": _RESPIRATORY,   # Home ventilator
+    "E0470": _RESPIRATORY,   # Respiratory assist device (BiPAP w/o backup)
+    "E0471": _RESPIRATORY,   # Respiratory assist device (BiPAP w/ backup)
+    "J7611": _RESPIRATORY,   # Albuterol concentrated solution
+    "J7613": _RESPIRATORY,   # Albuterol unit dose
+    "J7626": _RESPIRATORY,   # Budesonide inhalation
+
+    # ── Cancer / chemotherapy ───────────────────────────────────────────────
+    # J9 series = chemotherapy drugs; 96413/96415/96417 = chemo infusion
+    "96413": _CANCER,    # Chemo IV infusion, up to 1 hr
+    "96415": _CANCER,    # Chemo IV infusion, each additional hr
+    "96417": _CANCER,    # Chemo IV push, each additional drug
+    "96409": _CANCER,    # Chemo IV push, single drug
+    "96411": _CANCER,    # Chemo IV push, each additional drug
+    "J9035": _CANCER,    # Bevacizumab (Avastin)
+    "J9145": _CANCER,    # Rituximab (Rituxan)
+    "J9201": _CANCER,    # Gemcitabine (Gemzar)
+    "J9217": _CANCER,    # Leuprolide depot suspension
+    "J9305": _CANCER,    # Pemetrexed (Alimta)
+    "J9355": _CANCER,    # Trastuzumab (Herceptin)
+    "J9171": _CANCER,    # Docetaxel
+    "J9264": _CANCER,    # Paclitaxel protein-bound
+    "J9999": _CANCER,    # Antineoplastic NOC
+
+    # ── Kidney disease / dialysis ───────────────────────────────────────────
+    "90935": _KIDNEY,    # Hemodialysis procedure
+    "90937": _KIDNEY,    # Hemodialysis, repeated evaluation
+    "90945": _KIDNEY,    # Dialysis other than hemo (e.g., peritoneal)
+    "90947": _KIDNEY,    # Dialysis other than hemo, repeated
+    "90951": _KIDNEY,    # ESRD-related MCP, age <2, 4+ visits
+    "90960": _KIDNEY,    # ESRD-related MCP, age 20+, 4+ visits
+    "90961": _KIDNEY,    # ESRD-related MCP, age 20+, 2-3 visits
+    "90962": _KIDNEY,    # ESRD-related MCP, age 20+, 1 visit
+    "90999": _KIDNEY,    # Unlisted dialysis procedure
+    "G0257": _KIDNEY,    # Unscheduled/emergency dialysis
+
+    # ── Behavioral health — psychotherapy codes match ANY BH condition ──────
+    "90832": _BH_ANY,    # Psychotherapy 30 min
+    "90834": _BH_ANY,    # Psychotherapy 45 min
+    "90837": _BH_ANY,    # Psychotherapy 60 min
+    "90838": _BH_ANY,    # Psychotherapy 60 min with E/M
+    "90839": _BH_ANY,    # Psychotherapy for crisis, first 60 min
+    "90847": _BH_ANY,    # Family psychotherapy with patient
+    "H0001": _BH_ANY,    # Alcohol/drug assessment
+    "H0004": _BH_ANY,    # Behavioral health counseling per 15 min
+    "H0005": _BH_ANY,    # Alcohol/drug group counseling
+    "H0015": _BH_ANY,    # Alcohol/drug intensive outpatient (IOP)
+
+    # ── Dementia / cognitive ────────────────────────────────────────────────
+    "99483": ["Bene_CC_BH_Alz_NonAlzdem_V2_Pct"],   # Cognitive assessment & care plan
+    "G0505": ["Bene_CC_BH_Alz_NonAlzdem_V2_Pct"],   # Cognition + functional assessment for dementia
+}
+
+
+def _parse_pct(raw) -> Optional[float]:
+    """Return float pct, or None when MUP cell is suppressed (empty string)."""
+    if raw in (None, ""):
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def diagnosis_procedure_mismatch(
+    provider: dict,
+    hcpcs_rows: list[dict],
+    mup_row: dict | None,
+) -> SignalResult:
+    """
+    Flag when a provider's top-billed condition-specific HCPCS code is paired
+    with a Medicare chronic-condition prevalence near zero for that condition.
+
+    Example: provider bills $200k of A4253 (diabetic test strips) but
+    Bene_CC_PH_Diabetes_V2_Pct = 0% — they have no diabetic Medicare patients.
+    Either they treat exclusively non-diabetics (implausible for diabetic
+    supplies) or the claims are fabricated.
+
+    OIG basis: Diagnosis-procedure consistency is the foundational medical
+    necessity test (42 CFR § 440.230). The MUP-by-Provider dataset
+    (Medicare beneficiary chronic-condition prevalence) is a public proxy
+    for the diagnosis denominator the Medicaid claims data lacks.
+
+    Limitations:
+      * Only fires when the provider has Medicare patients (MUP coverage).
+        Pure Medicaid-only providers will return score=0 (no signal).
+      * The condition map is intentionally narrow — only HCPCS codes whose
+        medical necessity tightly maps to one chronic condition.
+    """
+    if mup_row is None:
+        return _result("diagnosis_procedure_mismatch", 0.0, 8,
+                       "Provider not in CMS MUP (no Medicare data — signal not applicable)", False)
+    if not hcpcs_rows:
+        return _result("diagnosis_procedure_mismatch", 0.0, 8, "No HCPCS data", False)
+
+    # Minimum Medicare panel size — with smaller panels, CMS's <11-bene
+    # suppression rule makes prevalence indeterminate (suppressed could mean
+    # 0 patients or 10). Below this threshold the signal cannot fire reliably.
+    try:
+        tot_benes = int(float(mup_row.get("Tot_Benes") or 0))
+    except (TypeError, ValueError):
+        tot_benes = 0
+    if tot_benes < 100:
+        return _result("diagnosis_procedure_mismatch", 0.0, 8,
+                       f"Medicare panel too small (Tot_Benes={tot_benes}) for "
+                       f"reliable diagnosis-prevalence assessment", False)
+
+    total_paid = sum(r.get("total_paid", 0) for r in hcpcs_rows) or 1.0
+
+    # Worst offender: (hcpcs, condition-label, share, observed max-pct)
+    worst: tuple[str, str, float, float] | None = None
+    for row in hcpcs_rows:
+        code = (row.get("hcpcs_code") or "").upper()
+        cc_cols = _HCPCS_CONDITION_MAP.get(code)
+        if not cc_cols:
+            continue
+        share = (row.get("total_paid", 0) or 0) / total_paid
+        if share < 0.10:
+            continue
+
+        # Logical-OR over valid columns. Suppressed cells (None) are skipped —
+        # if ALL columns are suppressed, we have no evidence either way and
+        # cannot fire (low Medicare panel + CMS suppression rule).
+        pcts = [_parse_pct(mup_row.get(c)) for c in cc_cols]
+        observed = [p for p in pcts if p is not None]
+        if not observed:
+            continue  # all suppressed — insufficient evidence
+        max_pct = max(observed)
+        if max_pct >= 1.0:
+            continue  # at least one valid condition documented — exonerated
+
+        label_src = cc_cols[0] if len(cc_cols) == 1 else "behavioral-health"
+        condition_label = (
+            label_src.replace("Bene_CC_", "")
+                     .replace("_V1_Pct", "")
+                     .replace("_V2_Pct", "")
+                     .replace("_", " ")
+        )
+        if worst is None or share > worst[2]:
+            worst = (code, condition_label, share, max_pct)
+
+    if worst is None:
+        return _result("diagnosis_procedure_mismatch", 0.0, 8,
+                       "Condition-specific codes match expected Medicare diagnosis mix "
+                       "(or Medicare panel too small to assess)", False)
+
+    code, condition_label, share, max_pct = worst
+    score = min(0.5 + (share - 0.10) * 1.25, 1.0)
+    reason = (
+        f"{code} drives {share:.0%} of billing — implies {condition_label} — but "
+        f"Medicare prevalence for that condition is {max_pct:.1f}% across "
+        f"11+ documented beneficiaries (diagnosis-fabrication signal)"
+    )
+    return _result("diagnosis_procedure_mismatch", score, 8, reason, True)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

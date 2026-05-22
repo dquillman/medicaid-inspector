@@ -220,6 +220,26 @@ _SIGNAL_META: dict[str, dict] = {
             "42 U.S.C. § 1320a-7b(a)(1) (False statements — fictitious practice)",
         ],
     },
+    "diagnosis_procedure_mismatch": {
+        "label": "Diagnosis-Procedure Mismatch",
+        "explanation": (
+            "A condition-specific procedure code drives a material share of this "
+            "provider's Medicaid billing, but the provider's Medicare beneficiary "
+            "population shows near-zero prevalence for the diagnosis that code "
+            "implies. Diagnosis-procedure consistency is the foundational medical "
+            "necessity test — billing for diabetic supplies to a population with "
+            "no documented diabetes, for example, is a documented "
+            "diagnosis-fabrication pattern. The Medicare MUP-by-Provider chronic-"
+            "condition prevalence serves as a public proxy for the diagnosis "
+            "denominator that Medicaid claims data alone cannot provide."
+        ),
+        "citations": [
+            "42 CFR § 440.230 (Medical necessity requirements)",
+            "42 U.S.C. § 1320a-7b(a)(1) (False statements — material misrepresentation)",
+            "42 U.S.C. § 1320a-7a(a)(1)(B) (CMP — services not medically necessary)",
+            "CMS MUP-by-Provider (Medicare Physician & Other Practitioners by Provider, 2023)",
+        ],
+    },
     "total_spend_outlier": {
         "label": "Total Spend Outlier",
         "explanation": (

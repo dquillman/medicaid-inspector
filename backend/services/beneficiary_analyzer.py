@@ -21,6 +21,8 @@ import time as _time
 from collections import defaultdict
 from typing import Any
 
+from core.ttl_cache import ttl_cached
+
 from core.store import get_prescanned, get_provider_by_npi
 
 log = logging.getLogger(__name__)
@@ -74,6 +76,7 @@ def _build_provider_aggs() -> list[dict]:
 
 # ── Doctor Shopping Proxy ───────────────────────────────────────────────────
 
+@ttl_cached(seconds=3600)
 async def detect_doctor_shopping(limit: int = 100) -> dict:
     """
     Find providers whose HCPCS codes overlap with many other providers and who
@@ -185,6 +188,7 @@ async def detect_doctor_shopping(limit: int = 100) -> dict:
 
 # ── High Utilization ────────────────────────────────────────────────────────
 
+@ttl_cached(seconds=3600)
 async def detect_high_utilization(limit: int = 100) -> dict:
     """
     Find providers where beneficiaries have abnormally high utilization:
@@ -245,6 +249,7 @@ async def detect_high_utilization(limit: int = 100) -> dict:
 
 # ── Geographic Impossibility Proxy ──────────────────────────────────────────
 
+@ttl_cached(seconds=3600)
 async def detect_geographic_anomalies(limit: int = 100) -> dict:
     """
     Detect providers with NPPES data suggesting multi-state operations or
@@ -316,6 +321,7 @@ async def detect_geographic_anomalies(limit: int = 100) -> dict:
 
 # ── Excessive Services ──────────────────────────────────────────────────────
 
+@ttl_cached(seconds=3600)
 async def detect_excessive_services(limit: int = 100) -> dict:
     """
     Find providers with abnormally high total claims per beneficiary
@@ -375,6 +381,7 @@ async def detect_excessive_services(limit: int = 100) -> dict:
 
 # ── Combined All-In-One ────────────────────────────────────────────────────
 
+@ttl_cached(seconds=3600)
 async def _run_all_beneficiary_analyses(limit: int = 100) -> dict:
     """Run all 4 detection analyses + summary in a single call."""
     shopping = await detect_doctor_shopping(limit=limit)
@@ -416,6 +423,7 @@ async def _run_all_beneficiary_analyses(limit: int = 100) -> dict:
 
 # ── Summary ─────────────────────────────────────────────────────────────────
 
+@ttl_cached(seconds=3600)
 async def beneficiary_fraud_summary() -> dict:
     """High-level summary stats."""
     providers = get_prescanned()

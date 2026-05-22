@@ -12,6 +12,7 @@ from typing import Any
 
 from core.store import get_prescanned
 from core.config import settings
+from core.ttl_cache import ttl_cached
 
 
 # ── Component weights (must sum to 1.0) ──────────────────────────────────────
@@ -50,6 +51,7 @@ def _severity(score: float) -> str:
     return "NORMAL"
 
 
+@ttl_cached(seconds=3600)
 def compute_hotspots() -> list[dict[str, Any]]:
     """
     Build composite hotspot scores for every 3-digit ZIP area that has
@@ -164,6 +166,7 @@ def compute_hotspots() -> list[dict[str, Any]]:
     return hotspots
 
 
+@ttl_cached(seconds=3600)
 def get_hotspot_detail(zip3: str) -> dict[str, Any] | None:
     """
     Return full detail for a single ZIP3 area, including top providers.

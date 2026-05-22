@@ -258,11 +258,61 @@ export const api = {
     expected_path: string
     remote_url: string
     file_size_gb: number
+    local_mtime: number | null
     download: { active: boolean; bytes_done: number; bytes_total: number; pct: number; done: boolean; error: string | null }
   }>('/data/status'),
 
-  startDownload: () =>
-    mutate<{ status: string }>('POST', '/data/download'),
+  dataRemoteInfo: () => get<{
+    url: string
+    remote_size_bytes: number | null
+    remote_last_modified: string | null
+    remote_mtime: number | null
+    local_size_bytes: number | null
+    local_mtime: number | null
+    update_available: boolean
+    error: string | null
+  }>('/data/remote-info'),
+
+  providerDiagnoses: (npi: string) => get<{
+    npi: string
+    has_data: boolean
+    message?: string
+    provider_type?: string
+    tot_benes?: number | null
+    bene_avg_age?: number | null
+    bene_avg_risk_score?: number | null
+    diagnosis_mix?: { column: string; label: string; pct: number }[]
+    data_source?: string
+    mismatch_signal?: {
+      signal: string
+      score: number
+      weight: number
+      reason: string
+      flagged: boolean
+    }
+  }>(`/providers/${npi}/diagnoses`),
+
+  mupStatus: () => get<{
+    is_local: boolean
+    local_path: string | null
+    file_size_mb: number | null
+    row_count: number | null
+    download: {
+      active: boolean
+      bytes_done: number
+      bytes_total: number
+      rows_done?: number
+      rows_total?: number
+      done: boolean
+      error: string | null
+      phase?: string
+    }
+  }>('/admin/mup-status'),
+
+  mupRefresh: () => mutate<{ ok: boolean; message: string }>('POST', '/admin/mup-refresh'),
+
+  startDownload: (force = false) =>
+    mutate<{ ok: boolean; message: string }>('POST', `/data/download${force ? '?force=true' : ''}`),
 
   smartScan: (stateFilter?: string) =>
     mutate<{ status: string }>('POST', '/prescan/smart-scan', { state_filter: stateFilter ?? null }),
