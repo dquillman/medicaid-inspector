@@ -18,6 +18,7 @@ from core.auth_store import (
     authenticate,
     get_user,
     create_user,
+    create_or_get_google_user,
     update_user,
     delete_user,
     list_users,
@@ -118,6 +119,58 @@ async def login(req: LoginRequest, request: Request):
         "token": token,
         "user": user,
     }
+
+
+class GoogleLoginRequest(BaseModel):
+    credential: str  # Google ID token (JWT) returned by GIS callback
+
+
+@router.post("/google")
+async def google_login(req: GoogleLoginRequest, request: Request):
+    """Sign in with a Google ID token. Verifies the JWT against Google's certs,
+    then finds-or-creates a viewer-role user keyed by the verified email.
+    """
+    import os
+    from core.rate_limiter import check_login_rate
+    check_login_rate(request)
+
+    client_id = os.environ.get("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise HTTPException(503, "Google sign-in is not configured on the server")
+
+    try:
+        from google.oauth2 import id_token
+        from google.auth.transport import requests as google_requests
+    except ImportError:
+        raise HTTPException(503, "google-auth library not installed on server")
+
+    try:
+        info = id_token.verify_oauth2_token(
+            req.credential, google_requests.Request(), client_id
+        )
+    except ValueError as e:
+        logger.warning("Google ID token verification failed: %s", e)
+        raise HTTPException(401, "Invalid Google credential")
+
+    if not info.get("email_verified"):
+        raise HTTPException(401, "Google account email is not verified")
+
+    email = info.get("email")
+    if not email:
+        raise HTTPException(401, "Google credential did not include an email")
+
+    display_name = info.get("name") or email
+    user = create_or_get_google_user(email=email, display_name=display_name)
+
+    token = create_session(email)
+    try:
+        from core.gcs_sync import upload_file
+        import asyncio
+        asyncio.get_event_loop().run_in_executor(None, upload_file, "sessions.json")
+    except Exception as e:
+        logger.warning("GCS session persistence failed: %s", e)
+
+    return {"token": token, "user": user}
 
 
 class RegisterRequest(BaseModel):

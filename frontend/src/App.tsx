@@ -272,6 +272,24 @@ export default function App() {
   const handleLogin = (username: string, password: string) =>
     authRequest('/auth/login', username, password, 'Login failed')
 
+  const handleGoogleCredential = async (credential: string): Promise<string | null> => {
+    try {
+      const data = await mutate<{ token: string; user: { username: string } }>(
+        'POST',
+        '/auth/google',
+        { credential },
+      )
+      const email = data.user?.username || ''
+      const session: AuthUser = { email, token: data.token, savedAt: Date.now() }
+      setUser(session)
+      localStorage.setItem('mfi_session', JSON.stringify(session))
+      setView('app')
+      return null
+    } catch (e) {
+      return e instanceof Error ? e.message : 'Google sign-in failed'
+    }
+  }
+
   const handleRegister = async (username: string, password: string, displayName?: string) => {
     try {
       const data = await mutate<{ token: string; user: { username: string } }>('POST', '/auth/register', {
@@ -305,6 +323,7 @@ export default function App() {
         <Login
           onLogin={handleLogin}
           onRegister={handleRegister}
+          onGoogleCredential={handleGoogleCredential}
           onBack={() => setView('landing')}
         />
       ) : (

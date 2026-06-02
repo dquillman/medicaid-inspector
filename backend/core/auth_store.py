@@ -251,8 +251,36 @@ def create_user(username: str, password: str, role: str, display_name: str) -> d
         "role": role,
         "display_name": display_name or username,
         "created_at": time.time(),
+        "auth_provider": "local",
     }
     _users[username] = user
+    _save_users()
+    return _safe_user(user)
+
+
+def create_or_get_google_user(email: str, display_name: str, default_role: str = "viewer") -> dict:
+    """Return an existing user keyed by email, or create a passwordless Google user.
+
+    Google users have no password_hash/salt — `authenticate()` will never return
+    them, so they can only sign in via the Google ID-token flow.
+    """
+    existing = _users.get(email)
+    if existing:
+        return _safe_user(existing)
+
+    if default_role not in ROLES:
+        raise ValueError(f"Invalid role '{default_role}'. Must be one of {ROLES}")
+
+    user = {
+        "username": email,
+        "password_hash": "",
+        "salt": "",
+        "role": default_role,
+        "display_name": display_name or email,
+        "created_at": time.time(),
+        "auth_provider": "google",
+    }
+    _users[email] = user
     _save_users()
     return _safe_user(user)
 

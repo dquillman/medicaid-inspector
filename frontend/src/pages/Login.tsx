@@ -1,12 +1,45 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 interface Props {
   onLogin: (username: string, password: string) => Promise<string | null>
   onRegister: (username: string, password: string, displayName?: string) => Promise<string | null>
+  onGoogleCredential: (credential: string) => Promise<string | null>
   onBack: () => void
 }
 
-export default function Login({ onLogin, onRegister, onBack }: Props) {
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
+const GIS_SRC = 'https://accounts.google.com/gsi/client'
+
+declare global {
+  interface Window {
+    google?: {
+      accounts: {
+        id: {
+          initialize: (config: {
+            client_id: string
+            callback: (resp: { credential: string }) => void
+            ux_mode?: 'popup' | 'redirect'
+            auto_select?: boolean
+          }) => void
+          renderButton: (
+            parent: HTMLElement,
+            options: {
+              type?: 'standard' | 'icon'
+              theme?: 'outline' | 'filled_blue' | 'filled_black'
+              size?: 'large' | 'medium' | 'small'
+              text?: 'signin_with' | 'signup_with' | 'continue_with' | 'signin'
+              shape?: 'rectangular' | 'pill' | 'circle' | 'square'
+              logo_alignment?: 'left' | 'center'
+              width?: number
+            },
+          ) => void
+        }
+      }
+    }
+  }
+}
+
+export default function Login({ onLogin, onRegister, onGoogleCredential, onBack }: Props) {
   const [isSignUp, setIsSignUp] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -14,6 +47,56 @@ export default function Login({ onLogin, onRegister, onBack }: Props) {
   const [displayName, setDisplayName] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
+  const googleBtnRef = useRef<HTMLDivElement | null>(null)
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID) return
+
+    const renderGoogleButton = () => {
+      if (!window.google?.accounts?.id || !googleBtnRef.current) return
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: async (resp: { credential: string }) => {
+          if (!resp.credential) return
+          setError('')
+          setLoading(true)
+          try {
+            const err = await onGoogleCredential(resp.credential)
+            if (err) setError(err)
+          } finally {
+            setLoading(false)
+          }
+        },
+        ux_mode: 'popup',
+        auto_select: false,
+      })
+      googleBtnRef.current.innerHTML = ''
+      window.google.accounts.id.renderButton(googleBtnRef.current, {
+        type: 'standard',
+        theme: 'filled_black',
+        size: 'large',
+        text: isSignUp ? 'signup_with' : 'signin_with',
+        shape: 'rectangular',
+        logo_alignment: 'left',
+        width: 320,
+      })
+    }
+
+    // Reuse the script tag if it was already injected
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${GIS_SRC}"]`)
+    if (existing) {
+      if (window.google?.accounts?.id) renderGoogleButton()
+      else existing.addEventListener('load', renderGoogleButton, { once: true })
+      return
+    }
+
+    const script = document.createElement('script')
+    script.src = GIS_SRC
+    script.async = true
+    script.defer = true
+    script.onload = renderGoogleButton
+    document.head.appendChild(script)
+  }, [isSignUp, onGoogleCredential])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -134,6 +217,21 @@ export default function Login({ onLogin, onRegister, onBack }: Props) {
           >
             {loading ? (isSignUp ? 'Creating account...' : 'Signing in...') : (isSignUp ? 'Create Account' : 'Sign In')}
           </button>
+
+          {GOOGLE_CLIENT_ID ? (
+            <>
+              <div className="flex items-center gap-3 pt-1">
+                <div className="flex-1 h-px bg-gray-800" />
+                <span className="text-[10px] uppercase tracking-wider text-gray-500">or</span>
+                <div className="flex-1 h-px bg-gray-800" />
+              </div>
+              <div ref={googleBtnRef} className="flex justify-center" />
+            </>
+          ) : (
+            <p className="text-[11px] text-gray-600 text-center pt-1">
+              Google sign-in disabled (VITE_GOOGLE_CLIENT_ID not set).
+            </p>
+          )}
         </form>
 
         <div className="text-center mt-4 space-y-2">
