@@ -26,7 +26,7 @@ const PLANS = [
     description: 'For compliance departments and state Medicaid agencies',
     features: [
       'Unlimited provider scans',
-      'All 17 fraud signals',
+      'All 18 fraud signals',
       'Advanced peer comparison',
       'OIG & SAM.gov exclusion checks',
       'Network analysis & clustering',
@@ -66,7 +66,7 @@ const FEATURES = [
         <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z" />
       </svg>
     ),
-    title: '17 Fraud Signals',
+    title: '18 Fraud Signals',
     desc: 'Detect billing concentration, bust-out patterns, ghost billing, upcoding, and 13 more OIG-based fraud indicators.',
   },
   {
@@ -118,7 +118,7 @@ const FEATURES = [
 
 const STATS = [
   { value: '106K+', label: 'Providers Scanned' },
-  { value: '17', label: 'Fraud Signals' },
+  { value: '18', label: 'Fraud Signals' },
   { value: '38K+', label: 'Providers Flagged' },
   { value: '$1.2T', label: 'Medicaid Spend Analyzed' },
 ]
@@ -213,7 +213,7 @@ export default function Landing({ onLogin }: Props) {
             </span>
           </h1>
           <p className="text-lg text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
-            Scan over 100,000 Medicaid providers against 17 OIG-based fraud signals.
+            Scan over 100,000 Medicaid providers against 18 OIG-based fraud signals.
             Real-time risk scoring, network analysis, and case management —
             powered by CMS/HHS open data.
           </p>
@@ -254,7 +254,7 @@ export default function Landing({ onLogin }: Props) {
                   { label: 'Providers Scanned', value: '106,660', color: 'text-blue-400' },
                   { label: 'Flagged for Review', value: '38,875', color: 'text-red-400' },
                   { label: 'Avg Risk Score', value: '12.4', color: 'text-yellow-400' },
-                  { label: 'Active Signals', value: '17 / 17', color: 'text-green-400' },
+                  { label: 'Active Signals', value: '18 / 18', color: 'text-green-400' },
                 ].map(m => (
                   <div key={m.label} className="bg-gray-900 rounded-lg p-3 border border-gray-800">
                     <p className="text-[10px] text-gray-500 uppercase tracking-wider">{m.label}</p>

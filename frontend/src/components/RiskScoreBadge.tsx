@@ -4,8 +4,6 @@ interface Props {
 }
 
 export default function RiskScoreBadge({ score, size = 'md' }: Props) {
-  const isHighRisk = score >= 50
-
   const cls =
     score >= 70 ? 'badge-high' :
     score >= 40 ? 'badge-medium' :
@@ -22,7 +20,6 @@ export default function RiskScoreBadge({ score, size = 'md' }: Props) {
   return (
     <span
       className={`${cls} ${textSize} font-mono font-bold`}
-      style={isHighRisk ? { animation: 'threat-pulse 2s ease-in-out infinite' } : undefined}
       title={`Risk Score: ${score.toFixed(1)}/100`}
     >
       {score.toFixed(0)} <span className="opacity-60 uppercase tracking-wider">{label}</span>

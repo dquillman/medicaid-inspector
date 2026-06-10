@@ -283,7 +283,7 @@ export default function TemporalAnalysisSection({ npi }: { npi: string }) {
         <div className="flex items-center gap-3">
           <h2 className="text-sm font-semibold text-gray-300">Temporal Anomaly Detection</h2>
           {hasCritical && (
-            <span className="text-[10px] px-2 py-0.5 bg-red-900 border border-red-700 rounded-full text-red-300 font-bold animate-pulse">
+            <span className="text-[10px] px-2 py-0.5 bg-red-900 border border-red-700 rounded-full text-red-300 font-bold">
               CRITICAL ANOMALIES
             </span>
           )}

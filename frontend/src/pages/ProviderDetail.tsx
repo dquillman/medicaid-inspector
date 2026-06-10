@@ -365,7 +365,7 @@ export default function ProviderDetail() {
 
       {/* OIG Exclusion Banner — full-width, impossible to miss */}
       {oigExcluded && oigData?.record && (
-        <div className="bg-red-950 border-2 border-red-600 rounded-xl px-6 py-5 flex items-start gap-4 shadow-lg shadow-red-950/50" style={{ animation: 'threat-pulse-bg 2.5s ease-in-out infinite' }}>
+        <div className="bg-red-950 border-2 border-red-600 rounded-xl px-6 py-5 flex items-start gap-4 shadow-lg shadow-red-950/50">
           <span className="text-red-500 text-3xl mt-0.5 font-black">{'\u26D4'}</span>
           <div className="flex-1">
             <p className="text-red-300 font-black text-base uppercase tracking-wider">OIG EXCLUSION LIST -- PROVIDER EXCLUDED FROM FEDERAL HEALTHCARE PROGRAMS</p>
@@ -380,7 +380,7 @@ export default function ProviderDetail() {
 
       {/* SAM.gov Exclusion Banner — full-width, similar to OIG */}
       {samData?.excluded && (
-        <div className="bg-red-950 border-2 border-red-600 rounded-xl px-6 py-5 flex items-start gap-4 shadow-lg shadow-red-950/50" style={{ animation: 'threat-pulse-bg 2.5s ease-in-out infinite' }}>
+        <div className="bg-red-950 border-2 border-red-600 rounded-xl px-6 py-5 flex items-start gap-4 shadow-lg shadow-red-950/50">
           <span className="text-red-500 text-3xl mt-0.5 font-black">{'\u26D4'}</span>
           <div className="flex-1">
             <p className="text-red-300 font-black text-base uppercase tracking-wider">SAM.GOV FEDERAL EXCLUSION -- PROVIDER EXCLUDED FROM GOVERNMENT CONTRACTS</p>

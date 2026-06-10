@@ -82,7 +82,6 @@
   /* Threat-level badges */
   .badge-critical {
     @apply bg-red-950 text-red-400 border border-red-700 text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider;
-    animation: threat-pulse 2s ease-in-out infinite;
   }
   .badge-warning {
     @apply bg-amber-950 text-amber-400 border border-amber-700 text-xs px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider;
@@ -140,16 +139,6 @@ button, a, input, select, textarea, .card, tr {
   transition: all 0.2s ease;
 }
 
-/* Threat pulse animation */
-@keyframes threat-pulse {
-  0%, 100% {
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
-  }
-  50% {
-    box-shadow: 0 0 8px 2px rgba(239, 68, 68, 0.3);
-  }
-}
-
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
@@ -160,11 +149,11 @@ button, a, input, select, textarea, .card, tr {
   animation: shimmer 1.5s infinite;
 }
 
-@keyframes threat-pulse-bg {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.85;
+/* Vestibular accessibility (Section 508) — disable motion for users who ask for it */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

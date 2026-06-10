@@ -113,7 +113,7 @@ export default function Overview() {
 
   const confirmedFraud = reviewCounts?.confirmed_fraud ?? 0
 
-  const barData = (signals ?? []).map(s => ({
+  const barData = (Array.isArray(signals) ? signals : []).map(s => ({
     signal: s.signal,
     name: SIGNAL_LABELS[s.signal] ?? s.signal,
     count: s.count,
@@ -134,7 +134,6 @@ export default function Overview() {
           <>
             <div
               className="bg-red-950 border-2 border-red-700 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
-              style={{ animation: confirmedFraud > 0 ? 'threat-pulse-bg 3s ease-in-out infinite' : undefined }}
               onClick={() => navigate('/review?status=confirmed_fraud')}
             >
               <p className="text-red-500 text-xs font-bold uppercase tracking-widest mb-2">CONFIRMED FRAUD CASES</p>

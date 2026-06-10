@@ -1,31 +1,47 @@
 /**
  * Basic render test for the App component.
  * Verifies the app mounts without crashing and shows the landing page.
+ * App is rendered inside QueryClientProvider because authenticated views
+ * (NotificationBell, Overview) call useQuery/useQueryClient.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from '../App'
 
-// Mock fetch globally
 beforeEach(() => {
+  // Empty body -> get() rejects -> queries land in error state -> components
+  // render their loading/placeholder branches, mirroring a dead backend.
   vi.stubGlobal('fetch', vi.fn(() =>
     Promise.resolve({
       ok: true,
-      json: () => Promise.resolve({}),
+      status: 200,
+      text: () => Promise.resolve(''),
     })
   ))
   localStorage.clear()
+  window.history.replaceState({}, '', '/')
 })
+
+function renderApp() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>
+  )
+}
 
 describe('App', () => {
   it('renders without crashing', () => {
-    const { container } = render(<App />)
+    const { container } = renderApp()
     expect(container).toBeDefined()
   })
 
   it('shows landing page when not authenticated', () => {
-    render(<App />)
-    // Landing page should be visible (no session in localStorage)
+    renderApp()
     expect(document.body.innerHTML).toBeTruthy()
   })
 
@@ -34,8 +50,7 @@ describe('App', () => {
       email: 'test@example.com',
       token: 'abc123',
     }))
-    render(<App />)
-    // Should show the authenticated app (nav bar with "Medicaid Fraud Inspector")
+    renderApp()
     expect(document.body.innerHTML).toContain('Medicaid Fraud Inspector')
   })
 })

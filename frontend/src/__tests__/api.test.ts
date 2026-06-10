@@ -1,15 +1,22 @@
 /**
  * Tests for the API helper functions with mocked fetch.
+ * Mocks mirror the real contract: api.ts reads bodies via res.text()
+ * (see parseJsonSafe), so every mock response must implement text().
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-// We need to mock fetch before importing api
 const mockFetch = vi.fn()
+
+function jsonResponse(data: unknown, status = 200) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    text: () => Promise.resolve(JSON.stringify(data)),
+  }
+}
 
 beforeEach(() => {
   vi.stubGlobal('fetch', mockFetch)
-  // Mock window.location.origin for URL construction
-  vi.stubGlobal('location', { origin: 'http://localhost:5200' })
 })
 
 afterEach(() => {
@@ -23,24 +30,19 @@ describe('API helper', () => {
       total_paid: 5000000,
       flagged_providers: 10,
     }
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(summaryData),
-    })
+    mockFetch.mockResolvedValueOnce(jsonResponse(summaryData))
 
     const { api } = await import('../lib/api')
     const result = await api.summary()
     expect(result).toEqual(summaryData)
-    expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/api/summary')
-    )
+    const calledUrl = mockFetch.mock.calls[mockFetch.mock.calls.length - 1][0]
+    expect(calledUrl).toContain('/api/summary')
   })
 
   it('providers() includes query params', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ providers: [], total: 0, page: 1, limit: 50 }),
-    })
+    mockFetch.mockResolvedValueOnce(
+      jsonResponse({ providers: [], total: 0, page: 1, limit: 50 })
+    )
 
     const { api } = await import('../lib/api')
     await api.providers({ search: 'test', states: 'TX', page: 1, limit: 10 })
@@ -50,22 +52,22 @@ describe('API helper', () => {
   })
 
   it('throws on non-ok response', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: false,
-      status: 500,
-      text: () => Promise.resolve('Internal Server Error'),
-    })
+    mockFetch.mockResolvedValueOnce(jsonResponse('Internal Server Error', 500))
 
     const { api } = await import('../lib/api')
-    await expect(api.summary()).rejects.toThrow('API error 500')
+    await expect(api.summary()).rejects.toThrow('Request failed (500)')
+  })
+
+  it('surfaces the server detail message on non-ok response', async () => {
+    mockFetch.mockResolvedValueOnce(jsonResponse({ detail: 'Scan already running' }, 409))
+
+    const { api } = await import('../lib/api')
+    await expect(api.summary()).rejects.toThrow('Scan already running')
   })
 
   it('prescanStatus() calls /api/prescan/status', async () => {
     const statusData = { status: 0, message: 'Idle', auto_mode: false }
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(statusData),
-    })
+    mockFetch.mockResolvedValueOnce(jsonResponse(statusData))
 
     const { api } = await import('../lib/api')
     const result = await api.prescanStatus()
@@ -73,10 +75,7 @@ describe('API helper', () => {
   })
 
   it('scanBatch() sends POST with batch_size', async () => {
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve({ started: true }),
-    })
+    mockFetch.mockResolvedValueOnce(jsonResponse({ started: true }))
 
     const { api } = await import('../lib/api')
     await api.scanBatch(200)
