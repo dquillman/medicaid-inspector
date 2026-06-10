@@ -413,7 +413,7 @@ export default function App() {
           className={`no-print py-4 text-center transition-[margin-left] duration-200 ${sidebarMargin}`}
         >
           <div className="divider mb-4 mx-auto max-w-2xl" />
-          <p className="text-[10px] text-gray-600 uppercase tracking-[0.2em] font-medium">
+          <p className="text-xs text-gray-600 uppercase tracking-[0.2em] font-medium">
             Powered by Medicaid Inspector &middot; Data sourced from CMS/HHS &middot; For authorized use only
           </p>
         </footer>

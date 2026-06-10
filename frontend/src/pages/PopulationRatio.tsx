@@ -102,7 +102,7 @@ function DensityTab() {
 
       {/* Bar chart */}
       <div className="card p-4">
-        <h2 className="text-sm font-semibold text-gray-300 mb-4">Top 15 States by Providers per 100k Enrollees</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-4">Top 15 States by Providers per 100k Enrollees</h2>
         <ResponsiveContainer width="100%" height={350}>
           <BarChart data={chartData} margin={{ top: 5, right: 30, left: 20, bottom: 5 }}>
             <CartesianGrid strokeDasharray="3 3" stroke="#374151" />

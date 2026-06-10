@@ -27,6 +27,7 @@ const SIGNAL_LABELS: Record<string, string> = {
   dead_npi_billing:         'Dead NPI Billing',
   new_provider_explosion:   'New Provider Explosion',
   geographic_impossibility: 'Geographic Impossibility',
+  diagnosis_procedure_mismatch: 'Diagnosis Mismatch',
 }
 
 const WIDGET_STORAGE_KEY = 'mfi_widget_order'
@@ -136,31 +137,31 @@ export default function Overview() {
               className="bg-red-950 border-2 border-red-700 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
               onClick={() => navigate('/review?status=confirmed_fraud')}
             >
-              <p className="text-red-500 text-xs font-bold uppercase tracking-widest mb-2">CONFIRMED FRAUD CASES</p>
+              <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2">Confirmed Fraud Cases</p>
               <p className="text-5xl font-black text-red-400">
                 {confirmedFraud.toLocaleString()}
               </p>
-              <p className="text-red-700 text-xs mt-2 uppercase tracking-wider">Requires Immediate Action</p>
+              <p className="text-red-600 text-xs mt-2 uppercase tracking-wider">Open cases requiring action</p>
             </div>
             <div
-              className="bg-red-950/40 border-2 border-red-800/60 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
+              className="card py-5 text-center cursor-pointer hover:border-red-800 transition-colors"
               onClick={() => navigate('/providers?risk_min=50')}
             >
-              <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2">HIGH RISK PROVIDERS</p>
-              <p className="text-5xl font-black text-red-400">
+              <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-2">High Risk Providers</p>
+              <p className="text-4xl font-bold text-red-400">
                 {(summary?.high_risk_providers ?? 0).toLocaleString()}
               </p>
-              <p className="text-red-800 text-xs mt-2 uppercase tracking-wider">Score &ge; 50</p>
+              <p className="text-gray-600 text-xs mt-2 uppercase tracking-wider">Score &ge; 50</p>
             </div>
             <div
-              className="bg-yellow-950/30 border-2 border-yellow-800/50 rounded-xl p-5 text-center cursor-pointer hover:border-yellow-500 transition-colors"
+              className="card py-5 text-center cursor-pointer hover:border-yellow-800 transition-colors"
               onClick={() => navigate('/providers?risk_min=10.1')}
             >
-              <p className="text-yellow-500 text-xs font-bold uppercase tracking-widest mb-2">FLAGGED FOR REVIEW</p>
-              <p className="text-4xl font-extrabold text-yellow-400">
+              <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-2">Flagged for Review</p>
+              <p className="text-4xl font-bold text-yellow-400">
                 {(summary?.flagged_providers ?? 0).toLocaleString()}
               </p>
-              <p className="text-yellow-800 text-xs mt-2 uppercase tracking-wider">Score &gt; 10</p>
+              <p className="text-gray-600 text-xs mt-2 uppercase tracking-wider">Score &gt; 10</p>
             </div>
           </>
         )}
@@ -210,7 +211,7 @@ export default function Overview() {
     'chart-grid': (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">Flagged Providers by State</h2>
+          <h2 className="text-base font-semibold text-gray-300 mb-3">Flagged Providers by State</h2>
           <div className="h-[28rem]">
             {heatmap ? (
               <StateHeatmap data={heatmap.by_state} onStateClick={(st) => navigate(`/providers?state=${st}`)} />
@@ -221,7 +222,7 @@ export default function Overview() {
           <p className="text-xs text-gray-600 mt-2">Color intensity = flagged provider count. State data from NPPES.</p>
         </div>
         <div className="card">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">Top Fraud Signals (provider count)</h2>
+          <h2 className="text-base font-semibold text-gray-300 mb-3">Top Fraud Signals (provider count)</h2>
           {barData.length > 0 ? (
             <ResponsiveContainer width="100%" height={barHeight}>
               <BarChart data={barData} layout="vertical" margin={{ left: 8 }}>
@@ -259,7 +260,7 @@ export default function Overview() {
     movers: moversData && (moversData.rising.length > 0 || moversData.falling.length > 0) ? (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="card border-red-900/40">
-          <h2 className="text-sm font-semibold text-red-400 mb-3 flex items-center gap-2">
+          <h2 className="text-base font-semibold text-red-400 mb-3 flex items-center gap-2">
             <span className="text-lg">{'\u2191'}</span> Rising Risk Scores
           </h2>
           {moversData.rising.length > 0 ? (
@@ -292,7 +293,7 @@ export default function Overview() {
           )}
         </div>
         <div className="card border-green-900/40">
-          <h2 className="text-sm font-semibold text-green-400 mb-3 flex items-center gap-2">
+          <h2 className="text-base font-semibold text-green-400 mb-3 flex items-center gap-2">
             <span className="text-lg">{'\u2193'}</span> Falling Risk Scores
           </h2>
           {moversData.falling.length > 0 ? (
@@ -345,7 +346,7 @@ export default function Overview() {
               <circle cx="46" cy="18" r="6" fill="#ef4444"/>
               <text x="46" y="22" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="9" fill="white">!</text>
             </svg>
-            Threat Dashboard
+            Program Integrity Overview
           </h1>
           <p className="text-gray-500 text-xs mt-1 uppercase tracking-wider">
             Medicaid Provider-Level Claims Analysis · 2018--2024 · 220M+ Records

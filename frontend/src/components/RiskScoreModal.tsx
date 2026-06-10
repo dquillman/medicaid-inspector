@@ -74,7 +74,7 @@ export default function RiskScoreModal() {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] font-bold text-gray-500 border border-gray-700 hover:border-gray-500 hover:text-gray-300 transition-colors ml-1 leading-none"
+        className="inline-flex items-center justify-center w-4 h-4 rounded-full text-xs font-bold text-gray-500 border border-gray-700 hover:border-gray-500 hover:text-gray-300 transition-colors ml-1 leading-none"
         title="What does the risk score mean?"
       >
         ?

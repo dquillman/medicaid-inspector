@@ -45,20 +45,20 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
     <div className="mt-3 space-y-3 border-t border-gray-700/50 pt-3">
       {/* Methodology */}
       <div>
-        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">How This Was Detected</p>
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">How This Was Detected</p>
         <p className="text-xs text-gray-300 leading-relaxed">{methodology}</p>
       </div>
 
       {/* Threshold */}
       <div>
-        <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Detection Threshold</p>
+        <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Detection Threshold</p>
         <p className="text-xs text-yellow-400 font-mono">{threshold}</p>
       </div>
 
       {/* Signal-specific evidence */}
       {signal === 'billing_concentration' && ev.top_codes && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
             Proof — HCPCS Code Breakdown (total: {fmt(ev.total_billed as number)})
           </p>
           <div className="space-y-1">
@@ -81,7 +81,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'revenue_per_bene_outlier' && ev.z_score != null && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — Statistical Comparison</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — Statistical Comparison</p>
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="bg-red-950/40 border border-red-900/50 rounded p-2">
               <p className="text-gray-500">This Provider</p>
@@ -104,7 +104,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'claims_per_bene_anomaly' && ev.z_score != null && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — Claims Volume</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — Claims Volume</p>
           <div className="grid grid-cols-3 gap-3 text-xs">
             <div className="bg-red-950/40 border border-red-900/50 rounded p-2 text-center">
               <p className="text-gray-500">Claims/Bene</p>
@@ -127,7 +127,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'billing_ramp_rate' && ev.first_6_months && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — First 6 Months</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — First 6 Months</p>
           <div className="flex items-end gap-1 h-20">
             {(ev.first_6_months as { month: string; total_paid: number }[]).map((m, i) => {
               const max = Math.max(...(ev.first_6_months as { total_paid: number }[]).map(x => x.total_paid))
@@ -152,7 +152,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'bust_out_pattern' && ev.timeline && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — Billing Timeline</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — Billing Timeline</p>
           <div className="flex items-end gap-px h-16">
             {(ev.timeline as { month: string; total_paid: number; is_peak: boolean }[]).map((m, i) => {
               const max = Math.max(...(ev.timeline as { total_paid: number }[]).map(x => x.total_paid))
@@ -175,10 +175,10 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'ghost_billing' && ev.months && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
             Proof — Beneficiary Counts ({ev.ghost_month_count as number}/{ev.total_months as number} months at exactly 12)
           </p>
-          <div className="grid grid-cols-6 gap-1 text-[10px]">
+          <div className="grid grid-cols-6 gap-1 text-xs">
             {(ev.months as { month: string; beneficiaries: number; is_ghost: boolean; total_paid: number }[]).slice(0, 24).map((m, i) => (
               <div
                 key={`${m.month ?? ''}-${i}`}
@@ -194,7 +194,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'total_spend_outlier' && ev.z_score != null && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — Spend Comparison</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — Spend Comparison</p>
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="bg-red-950/40 border border-red-900/50 rounded p-2">
               <p className="text-gray-500">This Provider</p>
@@ -214,7 +214,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'billing_consistency' && ev.monthly_values && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
             Proof — Monthly Values (CV = {(ev.cv as number).toFixed(4)})
           </p>
           <div className="flex items-end gap-px h-16">
@@ -239,7 +239,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'bene_concentration' && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — Claims vs Beneficiaries</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — Claims vs Beneficiaries</p>
           <div className="grid grid-cols-3 gap-3 text-xs">
             <div className="bg-gray-800/50 border border-gray-700/50 rounded p-2 text-center">
               <p className="text-gray-500">Claims</p>
@@ -259,7 +259,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'upcoding_pattern' && ev.em_families && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — E/M Code Distribution</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — E/M Code Distribution</p>
           {(ev.em_families as { family: string; total_claims: number; codes: { code: string; claims: number; pct: number }[] }[]).map(fam => (
             <div key={fam.family} className="mb-2">
               <p className="text-xs text-gray-400 mb-1">{fam.family} ({fam.total_claims} claims)</p>
@@ -267,7 +267,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
                 {fam.codes.map(c => (
                   <div
                     key={c.code}
-                    className={`flex-1 rounded p-1 text-center text-[10px] ${c.pct > 50 ? 'bg-red-950/50 border border-red-800 text-red-300' : 'bg-gray-800 text-gray-400'}`}
+                    className={`flex-1 rounded p-1 text-center text-xs ${c.pct > 50 ? 'bg-red-950/50 border border-red-800 text-red-300' : 'bg-gray-800 text-gray-400'}`}
                   >
                     <div className="font-mono">{c.code}</div>
                     <div className="font-bold">{c.pct}%</div>
@@ -281,7 +281,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'address_cluster_risk' && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
             Proof — {ev.cluster_size as number} Providers at This Address
           </p>
           {ev.address && (
@@ -308,7 +308,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'specialty_mismatch' && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
             Proof — {ev.specialty as string} (keyword: {ev.matched_keyword as string})
           </p>
           <div className="grid grid-cols-2 gap-3 text-xs mb-2">
@@ -340,7 +340,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
             </div>
           </div>
           {ev.valid_prefixes && (
-            <p className="text-[10px] text-gray-600">
+            <p className="text-xs text-gray-600">
               Expected code prefixes: {(ev.valid_prefixes as string[]).join(', ')}
             </p>
           )}
@@ -349,7 +349,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'corporate_shell_risk' && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">
             Proof — {ev.cluster_size as number} NPIs Under Same Official
           </p>
           {ev.authorized_official && (
@@ -379,7 +379,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'geographic_impossibility' && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — State Mismatch</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — State Mismatch</p>
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="bg-gray-800/50 border border-gray-700/50 rounded p-2 text-center">
               <p className="text-gray-500">NPPES Registration</p>
@@ -399,7 +399,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'oig_excluded' && ev.record && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — OIG LEIE Record</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — OIG LEIE Record</p>
           <div className="bg-red-950/40 border border-red-900/50 rounded p-2 text-xs space-y-1">
             {Object.entries(ev.record as Record<string, string>).map(([k, v]) => (
               <div key={k} className="flex gap-2">
@@ -413,7 +413,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'dead_npi_billing' && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — NPI Status</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — NPI Status</p>
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="bg-red-950/40 border border-red-900/50 rounded p-2">
               <p className="text-gray-500">NPI Status</p>
@@ -431,7 +431,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
 
       {signal === 'new_provider_explosion' && (
         <div>
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Proof — Provider Age vs Billing</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Proof — Provider Age vs Billing</p>
           <div className="grid grid-cols-2 gap-3 text-xs">
             <div className="bg-gray-800/50 border border-gray-700/50 rounded p-2">
               <p className="text-gray-500">NPI Enumerated</p>
@@ -446,7 +446,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
         </div>
       )}
 
-      <p className="text-[10px] text-gray-600 italic border-t border-gray-800 pt-2">
+      <p className="text-xs text-gray-600 italic border-t border-gray-800 pt-2">
         Source: OIG Medicaid Fraud Control Units methodology, CMS Fraud Prevention System, 42 CFR Part 455
       </p>
     </div>

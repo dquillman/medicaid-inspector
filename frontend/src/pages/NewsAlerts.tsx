@@ -121,7 +121,7 @@ export default function NewsAlerts() {
       {/* Add form */}
       {showForm && (
         <div className="card space-y-3">
-          <h2 className="text-sm font-semibold text-gray-300">Add New Alert</h2>
+          <h2 className="text-base font-semibold text-gray-300">Add New Alert</h2>
           <div className="grid grid-cols-2 gap-3">
             <input
               className="input"
@@ -244,7 +244,7 @@ export default function NewsAlerts() {
               {/* Content */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded border ${CATEGORY_COLORS[alert.category] || 'bg-gray-800 text-gray-400 border-gray-700'}`}>
+                  <span className={`text-xs uppercase tracking-wider font-semibold px-2 py-0.5 rounded border ${CATEGORY_COLORS[alert.category] || 'bg-gray-800 text-gray-400 border-gray-700'}`}>
                     {alert.category}
                   </span>
                   <span className={`text-xs font-medium ${SEVERITY_COLORS[alert.severity] || 'text-gray-400'}`}>

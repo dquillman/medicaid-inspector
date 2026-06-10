@@ -208,15 +208,15 @@ export default function Watchlist() {
       {/* KPI cards */}
       <div className="grid grid-cols-3 gap-4">
         <div className="card text-center">
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">Total Watched</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Total Watched</p>
           <p className="text-2xl font-bold text-blue-400 mt-1">{items.length}</p>
         </div>
         <div className="card text-center">
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">Active</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Active</p>
           <p className="text-2xl font-bold text-green-400 mt-1">{activeCount}</p>
         </div>
         <div className="card text-center">
-          <p className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">Alerts Triggered</p>
+          <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">Alerts Triggered</p>
           <p className={`text-2xl font-bold mt-1 ${alertCount > 0 ? 'text-red-400' : 'text-gray-500'}`}>
             {alertCount}
           </p>
@@ -259,7 +259,7 @@ export default function Watchlist() {
         <div className="card p-0 overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-800 text-left text-[10px] uppercase tracking-wider text-gray-500">
+              <tr className="border-b border-gray-800 text-left text-xs uppercase tracking-wider text-gray-500">
                 <th className="px-4 py-3">Provider</th>
                 <th className="px-4 py-3">NPI</th>
                 <th className="px-4 py-3">Specialty</th>

@@ -295,7 +295,7 @@ function RingDetailPanel({ ringId, onClose }: { ringId: string; onClose: () => v
               <span className="font-mono text-gray-400">{e.source.slice(-6)}</span>
               <span style={{ color: CONNECTION_COLORS[e.type] || '#6b7280' }}>&mdash;</span>
               <span className="font-mono text-gray-400">{e.target.slice(-6)}</span>
-              <span className="px-1.5 py-0.5 rounded text-[10px]" style={{ color: CONNECTION_COLORS[e.type] || '#6b7280', borderColor: CONNECTION_COLORS[e.type] || '#6b7280', borderWidth: 1 }}>
+              <span className="px-1.5 py-0.5 rounded text-xs" style={{ color: CONNECTION_COLORS[e.type] || '#6b7280', borderColor: CONNECTION_COLORS[e.type] || '#6b7280', borderWidth: 1 }}>
                 {CONNECTION_LABELS[e.type] || e.type}
               </span>
               <span className="text-gray-600 truncate max-w-[200px]" title={e.detail}>{e.detail}</span>
@@ -451,7 +451,7 @@ export default function FraudRings() {
                     {ring.connection_types.map(t => (
                       <span
                         key={t}
-                        className="text-[10px] px-2 py-0.5 rounded-full border"
+                        className="text-xs px-2 py-0.5 rounded-full border"
                         style={{ borderColor: CONNECTION_COLORS[t] || '#6b7280', color: CONNECTION_COLORS[t] || '#6b7280' }}
                       >
                         {CONNECTION_LABELS[t] || t}

@@ -476,7 +476,7 @@ export default function MFCUReferralPage() {
                     </div>
                   ))}
                   {flaggedSignals.length > 8 && (
-                    <p className="text-gray-600 text-[10px]">+{flaggedSignals.length - 8} more</p>
+                    <p className="text-gray-600 text-xs">+{flaggedSignals.length - 8} more</p>
                   )}
                 </div>
               </div>
@@ -490,7 +490,7 @@ export default function MFCUReferralPage() {
                   {refsData.referrals.slice(0, 3).map((r: any, i: number) => (
                     <div key={i} className="text-xs flex items-center justify-between">
                       <span className="text-gray-400 font-mono">{r.referral_id ?? r.id}</span>
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                      <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
                         r.stage === 'submitted' ? 'bg-blue-900/50 text-blue-300' :
                         r.stage === 'under_investigation' ? 'bg-yellow-900/50 text-yellow-300' :
                         r.stage === 'closed' ? 'bg-gray-800 text-gray-500' :

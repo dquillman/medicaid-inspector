@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
+import { ExclamationTriangleIcon } from './icons'
 
 const BH_PREFIXES = ['Bene_CC_BH']
 const TOP_N = 10
@@ -30,7 +31,7 @@ export default function DiagnosisMixCard({ npi }: { npi: string }) {
   if (isLoading) {
     return (
       <div className="card">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">Diagnosis Mix</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-3">Diagnosis Mix</h2>
         <div className="h-40 flex items-center justify-center text-gray-600 text-sm">Loading…</div>
       </div>
     )
@@ -42,7 +43,7 @@ export default function DiagnosisMixCard({ npi }: { npi: string }) {
     return (
       <div className="card">
         <div className="flex items-baseline justify-between mb-2">
-          <h2 className="text-sm font-semibold text-gray-300">Diagnosis Mix</h2>
+          <h2 className="text-base font-semibold text-gray-300">Diagnosis Mix</h2>
           <span className="text-xs text-gray-600">CMS MUP-by-Provider</span>
         </div>
         <p className="text-xs text-gray-500">
@@ -60,7 +61,7 @@ export default function DiagnosisMixCard({ npi }: { npi: string }) {
     <div className="card space-y-3">
       <div className="flex items-baseline justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-gray-300">Diagnosis Mix</h2>
+          <h2 className="text-base font-semibold text-gray-300">Diagnosis Mix</h2>
           <p className="text-xs text-gray-600 mt-0.5">
             {data.provider_type ?? ''} · {data.tot_benes?.toLocaleString() ?? '—'} Medicare beneficiaries
             {data.bene_avg_age != null && ` · avg age ${data.bene_avg_age.toFixed(0)}`}
@@ -73,7 +74,7 @@ export default function DiagnosisMixCard({ npi }: { npi: string }) {
       {mismatch?.flagged && (
         <div className="rounded-md border border-red-800 bg-red-950/30 px-3 py-2">
           <div className="flex items-center gap-2 mb-1">
-            <span className="text-red-400 font-semibold text-xs">⚠ DIAGNOSIS-PROCEDURE MISMATCH</span>
+            <span className="text-red-400 font-semibold text-xs flex items-center gap-1.5"><ExclamationTriangleIcon className="w-3.5 h-3.5" /> DIAGNOSIS-PROCEDURE MISMATCH</span>
             <span className="text-xs text-red-300/80 font-mono">
               score {(mismatch.score * 100).toFixed(0)} · weight {mismatch.weight}
             </span>

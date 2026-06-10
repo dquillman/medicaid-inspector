@@ -27,7 +27,7 @@ const ANOMALY_TYPE_LABELS: Record<string, string> = {
 function SeverityBadge({ severity }: { severity: string }) {
   const s = SEVERITY_COLORS[severity] || SEVERITY_COLORS.LOW
   return (
-    <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full border ${s.bg} ${s.border} ${s.text}`}>
+    <span className={`text-xs font-bold uppercase px-2 py-0.5 rounded-full border ${s.bg} ${s.border} ${s.text}`}>
       {severity}
     </span>
   )
@@ -38,7 +38,7 @@ function AnomalyTypeBadge({ type }: { type: string }) {
   const isVolumeIssue = type === 'impossible_volume'
   const isPracticeChange = type === 'practice_change'
   return (
-    <span className={`text-[10px] font-medium uppercase px-2 py-0.5 rounded border ${
+    <span className={`text-xs font-medium uppercase px-2 py-0.5 rounded border ${
       isVolumeIssue
         ? 'bg-red-900/30 border-red-800 text-red-400'
         : isPracticeChange
@@ -89,7 +89,7 @@ function DayOfWeekChart({ data }: { data: TemporalAnalysis['day_of_week_distribu
           </Bar>
         </BarChart>
       </ResponsiveContainer>
-      <p className="text-[10px] text-gray-600 mt-1 text-center">
+      <p className="text-xs text-gray-600 mt-1 text-center">
         Estimated from monthly claim volumes and business day counts
       </p>
     </div>
@@ -161,7 +161,7 @@ function MonthlyTrendChart({ data, meanPaid }: {
           />
         </LineChart>
       </ResponsiveContainer>
-      <div className="flex items-center gap-4 mt-2 justify-center text-[10px] text-gray-500">
+      <div className="flex items-center gap-4 mt-2 justify-center text-xs text-gray-500">
         <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-full bg-blue-500 inline-block" /> Normal
         </span>
@@ -199,12 +199,12 @@ function AnomalyList({ anomalies }: { anomalies: TemporalAnomaly[] }) {
         </h3>
         <div className="flex items-center gap-2">
           {criticalCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 bg-red-900/40 border border-red-700 rounded-full text-red-300 font-bold">
+            <span className="text-xs px-2 py-0.5 bg-red-900/40 border border-red-700 rounded-full text-red-300 font-bold">
               {criticalCount} CRITICAL
             </span>
           )}
           {highCount > 0 && (
-            <span className="text-[10px] px-2 py-0.5 bg-orange-900/40 border border-orange-700 rounded-full text-orange-300 font-bold">
+            <span className="text-xs px-2 py-0.5 bg-orange-900/40 border border-orange-700 rounded-full text-orange-300 font-bold">
               {highCount} HIGH
             </span>
           )}
@@ -221,7 +221,7 @@ function AnomalyList({ anomalies }: { anomalies: TemporalAnomaly[] }) {
               <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                 <SeverityBadge severity={anomaly.severity} />
                 <AnomalyTypeBadge type={anomaly.type} />
-                <span className="text-[10px] text-gray-500 font-mono ml-auto">
+                <span className="text-xs text-gray-500 font-mono ml-auto">
                   {anomaly.date_range}
                 </span>
               </div>
@@ -247,7 +247,7 @@ export default function TemporalAnalysisSection({ npi }: { npi: string }) {
   if (isLoading) {
     return (
       <div className="card">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">Temporal Anomaly Detection</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-3">Temporal Anomaly Detection</h2>
         <div className="h-40 flex items-center justify-center text-gray-600 text-sm">
           Analyzing temporal patterns...
         </div>
@@ -260,7 +260,7 @@ export default function TemporalAnalysisSection({ npi }: { npi: string }) {
     if (errMsg.includes('404')) return null
     return (
       <div className="card">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">Temporal Anomaly Detection</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-3">Temporal Anomaly Detection</h2>
         <p className="text-xs text-gray-500">Could not load temporal analysis.</p>
       </div>
     )
@@ -281,24 +281,24 @@ export default function TemporalAnalysisSection({ npi }: { npi: string }) {
     }`}>
       <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <h2 className="text-sm font-semibold text-gray-300">Temporal Anomaly Detection</h2>
+          <h2 className="text-base font-semibold text-gray-300">Temporal Anomaly Detection</h2>
           {hasCritical && (
-            <span className="text-[10px] px-2 py-0.5 bg-red-900 border border-red-700 rounded-full text-red-300 font-bold">
+            <span className="text-xs px-2 py-0.5 bg-red-900 border border-red-700 rounded-full text-red-300 font-bold">
               CRITICAL ANOMALIES
             </span>
           )}
           {!hasCritical && hasAnomalies && (
-            <span className="text-[10px] px-2 py-0.5 bg-yellow-900/60 border border-yellow-700 rounded-full text-yellow-300 font-bold">
+            <span className="text-xs px-2 py-0.5 bg-yellow-900/60 border border-yellow-700 rounded-full text-yellow-300 font-bold">
               {data.detected_anomalies.length} ANOMAL{data.detected_anomalies.length === 1 ? 'Y' : 'IES'}
             </span>
           )}
           {!hasAnomalies && (
-            <span className="text-[10px] px-2 py-0.5 bg-green-900/40 border border-green-800 rounded-full text-green-400 font-bold">
+            <span className="text-xs px-2 py-0.5 bg-green-900/40 border border-green-800 rounded-full text-green-400 font-bold">
               NO ANOMALIES
             </span>
           )}
         </div>
-        <div className="text-[10px] text-gray-500">
+        <div className="text-xs text-gray-500">
           {data.summary.total_months} months analyzed
         </div>
       </div>
@@ -338,13 +338,13 @@ export default function TemporalAnalysisSection({ npi }: { npi: string }) {
           <h3 className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-2">
             Impossible Day Volumes ({data.impossible_days.length})
           </h3>
-          <p className="text-[10px] text-gray-500 mb-3">
+          <p className="text-xs text-gray-500 mb-3">
             Months where estimated daily service hours exceed 24 hours per business day (based on 15 min/claim)
           </p>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[10px] text-gray-500 border-b border-gray-800">
+                <tr className="text-xs text-gray-500 border-b border-gray-800">
                   <th className="text-left pb-2 pr-4 font-medium">Month</th>
                   <th className="text-right pb-2 pr-4 font-medium">Claims</th>
                   <th className="text-right pb-2 pr-4 font-medium">Biz Days</th>

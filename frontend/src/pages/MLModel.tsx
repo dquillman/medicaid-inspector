@@ -392,9 +392,9 @@ export default function MLModel() {
                         </td>
                         <td className="px-4 py-2 text-xs">
                           {p.label === 1 ? (
-                            <span className="px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 text-[10px] uppercase">Fraud</span>
+                            <span className="px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 text-xs uppercase">Fraud</span>
                           ) : p.label === 0 ? (
-                            <span className="px-1.5 py-0.5 rounded bg-green-900/50 text-green-300 text-[10px] uppercase">Clear</span>
+                            <span className="px-1.5 py-0.5 rounded bg-green-900/50 text-green-300 text-xs uppercase">Clear</span>
                           ) : (
                             <span className="text-gray-600">-</span>
                           )}

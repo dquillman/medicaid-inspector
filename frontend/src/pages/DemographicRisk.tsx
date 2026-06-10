@@ -119,7 +119,7 @@ export default function DemographicRisk() {
       {/* Scatter Chart */}
       {correlations && correlations.correlations.length > 0 && (
         <div className="card p-4">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">
+          <h2 className="text-base font-semibold text-gray-300 mb-3">
             Poverty Rate vs. Avg Provider Risk Score by State
           </h2>
           <ResponsiveContainer width="100%" height={340}>
@@ -272,7 +272,7 @@ function StateDetailPanel({
               ['Demo Risk Score', data.demographic_risk_score.toFixed(1)],
             ] as [string, string][]).map(([label, value]) => (
               <div key={label} className="bg-gray-800/50 rounded p-2">
-                <div className="text-[10px] text-gray-500 uppercase">{label}</div>
+                <div className="text-xs text-gray-500 uppercase">{label}</div>
                 <div className="text-sm font-semibold text-gray-200">{value}</div>
               </div>
             ))}

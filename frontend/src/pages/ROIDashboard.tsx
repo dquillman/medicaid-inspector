@@ -125,7 +125,7 @@ export default function ROIDashboard() {
           <p className={`text-3xl font-black text-blue-400 ${isLoading ? 'animate-pulse' : ''}`}>
             {isLoading ? '...' : fmt(summary?.total_flagged_billing ?? 0)}
           </p>
-          <p className="text-gray-600 text-[10px] mt-1">Confirmed + Referred</p>
+          <p className="text-gray-600 text-xs mt-1">Confirmed + Referred</p>
         </div>
 
         <div className={`card py-4 text-center ${rateBg(recoveryRate)}`}>
@@ -140,7 +140,7 @@ export default function ROIDashboard() {
           <p className={`text-3xl font-black text-red-400 ${isLoading ? 'animate-pulse' : ''}`}>
             {isLoading ? '...' : (summary?.cases_confirmed ?? 0).toLocaleString()}
           </p>
-          <p className="text-gray-600 text-[10px] mt-1">
+          <p className="text-gray-600 text-xs mt-1">
             + {summary?.cases_referred ?? 0} referred
           </p>
         </div>
@@ -150,7 +150,7 @@ export default function ROIDashboard() {
           <p className={`text-3xl font-black ${rateColor(1 - falsePositiveRate)} ${isLoading ? 'animate-pulse' : ''}`}>
             {isLoading ? '...' : `${(falsePositiveRate * 100).toFixed(1)}%`}
           </p>
-          <p className="text-gray-600 text-[10px] mt-1">
+          <p className="text-gray-600 text-xs mt-1">
             {summary?.cases_dismissed ?? 0} dismissed
           </p>
         </div>
@@ -181,7 +181,7 @@ export default function ROIDashboard() {
       <div className="grid grid-cols-2 gap-6">
         {/* Monthly Trend Chart */}
         <div className="card">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">Monthly Recovery Trend</h2>
+          <h2 className="text-base font-semibold text-gray-300 mb-3">Monthly Recovery Trend</h2>
           {(summary?.monthly_trend ?? []).length > 0 ? (
             <ResponsiveContainer width="100%" height={300}>
               <LineChart data={summary!.monthly_trend} margin={{ left: 8, right: 8 }}>
@@ -219,7 +219,7 @@ export default function ROIDashboard() {
 
         {/* Log Recovery Form */}
         <div className="card">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">Log Recovery</h2>
+          <h2 className="text-base font-semibold text-gray-300 mb-3">Log Recovery</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
             {/* NPI with autocomplete */}
             <div className="relative">
@@ -313,7 +313,7 @@ export default function ROIDashboard() {
 
       {/* Recent Recoveries Table */}
       <div className="card">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">Recent Recoveries</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-3">Recent Recoveries</h2>
         {(recoveriesData?.items ?? []).length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -380,7 +380,7 @@ export default function ROIDashboard() {
       {/* Top Recoveries */}
       {(summary?.top_recoveries ?? []).length > 0 && (
         <div className="card">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">Top 10 Recoveries by Amount</h2>
+          <h2 className="text-base font-semibold text-gray-300 mb-3">Top 10 Recoveries by Amount</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>

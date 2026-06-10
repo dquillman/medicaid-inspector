@@ -99,19 +99,19 @@ export default function AuditLog() {
       {stats && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
           <div className="card">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total Events</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Total Events</p>
             <p className="text-2xl font-bold text-white mt-1">{stats.total_entries.toLocaleString()}</p>
           </div>
           <div className="card">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Action Types</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Action Types</p>
             <p className="text-2xl font-bold text-white mt-1">{Object.keys(stats.by_action_type).length}</p>
           </div>
           <div className="card">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Active Days</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Active Days</p>
             <p className="text-2xl font-bold text-white mt-1">{stats.actions_per_day.length}</p>
           </div>
           <div className="card">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider">Top Entity</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider">Top Entity</p>
             <p className="text-sm font-mono text-white mt-1 truncate">
               {stats.most_active_entities[0]?.entity ?? '--'}
             </p>
@@ -162,7 +162,7 @@ export default function AuditLog() {
         ) : (
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-gray-800 text-left text-[10px] text-gray-500 uppercase tracking-wider">
+              <tr className="border-b border-gray-800 text-left text-xs text-gray-500 uppercase tracking-wider">
                 <th className="px-4 py-2.5">Timestamp</th>
                 <th className="px-4 py-2.5">Action</th>
                 <th className="px-4 py-2.5">Entity</th>

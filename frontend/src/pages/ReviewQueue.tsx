@@ -4,36 +4,17 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { ReviewItem, ReviewCounts, AuditEntry } from '../lib/types'
 import { fmt } from '../lib/format'
+import { riskChipClass } from '../lib/risk'
+import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
+import { ArrowDownTrayIcon } from '../components/icons'
 import EmptyState from '../components/EmptyState'
 import QuickTriagePanel from '../components/QuickTriagePanel'
 
 type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
 
-const STATUS_LABELS: Record<string, string> = {
-  pending:         'Pending',
-  assigned:        'Assigned',
-  investigating:   'Investigating',
-  confirmed_fraud: 'Confirmed Fraud',
-  referred:        'Referred',
-  dismissed:       'Dismissed',
-}
-
-const STATUS_COLORS: Record<string, string> = {
-  pending:         'text-yellow-400 bg-yellow-400/10',
-  assigned:        'text-cyan-400 bg-cyan-400/10',
-  investigating:   'text-purple-400 bg-purple-400/10',
-  confirmed_fraud: 'text-red-400 bg-red-400/10',
-  referred:        'text-orange-400 bg-orange-400/10',
-  dismissed:       'text-gray-500 bg-gray-500/10',
-}
-
 function RiskBadge({ score }: { score: number }) {
-  const color =
-    score >= 75 ? 'bg-red-900 text-red-300' :
-    score >= 50 ? 'bg-orange-900 text-orange-300' :
-    'bg-yellow-900 text-yellow-300'
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-mono font-bold ${color}`}>
+    <span className={`px-2 py-0.5 rounded text-xs font-mono font-bold ${riskChipClass(score)}`}>
       {score.toFixed(1)}
     </span>
   )
@@ -590,7 +571,7 @@ export default function ReviewQueue() {
               value={npiSearch}
               onChange={e => { setNpiSearch(e.target.value); setPage(1) }}
               placeholder="Search NPI..."
-              className="w-44 px-3 py-2 pl-8 bg-gray-800 border border-gray-700 rounded text-white text-sm focus:border-blue-500 focus:outline-none font-mono"
+              className="input w-44 pl-8 text-sm font-mono"
             />
             <svg className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
@@ -620,7 +601,7 @@ export default function ReviewQueue() {
             }`}
             aria-label="Export confirmed fraud cases as CSV"
           >
-            {statusFilter === 'confirmed_fraud' && <span>&#8659;</span>}
+            {statusFilter === 'confirmed_fraud' && <ArrowDownTrayIcon />}
             Export Confirmed CSV
           </button>
         </div>

@@ -72,7 +72,7 @@ function RatioCell({ ratio }: { ratio: number }) {
 function FlagBadge({ flagged }: { flagged: boolean }) {
   if (!flagged) return null
   return (
-    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-900/60 text-red-300 border border-red-800">
+    <span className="px-1.5 py-0.5 rounded text-xs font-bold uppercase tracking-wider bg-red-900/60 text-red-300 border border-red-800">
       Flagged
     </span>
   )
@@ -138,19 +138,19 @@ function StateDrilldownPanel({
         <>
           <div className="grid grid-cols-4 gap-3 mb-4">
             <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wider">Enrollment</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider">Enrollment</div>
               <div className="text-lg font-bold text-white">{fmtNum(data.medicaid_enrollment)}</div>
             </div>
             <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wider">Providers</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider">Providers</div>
               <div className="text-lg font-bold text-white">{data.provider_count.toLocaleString()}</div>
             </div>
             <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wider">Total Billing</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider">Total Billing</div>
               <div className="text-lg font-bold text-white">{fmt(data.total_billing)}</div>
             </div>
             <div className="bg-gray-800/50 rounded-lg p-3">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wider">$/Enrollee</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider">$/Enrollee</div>
               <div className="text-lg font-bold text-white">{fmt(data.billing_per_enrollee)}</div>
             </div>
           </div>
@@ -290,17 +290,17 @@ export default function BeneficiaryDensity() {
           {/* KPI Cards */}
           <div className="grid grid-cols-3 gap-4">
             <div className="card">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Total Enrollment</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Total Enrollment</div>
               <div className="text-2xl font-bold text-white">{fmtNum(totalEnrollment)}</div>
               <div className="text-xs text-gray-500 mt-1">{states.length} states tracked</div>
             </div>
             <div className="card">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">States Flagged</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">States Flagged</div>
               <div className="text-2xl font-bold text-red-400">{flaggedCount}</div>
               <div className="text-xs text-gray-500 mt-1">Ratio &gt; 1.5x national avg</div>
             </div>
             <div className="card">
-              <div className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Highest Ratio</div>
+              <div className="text-xs text-gray-500 uppercase tracking-wider mb-1">Highest Ratio</div>
               {highestRatioState ? (
                 <>
                   <div className="text-2xl font-bold text-white">
@@ -319,7 +319,7 @@ export default function BeneficiaryDensity() {
 
           {/* State Table */}
           <div className="card">
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+            <h2 className="text-base font-semibold text-gray-400 uppercase tracking-wider mb-3">
               State-Level Density Analysis
             </h2>
             {states.length === 0 ? (

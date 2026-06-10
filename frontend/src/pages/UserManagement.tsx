@@ -219,7 +219,7 @@ export default function UserManagement() {
                 <td className="py-3 px-4 text-white font-mono">
                   {u.username}
                   {u.username === currentUser?.username && (
-                    <span className="ml-2 text-[10px] text-gray-500">(you)</span>
+                    <span className="ml-2 text-xs text-gray-500">(you)</span>
                   )}
                 </td>
                 <td className="py-3 px-4 text-gray-300">{u.display_name}</td>

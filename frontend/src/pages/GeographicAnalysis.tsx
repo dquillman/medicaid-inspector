@@ -8,21 +8,21 @@ import { fmtM } from '../lib/format'
 function SeverityBadge({ count }: { count: number }) {
   if (count >= 10) {
     return (
-      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-900/60 text-red-300 border border-red-700">
+      <span className="px-1.5 py-0.5 rounded text-xs font-bold uppercase tracking-wider bg-red-900/60 text-red-300 border border-red-700">
         Critical
       </span>
     )
   }
   if (count >= 5) {
     return (
-      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-orange-900/60 text-orange-300 border border-orange-700">
+      <span className="px-1.5 py-0.5 rounded text-xs font-bold uppercase tracking-wider bg-orange-900/60 text-orange-300 border border-orange-700">
         High
       </span>
     )
   }
   if (count >= 3) {
     return (
-      <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-yellow-900/60 text-yellow-300 border border-yellow-700">
+      <span className="px-1.5 py-0.5 rounded text-xs font-bold uppercase tracking-wider bg-yellow-900/60 text-yellow-300 border border-yellow-700">
         Watch
       </span>
     )
@@ -110,7 +110,7 @@ export default function GeographicAnalysis() {
       {/* State Heatmap */}
       <div className="card">
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-gray-300">
+          <h2 className="text-base font-semibold text-gray-300">
             {selectedState ? `${selectedState} — State Detail` : 'Flagged Providers by State'}
           </h2>
           <span className="text-xs text-gray-600">Click a state to drill down</span>
@@ -124,7 +124,7 @@ export default function GeographicAnalysis() {
       {selectedState && (
         <div className="card space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-white">
+            <h2 className="text-base font-semibold text-white">
               Cities in {selectedState}
             </h2>
             {drilldownData && (

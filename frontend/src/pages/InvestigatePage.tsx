@@ -101,7 +101,7 @@ export default function InvestigatePage() {
             <p className="text-gray-400 text-xs uppercase tracking-widest font-bold">
               Medicaid Program Integrity &mdash; Investigation Narrative
             </p>
-            <p className="text-gray-500 text-[10px] mt-1">
+            <p className="text-gray-500 text-xs mt-1">
               Classification: FOR OFFICIAL USE ONLY &middot; NPI {npi}
             </p>
           </div>

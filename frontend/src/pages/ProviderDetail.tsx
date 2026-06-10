@@ -4,6 +4,12 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
+import { riskChipClass } from '../lib/risk'
+import {
+  PrinterIcon, MagnifyingGlassIcon, LinkIcon, ExclamationTriangleIcon,
+  DocumentTextIcon, ArrowDownTrayIcon, StarIcon, StarSolidIcon,
+  NoSymbolIcon, InformationCircleIcon,
+} from '../components/icons'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 import SpendingTimeline from '../components/SpendingTimeline'
 import HcpcsBreakdown from '../components/HcpcsBreakdown'
@@ -63,7 +69,7 @@ function MedicareCrossReference({ data: medicareData }: { data: MedicareComparis
   if (!medicareData) {
     return (
       <div className="card">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">Medicare Cross-Reference</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-3">Medicare Cross-Reference</h2>
         <div className="h-24 flex items-center justify-center text-gray-600 text-sm">Loading Medicare data...</div>
       </div>
     )
@@ -71,7 +77,7 @@ function MedicareCrossReference({ data: medicareData }: { data: MedicareComparis
   return (
     <div className={`card ${medicareData.has_discrepancies ? 'border-orange-800/60 bg-orange-950/10' : ''}`}>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+        <h2 className="text-base font-semibold text-gray-300 flex items-center gap-2">
           Medicare Cross-Reference
           {medicareData.has_discrepancies && (
             <span className="text-xs px-2 py-0.5 bg-orange-900 border border-orange-700 rounded-full text-orange-300 font-bold">
@@ -82,7 +88,7 @@ function MedicareCrossReference({ data: medicareData }: { data: MedicareComparis
             <span className="text-xs px-2 py-0.5 bg-gray-800 border border-gray-700 rounded-full text-gray-400">NO MEDICARE DATA</span>
           )}
         </h2>
-        <span className="text-[10px] text-gray-600 uppercase tracking-wider">CMS Medicare FFS Utilization</span>
+        <span className="text-xs text-gray-600 uppercase tracking-wider">CMS Medicare FFS Utilization</span>
       </div>
       {medicareData.error ? (
         <p className="text-xs text-gray-500">Could not reach CMS Medicare API: {medicareData.error}</p>
@@ -94,7 +100,7 @@ function MedicareCrossReference({ data: medicareData }: { data: MedicareComparis
                 const alertCls = d.severity === 'HIGH' ? 'bg-red-950/30 border-red-800 text-red-300' : d.severity === 'MEDIUM' ? 'bg-orange-950/30 border-orange-800 text-orange-300' : 'bg-yellow-950/30 border-yellow-800 text-yellow-300'
                 return (
                   <div key={i} className={`flex items-start gap-3 px-4 py-3 rounded-lg border ${alertCls}`}>
-                    <span className="text-lg mt-0.5 font-black">{d.severity === 'LOW' ? '\u2139' : '\u26A0'}</span>
+                    <span className="mt-0.5">{d.severity === 'LOW' ? <InformationCircleIcon className="w-5 h-5" /> : <ExclamationTriangleIcon className="w-5 h-5" />}</span>
                     <div className="flex-1">
                       <p className="text-sm font-medium">{d.description}</p>
                       <p className="text-xs mt-0.5 opacity-70">
@@ -163,7 +169,7 @@ function MedicareCrossReference({ data: medicareData }: { data: MedicareComparis
                       <div key={i} className="flex items-center justify-between px-3 py-1.5 bg-gray-900/50 border border-gray-800 rounded text-xs">
                         <div className="flex items-center gap-2 min-w-0">
                           <span className="font-mono text-green-400 flex-shrink-0">{h.hcpcs_code}</span>
-                          {'description' in h && h.description && <span className="text-gray-500 truncate text-[10px]" title={String(h.description)}>{String(h.description)}</span>}
+                          {'description' in h && h.description && <span className="text-gray-500 truncate text-xs" title={String(h.description)}>{String(h.description)}</span>}
                         </div>
                         <span className="text-gray-300 font-mono flex-shrink-0 ml-2">{fmt(h.total_paid)}</span>
                       </div>
@@ -359,14 +365,14 @@ export default function ProviderDetail() {
           className="no-print px-3 py-1.5 bg-gray-800 hover:bg-gray-700 border border-gray-600 text-gray-300 text-xs rounded transition-colors flex items-center gap-1.5"
           title="Print this page"
         >
-          <span>🖨</span> Print
+          <PrinterIcon /> Print
         </button>
       </div>
 
       {/* OIG Exclusion Banner — full-width, impossible to miss */}
       {oigExcluded && oigData?.record && (
         <div className="bg-red-950 border-2 border-red-600 rounded-xl px-6 py-5 flex items-start gap-4 shadow-lg shadow-red-950/50">
-          <span className="text-red-500 text-3xl mt-0.5 font-black">{'\u26D4'}</span>
+          <NoSymbolIcon className="w-8 h-8 text-red-500 mt-0.5 flex-shrink-0" />
           <div className="flex-1">
             <p className="text-red-300 font-black text-base uppercase tracking-wider">OIG EXCLUSION LIST -- PROVIDER EXCLUDED FROM FEDERAL HEALTHCARE PROGRAMS</p>
             <p className="text-red-400 text-sm mt-2 font-mono">
@@ -381,7 +387,7 @@ export default function ProviderDetail() {
       {/* SAM.gov Exclusion Banner — full-width, similar to OIG */}
       {samData?.excluded && (
         <div className="bg-red-950 border-2 border-red-600 rounded-xl px-6 py-5 flex items-start gap-4 shadow-lg shadow-red-950/50">
-          <span className="text-red-500 text-3xl mt-0.5 font-black">{'\u26D4'}</span>
+          <NoSymbolIcon className="w-8 h-8 text-red-500 mt-0.5 flex-shrink-0" />
           <div className="flex-1">
             <p className="text-red-300 font-black text-base uppercase tracking-wider">SAM.GOV FEDERAL EXCLUSION -- PROVIDER EXCLUDED FROM GOVERNMENT CONTRACTS</p>
             <p className="text-red-400 text-sm mt-2">
@@ -438,21 +444,21 @@ export default function ProviderDetail() {
               className="px-4 py-2 bg-blue-700 hover:bg-blue-600 border border-blue-500 hover:border-blue-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-blue-900/30"
               title="Generate a full investigation narrative with signals, statutes, and recommendations"
             >
-              <span>&#128269;</span> Investigate
+              <MagnifyingGlassIcon /> Investigate
             </Link>
             <Link
               to={`/providers/${npi}/ownership`}
               className="px-4 py-2 bg-purple-700 hover:bg-purple-600 border border-purple-500 hover:border-purple-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-purple-900/30"
               title="Trace ownership network, shared addresses, and co-located providers"
             >
-              <span>&#128279;</span> Trace Ownership
+              <LinkIcon /> Trace Ownership
             </Link>
             <Link
               to={`/providers/${npi}/referral`}
               className="px-4 py-2 bg-red-700 hover:bg-red-600 border border-red-500 hover:border-red-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-red-900/30"
               title="Refer this provider to the Medicaid Fraud Control Unit"
             >
-              <span>&#9888;</span> Refer to MFCU
+              <ExclamationTriangleIcon /> Refer to MFCU
             </Link>
           </div>
           <button
@@ -465,7 +471,7 @@ export default function ProviderDetail() {
             className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2 disabled:opacity-50"
             title="Generate a comprehensive HTML referral packet for this provider"
           >
-            <span>&#128196;</span> {exportStatus === 'loading' ? 'Generating...' : 'Generate Referral Packet'}
+            <DocumentTextIcon /> {exportStatus === 'loading' ? 'Generating...' : 'Generate Referral Packet'}
           </button>
           <button
             onClick={async () => {
@@ -477,7 +483,7 @@ export default function ProviderDetail() {
             className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2 disabled:opacity-50"
             title="Download all fraud evidence for this provider as a .tar.gz archive"
           >
-            <span>&#8659;</span> {exportStatus === 'loading' ? 'Exporting...' : 'Export Fraud Package'}
+            <ArrowDownTrayIcon /> {exportStatus === 'loading' ? 'Exporting...' : 'Export Fraud Package'}
           </button>
           {exportError && <p className="text-xs text-red-400">{exportError}</p>}
           {watchlistStatus?.watched ? (
@@ -487,7 +493,7 @@ export default function ProviderDetail() {
               className="px-4 py-2 bg-yellow-900/40 hover:bg-yellow-900/60 border border-yellow-700 text-yellow-300 text-sm font-medium rounded transition-colors flex items-center gap-2"
               title="Remove from watchlist"
             >
-              <span>&#9733;</span> On Watchlist
+              <StarSolidIcon className="w-4 h-4 text-yellow-400" /> On Watchlist
             </button>
           ) : (
             <button
@@ -496,7 +502,7 @@ export default function ProviderDetail() {
               className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-yellow-600 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2"
               title="Add to watchlist for monitoring"
             >
-              <span>&#9734;</span> Add to Watchlist
+              <StarIcon /> Add to Watchlist
             </button>
           )}
           {watchlistMsg && (
@@ -516,7 +522,7 @@ export default function ProviderDetail() {
           { label: 'Avg $/Claim',   value: detail.spending?.total_claims ? fmt(Math.round((detail.spending?.total_paid ?? 0) / detail.spending.total_claims)) : '--', color: 'text-cyan-400' },
         ].map(kpi => (
           <div key={kpi.label} className="flex-1 px-5 py-4 text-center">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">{kpi.label}</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">{kpi.label}</p>
             <p className={`text-xl font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
           </div>
         ))}
@@ -525,7 +531,7 @@ export default function ProviderDetail() {
       <div className="grid grid-cols-2 gap-5">
         {/* Fraud flags */}
         <div className="card">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">
+          <h2 className="text-base font-semibold text-gray-300 mb-3">
             {(detail.signal_results ?? []).length} Fraud Signals Analyzed
           </h2>
           <FraudFlagsTable signals={detail.signal_results ?? []} npi={npi} />
@@ -533,7 +539,7 @@ export default function ProviderDetail() {
 
         {/* HCPCS breakdown */}
         <div className="card">
-          <h2 className="text-sm font-semibold text-gray-300 mb-3">Billing by Procedure Code</h2>
+          <h2 className="text-base font-semibold text-gray-300 mb-3">Billing by Procedure Code</h2>
           {hcpcsData?.hcpcs?.length ? (
             <HcpcsBreakdown data={hcpcsData.hcpcs} />
           ) : (
@@ -548,7 +554,7 @@ export default function ProviderDetail() {
       {/* Peer Comparison */}
       {peers && peers.top_hcpcs && peers.peer_count > 0 && (
         <div className="card bg-blue-950/20 border-blue-900/40">
-          <h2 className="text-sm font-semibold text-gray-300 mb-1">Peer Comparison</h2>
+          <h2 className="text-base font-semibold text-gray-300 mb-1">Peer Comparison</h2>
           <p className="text-xs text-gray-500 mb-3">
             Compared to <span className="text-gray-300 font-medium">{peers.peer_count.toLocaleString()}</span> providers
             billing primarily <span className="font-mono text-blue-400">{peers.top_hcpcs}</span>
@@ -591,7 +597,7 @@ export default function ProviderDetail() {
       {/* Risk Score Trend */}
       {scoreTrendData && scoreTrendData.snapshot_count >= 2 && (
         <div className="card">
-          <h2 className="text-sm font-semibold text-gray-300 mb-1">Risk Score Trend</h2>
+          <h2 className="text-base font-semibold text-gray-300 mb-1">Risk Score Trend</h2>
           <p className="text-xs text-gray-500 mb-3">
             {scoreTrendData.snapshot_count} scan snapshots tracked
           </p>
@@ -628,9 +634,9 @@ export default function ProviderDetail() {
       {cluster.length > 0 && (
         <div className="card border-yellow-800/50">
           <div className="flex items-start gap-2 mb-3">
-            <span className="text-yellow-400 text-lg">⚠</span>
+            <ExclamationTriangleIcon className="w-5 h-5 text-yellow-400 mt-0.5 flex-shrink-0" />
             <div>
-              <h2 className="text-sm font-semibold text-yellow-300">
+              <h2 className="text-base font-semibold text-yellow-300">
                 {cluster.length} Other Provider{cluster.length !== 1 ? 's' : ''} at Same Address
               </h2>
               <p className="text-xs text-gray-500 mt-0.5">
@@ -664,11 +670,7 @@ export default function ProviderDetail() {
                     {c.specialty || '—'}
                   </td>
                   <td className="py-2 pr-4">
-                    <span className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded ${
-                      c.risk_score >= 75 ? 'bg-red-900 text-red-300' :
-                      c.risk_score >= 50 ? 'bg-orange-900 text-orange-300' :
-                      'bg-gray-800 text-gray-400'
-                    }`}>{c.risk_score.toFixed(0)}</span>
+                    <span className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded ${riskChipClass(c.risk_score)}`}>{c.risk_score.toFixed(0)}</span>
                   </td>
                   <td className="py-2 pr-4 text-gray-400 text-xs">{fmt(c.total_paid)}</td>
                   <td className="py-2 text-xs">
@@ -694,7 +696,7 @@ export default function ProviderDetail() {
               ? 'border-yellow-800 bg-yellow-950/20'
               : ''
         }`}>
-          <h2 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+          <h2 className="text-base font-semibold text-gray-300 mb-3 flex items-center gap-2">
             CMS Open Payments
             {openPaymentsData?.total_amount && openPaymentsData.total_amount >= 100_000 && (
               <span className="text-xs px-2 py-0.5 bg-red-900 border border-red-700 rounded-full text-red-300 font-bold">
@@ -714,7 +716,7 @@ export default function ProviderDetail() {
               <div className="space-y-3">
                 <div className="flex items-baseline gap-6">
                   <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total Received</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">Total Received</p>
                     <p className={`text-xl font-bold mt-0.5 ${
                       openPaymentsData.total_amount >= 100_000 ? 'text-red-400' :
                       openPaymentsData.total_amount >= 10_000 ? 'text-yellow-400' : 'text-blue-400'
@@ -723,17 +725,17 @@ export default function ProviderDetail() {
                     </p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Payments</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">Payments</p>
                     <p className="text-xl font-bold mt-0.5 text-gray-300">{openPaymentsData.payment_count}</p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">Companies</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">Companies</p>
                     <p className="text-xl font-bold mt-0.5 text-gray-300">{openPaymentsData.unique_companies.length}</p>
                   </div>
                 </div>
                 {openPaymentsData.unique_companies.length > 0 && (
                   <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Paying Companies</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Paying Companies</p>
                     <div className="flex flex-wrap gap-1">
                       {openPaymentsData.unique_companies.map(c => (
                         <span key={c} className="text-xs px-2 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-400">
@@ -756,7 +758,7 @@ export default function ProviderDetail() {
         <div className={`card ${
           samData?.excluded ? 'border-red-800 bg-red-950/20' : ''
         }`}>
-          <h2 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+          <h2 className="text-base font-semibold text-gray-300 mb-3 flex items-center gap-2">
             SAM.gov Federal Exclusion
             {samData && !samData.excluded && !samData.error && (
               <span className="text-xs px-2 py-0.5 bg-green-900/40 border border-green-800 rounded-full text-green-400 font-bold">
@@ -791,7 +793,7 @@ export default function ProviderDetail() {
                 </p>
                 {samData.records.length > 0 && (
                   <div>
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Exclusion Records ({samData.records.length})</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Exclusion Records ({samData.records.length})</p>
                     <div className="space-y-1">
                       {samData.records.map((r, i) => (
                         <div key={i} className="text-xs bg-red-950/40 border border-red-900 rounded px-3 py-2 text-red-300 font-mono">
@@ -822,7 +824,7 @@ export default function ProviderDetail() {
         licenseData?.has_critical_flags ? 'border-red-800 bg-red-950/20' :
         licenseData && licenseData.flag_count > 0 ? 'border-yellow-800 bg-yellow-950/20' : ''
       }`}>
-        <h2 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+        <h2 className="text-base font-semibold text-gray-300 mb-3 flex items-center gap-2">
           Credentials & License Verification
           {licenseData?.verified && licenseData.flag_count === 0 && (
             <span className="text-xs px-2 py-0.5 bg-green-900/40 border border-green-800 rounded-full text-green-400 font-bold">
@@ -880,7 +882,7 @@ export default function ProviderDetail() {
               {/* Entity & Deactivation Status */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Entity Type</p>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Entity Type</p>
                   <p className="text-sm text-gray-300">
                     {licenseData.entity_info?.entity_type_label || '---'}
                     {licenseData.entity_info?.is_sole_proprietor && (
@@ -891,7 +893,7 @@ export default function ProviderDetail() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">NPI Status</p>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">NPI Status</p>
                   <p className="text-sm">
                     {licenseData.deactivation_status?.is_deactivated ? (
                       <span className="text-red-400 font-bold">
@@ -908,11 +910,11 @@ export default function ProviderDetail() {
                   </p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Enumeration Date</p>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Enumeration Date</p>
                   <p className="text-sm text-gray-300">{licenseData.enumeration_date || '---'}</p>
                 </div>
                 <div>
-                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-1">Primary Specialty</p>
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Primary Specialty</p>
                   <p className="text-sm text-purple-400">
                     {licenseData.taxonomy_match?.primary_specialty || '---'}
                   </p>
@@ -936,7 +938,7 @@ export default function ProviderDetail() {
               {/* License Details Table */}
               {licenseData.licenses.length > 0 && (
                 <div>
-                  <p className="text-[10px] text-gray-500 uppercase tracking-wider mb-2">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">
                     Registered Licenses & Taxonomy Codes ({licenseData.licenses.length})
                   </p>
                   <table className="w-full text-sm">
@@ -982,7 +984,7 @@ export default function ProviderDetail() {
 
       {/* Enhanced Timeline Analysis */}
       <div className="card">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">
+        <h2 className="text-base font-semibold text-gray-300 mb-3">
           Provider Timeline Analysis
         </h2>
         <ProviderTimelineAnalysis npi={npi!} />
@@ -994,7 +996,7 @@ export default function ProviderDetail() {
         <div className="card border-indigo-800/50">
           <div className="flex items-start justify-between mb-4">
             <div>
-              <h2 className="text-sm font-semibold text-gray-300 flex items-center gap-2">
+              <h2 className="text-base font-semibold text-gray-300 flex items-center gap-2">
                 Related Providers
                 <span className="text-xs px-2 py-0.5 bg-indigo-900/40 border border-indigo-800 rounded-full text-indigo-400 font-bold">
                   {relatedData.total} found
@@ -1069,7 +1071,7 @@ export default function ProviderDetail() {
                       same_zip: 'bg-gray-800 border-gray-600 text-gray-400',
                     }
                     return (
-                      <span key={rt} className={`text-[10px] px-1.5 py-0.5 border rounded ${colors[rt] ?? 'bg-gray-800 border-gray-700 text-gray-400'}`}>
+                      <span key={rt} className={`text-xs px-1.5 py-0.5 border rounded ${colors[rt] ?? 'bg-gray-800 border-gray-700 text-gray-400'}`}>
                         {labels[rt] ?? rt}
                       </span>
                     )
@@ -1084,12 +1086,7 @@ export default function ProviderDetail() {
 
                 {/* Risk + Paid */}
                 <div className="flex-shrink-0 text-right w-20">
-                  <span className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded ${
-                    rp.risk_score >= 75 ? 'bg-red-900 text-red-300' :
-                    rp.risk_score >= 50 ? 'bg-orange-900 text-orange-300' :
-                    rp.risk_score >= 25 ? 'bg-yellow-900/50 text-yellow-300' :
-                    'bg-gray-800 text-gray-400'
-                  }`}>{rp.risk_score?.toFixed(0) ?? '—'}</span>
+                  <span className={`text-xs font-mono font-bold px-1.5 py-0.5 rounded ${riskChipClass(rp.risk_score ?? 0)}`}>{rp.risk_score?.toFixed(0) ?? '—'}</span>
                   <p className="text-xs text-gray-500 mt-1">{fmt(rp.total_paid)}</p>
                 </div>
               </div>
@@ -1109,7 +1106,7 @@ export default function ProviderDetail() {
       {providerNewsData && providerNewsData.alerts.length > 0 && (
         <div className="card">
           <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-gray-300">News & Legal Alerts</h2>
+            <h2 className="text-base font-semibold text-gray-300">News & Legal Alerts</h2>
             <Link to="/news" className="text-xs text-blue-400 hover:underline">View all alerts</Link>
           </div>
           <div className="space-y-2">
@@ -1122,7 +1119,7 @@ export default function ProviderDetail() {
               }
               return (
                 <div key={alert.id} className="flex items-start gap-3 px-3 py-2 bg-gray-800/50 rounded border border-gray-700">
-                  <span className={`text-[10px] uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border shrink-0 ${catColors[alert.category] ?? 'bg-gray-800 text-gray-400 border-gray-700'}`}>
+                  <span className={`text-xs uppercase tracking-wider font-semibold px-1.5 py-0.5 rounded border shrink-0 ${catColors[alert.category] ?? 'bg-gray-800 text-gray-400 border-gray-700'}`}>
                     {alert.category}
                   </span>
                   <div className="min-w-0 flex-1">
@@ -1131,7 +1128,7 @@ export default function ProviderDetail() {
                     </a>
                     <p className="text-[11px] text-gray-500 mt-0.5 truncate">{alert.summary}</p>
                   </div>
-                  <span className="text-[10px] text-gray-600 shrink-0">{alert.date}</span>
+                  <span className="text-xs text-gray-600 shrink-0">{alert.date}</span>
                 </div>
               )
             })}
@@ -1142,7 +1139,7 @@ export default function ProviderDetail() {
       {/* Network link */}
       <div className="card flex items-center justify-between no-print">
         <div>
-          <h2 className="text-sm font-semibold text-gray-300">Provider Network</h2>
+          <h2 className="text-base font-semibold text-gray-300">Provider Network</h2>
           <p className="text-xs text-gray-500 mt-0.5">Explore billing/servicing relationships for this NPI</p>
         </div>
         <Link to={`/network?npi=${npi}`} className="btn-primary">

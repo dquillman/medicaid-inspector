@@ -6,6 +6,7 @@ import {
 import { api } from '../lib/api'
 import type { TimelineMonth, TimelineEvent } from '../lib/types'
 import { fmt } from '../lib/format'
+import { ExclamationTriangleIcon } from './icons'
 
 function EventIcon({ type }: { type: string }) {
   switch (type) {
@@ -16,7 +17,7 @@ function EventIcon({ type }: { type: string }) {
     case 'spike':
       return <span className="text-red-400 text-base" title="Billing spike">&#9650;</span>
     case 'gap':
-      return <span className="text-yellow-400 text-base" title="Billing gap">&#9888;</span>
+      return <span className="text-yellow-400" title="Billing gap"><ExclamationTriangleIcon className="w-4 h-4" /></span>
     default:
       return <span className="text-gray-400 text-base">&#8226;</span>
   }
@@ -122,7 +123,7 @@ export default function ProviderTimelineAnalysis({ npi }: { npi: string }) {
           },
         ].map(kpi => (
           <div key={kpi.label} className="bg-gray-800/50 border border-gray-700 rounded-lg px-4 py-2 text-center min-w-[100px]">
-            <p className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">{kpi.label}</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">{kpi.label}</p>
             <p className={`text-lg font-bold mt-0.5 ${kpi.color}`}>{kpi.value}</p>
           </div>
         ))}
@@ -234,7 +235,7 @@ export default function ProviderTimelineAnalysis({ npi }: { npi: string }) {
                 className={`flex items-center gap-3 px-3 py-2 rounded-lg border ${eventColor(event.type)}`}
               >
                 <EventIcon type={event.type} />
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 min-w-[100px]">
+                <span className="text-xs font-bold uppercase tracking-wider text-gray-500 min-w-[100px]">
                   {eventLabel(event.type)}
                 </span>
                 <span className="font-mono text-xs text-gray-400 min-w-[70px]">

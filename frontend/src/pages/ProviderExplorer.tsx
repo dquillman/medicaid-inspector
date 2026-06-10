@@ -3,6 +3,8 @@ import { useQuery, useQueries } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, mutate, get } from '../lib/api'
 import { fmt } from '../lib/format'
+import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
+import { FunnelIcon, FunnelSolidIcon, ExclamationTriangleIcon } from '../components/icons'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 import BulkActionBar from '../components/BulkActionBar'
 import Sparkline from '../components/Sparkline'
@@ -77,7 +79,7 @@ function CheckboxList({
     <div className="space-y-1">
       {options.length > 8 && (
         <input
-          className="w-full bg-gray-700 text-white text-xs px-2 py-1 rounded border border-gray-600 mb-1"
+          className="input w-full text-xs px-2 py-1 mb-1"
           placeholder="Search…"
           value={search}
           onChange={e => setSearch(e.target.value)}
@@ -127,7 +129,7 @@ function RangeInputs({
         <span className="text-xs text-gray-500 w-7">Min</span>
         <input
           type="number"
-          className="flex-1 bg-gray-700 text-white text-xs px-2 py-1 rounded border border-gray-600"
+          className="input flex-1 text-xs px-2 py-1"
           placeholder={prefix ? `${prefix}0` : '0'}
           value={value.min}
           onChange={e => onChange({ ...value, min: e.target.value })}
@@ -138,7 +140,7 @@ function RangeInputs({
         <span className="text-xs text-gray-500 w-7">Max</span>
         <input
           type="number"
-          className="flex-1 bg-gray-700 text-white text-xs px-2 py-1 rounded border border-gray-600"
+          className="input flex-1 text-xs px-2 py-1"
           placeholder="∞"
           value={value.max}
           onChange={e => onChange({ ...value, max: e.target.value })}
@@ -258,15 +260,6 @@ interface ColDef {
   sortable?: boolean
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  pending:        'text-yellow-400 bg-yellow-400/10',
-  reviewed:       'text-blue-400 bg-blue-400/10',
-  confirmed_fraud:'text-red-400 bg-red-400/10',
-  dismissed:      'text-gray-500 bg-gray-500/10',
-}
-const STATUS_LABELS: Record<string, string> = {
-  pending: 'Pending', reviewed: 'Reviewed', confirmed_fraud: 'Fraud', dismissed: 'Dismissed',
-}
 
 const COLUMNS: ColDef[] = [
   { key: 'npi',                 label: 'NPI' },
@@ -331,7 +324,7 @@ function ColHeader({
             {col.label}
             {isSorted
               ? <span className="text-blue-400 ml-0.5">{sortDir === 'asc' ? '▲' : '▼'}</span>
-              : <span className="text-gray-700 ml-0.5">⇅</span>
+              : <span className="text-gray-500 ml-0.5">⇅</span>
             }
           </button>
         ) : (
@@ -343,9 +336,10 @@ function ColHeader({
               ref={btnRef}
               onClick={e => { e.stopPropagation(); onOpenFilterChange(isOpen ? null : col.key) }}
               title="Filter"
-              className={`ml-0.5 text-xs transition-colors ${activeFilter ? 'text-blue-400' : 'text-gray-600 hover:text-gray-400'}`}
+              aria-label={`Filter ${col.label}`}
+              className={`ml-0.5 p-1 -m-0.5 rounded transition-colors ${activeFilter ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'}`}
             >
-              {activeFilter ? '⬛' : '▽'}
+              {activeFilter ? <FunnelSolidIcon className="w-3.5 h-3.5" /> : <FunnelIcon className="w-3.5 h-3.5" />}
             </button>
             <FilterDropdown
               colKey={col.key}
@@ -821,7 +815,7 @@ export default function ProviderExplorer() {
                       aria-label={`Select provider ${p.npi}`}
                     />
                   </td>
-                  <td className="px-3 py-2.5 font-mono-data text-blue-400 text-xs sticky left-0 z-10 bg-gray-900 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">{p.npi}</td>
+                  <td className="px-3 py-2.5 font-mono-data text-blue-400 text-sm sticky left-0 z-10 bg-gray-900 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">{p.npi}</td>
                   <td className="px-3 py-2.5 text-gray-300 max-w-[200px] truncate" title={name}>
                     {name || <span className="text-gray-600 italic">--</span>}
                   </td>
@@ -834,7 +828,7 @@ export default function ProviderExplorer() {
                   <td className="px-3 py-2.5"><RiskScoreBadge score={p.risk_score} size="sm" /></td>
                   <td className="px-3 py-2.5">
                     {p.flags.length > 0
-                      ? <span className="text-red-400 text-xs font-medium">{'\u26A0'} {p.flags.length} flag{p.flags.length !== 1 ? 's' : ''}</span>
+                      ? <span className="text-red-400 text-xs font-medium inline-flex items-center gap-1"><ExclamationTriangleIcon className="w-3.5 h-3.5" /> {p.flags.length} flag{p.flags.length !== 1 ? 's' : ''}</span>
                       : <span className="text-gray-600 text-xs">--</span>
                     }
                   </td>

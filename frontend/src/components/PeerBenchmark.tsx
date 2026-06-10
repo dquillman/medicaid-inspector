@@ -126,7 +126,7 @@ function DistributionChart({ dist }: { dist: MetricDistribution }) {
         </BarChart>
       </ResponsiveContainer>
       {/* Color legend */}
-      <div className="flex items-center gap-4 text-[10px] text-gray-500">
+      <div className="flex items-center gap-4 text-xs text-gray-500">
         <span className="flex items-center gap-1">
           <span className="inline-block w-3 h-3 rounded" style={{ backgroundColor: '#1e3a5f' }}></span>
           Below 75th %ile

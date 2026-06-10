@@ -4,14 +4,17 @@ export default {
   content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
     extend: {
+      fontFamily: {
+        mono: ['IBM Plex Mono', 'JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'Consolas', 'monospace'],
+      },
       colors: {
         brand: {
-          50:  '#f0f4ff',
-          100: '#e0eaff',
-          500: '#3b6bff',
-          600: '#2755e0',
-          700: '#1a3db8',
-          900: '#0a1a6b',
+          50:  '#eff6ff',
+          100: '#dbeafe',
+          500: '#3b82f6',
+          600: '#2563eb',
+          700: '#1d4ed8',
+          900: '#1e3a8a',
         },
         risk: {
           low:    '#22c55e',

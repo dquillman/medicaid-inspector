@@ -41,7 +41,7 @@ function HcpcsDetailPanel({ npi, code, onClose }: { npi: string; code: string; o
           { label: 'Active Months', value: String(data.month_count), color: 'text-purple-400' },
         ].map(s => (
           <div key={s.label} className="bg-gray-900/50 rounded px-3 py-2">
-            <div className="text-[10px] text-gray-500 uppercase tracking-wider">{s.label}</div>
+            <div className="text-xs text-gray-500 uppercase tracking-wider">{s.label}</div>
             <div className={`text-sm font-bold ${s.color}`}>{s.value}</div>
           </div>
         ))}

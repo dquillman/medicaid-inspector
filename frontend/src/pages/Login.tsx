@@ -222,7 +222,7 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
             <>
               <div className="flex items-center gap-3 pt-1">
                 <div className="flex-1 h-px bg-gray-800" />
-                <span className="text-[10px] uppercase tracking-wider text-gray-500">or</span>
+                <span className="text-xs uppercase tracking-wider text-gray-500">or</span>
                 <div className="flex-1 h-px bg-gray-800" />
               </div>
               <div ref={googleBtnRef} className="flex justify-center" />

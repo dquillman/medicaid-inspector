@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { PrescanStatus } from '../lib/types'
+import { ExclamationTriangleIcon } from '../components/icons'
 
 const US_STATES = [
   'AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN',
@@ -152,7 +153,7 @@ function DataSourceCard() {
       <div className="flex items-center justify-between gap-4">
         <div className="space-y-0.5">
           <div className="flex items-center gap-2 text-sm">
-            <span className="text-yellow-400 font-bold">⚠</span>
+            <ExclamationTriangleIcon className="w-4 h-4 text-yellow-400" />
             <span className="text-yellow-300 font-semibold">Using remote dataset</span>
             <span className="text-gray-500">— each scan batch takes 10–30s over the network</span>
           </div>
@@ -603,7 +604,7 @@ export default function AdminScan() {
 
       {/* ML Model Training */}
       <div className="card space-y-3">
-        <h2 className="text-sm font-semibold text-gray-300">ML Anomaly Detection (Isolation Forest)</h2>
+        <h2 className="text-base font-semibold text-gray-300">ML Anomaly Detection (Isolation Forest)</h2>
         <p className="text-xs text-gray-500">
           Train an unsupervised ML model on all cached providers to detect statistical outliers
           beyond rule-based signals.
@@ -671,7 +672,7 @@ function DatasetInfoCard() {
 
   return (
     <div className="card space-y-3">
-      <h2 className="text-sm font-semibold text-gray-300">Dataset Information</h2>
+      <h2 className="text-base font-semibold text-gray-300">Dataset Information</h2>
 
       {info ? (
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
@@ -767,7 +768,7 @@ function DataQualityCard() {
 
   return (
     <div className="card space-y-3">
-      <h2 className="text-sm font-semibold text-gray-300">Data Quality Validation</h2>
+      <h2 className="text-base font-semibold text-gray-300">Data Quality Validation</h2>
       <p className="text-xs text-gray-500">
         Validates NPI format (Luhn check), claim amounts, and date ranges against the active dataset.
         Runs automatically on first scan batch.
@@ -799,19 +800,19 @@ function DataQualityCard() {
           <div className="grid grid-cols-4 gap-3">
             <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-white">{q.total_dataset_rows?.toLocaleString()}</div>
-              <div className="text-[10px] text-gray-500 uppercase">Total Rows</div>
+              <div className="text-xs text-gray-500 uppercase">Total Rows</div>
             </div>
             <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-green-400">{q.valid_records?.toLocaleString()}</div>
-              <div className="text-[10px] text-gray-500 uppercase">Valid</div>
+              <div className="text-xs text-gray-500 uppercase">Valid</div>
             </div>
             <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-red-400">{q.invalid_records}</div>
-              <div className="text-[10px] text-gray-500 uppercase">Invalid</div>
+              <div className="text-xs text-gray-500 uppercase">Invalid</div>
             </div>
             <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-yellow-400">{q.sample_size?.toLocaleString()}</div>
-              <div className="text-[10px] text-gray-500 uppercase">Sampled</div>
+              <div className="text-xs text-gray-500 uppercase">Sampled</div>
             </div>
           </div>
 
@@ -831,7 +832,7 @@ function DataQualityCard() {
           )}
 
           {q.last_run && (
-            <p className="text-[10px] text-gray-600">
+            <p className="text-xs text-gray-600">
               Last run: {new Date(q.last_run * 1000).toLocaleString()}
               {(q as any).elapsed_sec !== undefined && ` (${(q as any).elapsed_sec}s)`}
             </p>
@@ -866,7 +867,7 @@ function DataLineageCard() {
 
   return (
     <div className="card space-y-3">
-      <h2 className="text-sm font-semibold text-gray-300">Data Lineage</h2>
+      <h2 className="text-base font-semibold text-gray-300">Data Lineage</h2>
       <p className="text-xs text-gray-500">
         Tracks which dataset version was used for each scan, when it ran, and how many providers/claims were processed.
       </p>
@@ -875,17 +876,17 @@ function DataLineageCard() {
         <div className="grid grid-cols-3 gap-3">
           <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
             <div className="text-lg font-bold text-white">{summary.total_scans}</div>
-            <div className="text-[10px] text-gray-500 uppercase">Total Scans</div>
+            <div className="text-xs text-gray-500 uppercase">Total Scans</div>
           </div>
           <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
             <div className="text-lg font-bold text-blue-400">{summary.dataset_versions_seen}</div>
-            <div className="text-[10px] text-gray-500 uppercase">Dataset Versions</div>
+            <div className="text-xs text-gray-500 uppercase">Dataset Versions</div>
           </div>
           <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
             <div className="text-lg font-bold text-gray-300">
               {summary.latest_scan ? new Date(summary.latest_scan * 1000).toLocaleDateString() : '--'}
             </div>
-            <div className="text-[10px] text-gray-500 uppercase">Latest Scan</div>
+            <div className="text-xs text-gray-500 uppercase">Latest Scan</div>
           </div>
         </div>
       )}
@@ -908,7 +909,7 @@ function DataLineageCard() {
                 <tr key={e.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
                   <td className="py-1.5 pr-3 text-gray-400">{new Date(e.timestamp * 1000).toLocaleString()}</td>
                   <td className="py-1.5 pr-3">
-                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+                    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
                       e.scan_type === 'smart' ? 'bg-purple-900 text-purple-300' :
                       e.scan_type === 'rescore' ? 'bg-yellow-900 text-yellow-300' :
                       'bg-blue-900 text-blue-300'

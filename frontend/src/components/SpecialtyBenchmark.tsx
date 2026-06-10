@@ -23,7 +23,7 @@ function PercentileGauge({ value, label }: { value: number; label: string }) {
 
   return (
     <div className={`rounded-lg border px-4 py-3 ${bgColor}`}>
-      <p className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">{label}</p>
+      <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">{label}</p>
       <div className="flex items-end gap-2 mt-1">
         <span className="text-2xl font-bold font-mono" style={{ color }}>
           {value.toFixed(0)}
@@ -88,7 +88,7 @@ export default function SpecialtyBenchmark({ npi }: { npi: string }) {
   if (isLoading) {
     return (
       <div className="card">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">Specialty Benchmark</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-3">Specialty Benchmark</h2>
         <div className="h-32 flex items-center justify-center text-gray-600 text-sm">Loading specialty data...</div>
       </div>
     )
@@ -97,7 +97,7 @@ export default function SpecialtyBenchmark({ npi }: { npi: string }) {
   if (!rankData || rankData.note || !rankData.percentiles || !rankData.stats) {
     return (
       <div className="card">
-        <h2 className="text-sm font-semibold text-gray-300 mb-3">Specialty Benchmark</h2>
+        <h2 className="text-base font-semibold text-gray-300 mb-3">Specialty Benchmark</h2>
         <p className="text-sm text-gray-500">
           {rankData?.note || 'Specialty benchmarking data unavailable for this provider.'}
         </p>
@@ -133,7 +133,7 @@ export default function SpecialtyBenchmark({ npi }: { npi: string }) {
     <div className="card bg-indigo-950/20 border-indigo-900/40">
       <div className="flex items-start justify-between mb-4">
         <div>
-          <h2 className="text-sm font-semibold text-gray-300">Specialty Benchmark</h2>
+          <h2 className="text-base font-semibold text-gray-300">Specialty Benchmark</h2>
           <p className="text-xs text-gray-500 mt-0.5">
             Compared to <span className="text-gray-300 font-medium">{provCount.toLocaleString()}</span> providers
             in <span className="text-indigo-400 font-medium">{rankData.specialty}</span>
@@ -161,7 +161,7 @@ export default function SpecialtyBenchmark({ npi }: { npi: string }) {
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
-              <tr className="text-[10px] text-gray-500 border-b border-gray-800 uppercase tracking-wider">
+              <tr className="text-xs text-gray-500 border-b border-gray-800 uppercase tracking-wider">
                 <th className="text-left pb-2 pr-4 font-medium">Metric</th>
                 <th className="text-left pb-2 pr-4 font-medium">This Provider</th>
                 <th className="text-left pb-2 pr-4 font-medium">Avg</th>
@@ -258,7 +258,7 @@ export default function SpecialtyBenchmark({ npi }: { npi: string }) {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="text-[10px] text-gray-500 border-b border-gray-800 uppercase tracking-wider">
+                <tr className="text-xs text-gray-500 border-b border-gray-800 uppercase tracking-wider">
                   <th className="text-left pb-2 pr-4 font-medium">NPI</th>
                   <th className="text-left pb-2 pr-4 font-medium">Name</th>
                   <th className="text-left pb-2 pr-4 font-medium">State</th>

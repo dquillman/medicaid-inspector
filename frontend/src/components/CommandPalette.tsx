@@ -207,7 +207,7 @@ export default function CommandPalette() {
             className="input w-full border-0 bg-transparent focus:ring-0 text-sm py-3 pl-3"
             aria-label="Search"
           />
-          <kbd className="hidden sm:inline-block text-[10px] text-gray-500 border border-gray-700 rounded px-1.5 py-0.5 font-mono">
+          <kbd className="hidden sm:inline-block text-xs text-gray-500 border border-gray-700 rounded px-1.5 py-0.5 font-mono">
             ESC
           </kbd>
         </div>
@@ -230,7 +230,7 @@ export default function CommandPalette() {
                   onClick={() => navigateTo(result)}
                   onMouseEnter={() => setSelectedIdx(i)}
                 >
-                  <span className="text-[10px] uppercase tracking-wider text-gray-500 w-16 shrink-0">
+                  <span className="text-xs uppercase tracking-wider text-gray-500 w-16 shrink-0">
                     {result.category}
                   </span>
                   <span className="text-sm text-gray-100">{result.label}</span>
@@ -247,7 +247,7 @@ export default function CommandPalette() {
                 onClick={() => navigateTo(result)}
                 onMouseEnter={() => setSelectedIdx(i)}
               >
-                <span className="text-[10px] uppercase tracking-wider text-blue-400 w-16 shrink-0">
+                <span className="text-xs uppercase tracking-wider text-blue-400 w-16 shrink-0">
                   Provider
                 </span>
                 <span className="text-sm text-gray-100 truncate">
@@ -262,7 +262,7 @@ export default function CommandPalette() {
           })}
         </div>
 
-        <div className="border-t border-gray-700 px-4 py-2 flex items-center gap-4 text-[10px] text-gray-500">
+        <div className="border-t border-gray-700 px-4 py-2 flex items-center gap-4 text-xs text-gray-500">
           <span>
             <kbd className="border border-gray-700 rounded px-1 py-0.5 font-mono mr-1">Up</kbd>
             <kbd className="border border-gray-700 rounded px-1 py-0.5 font-mono mr-1">Down</kbd>

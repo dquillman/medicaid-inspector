@@ -124,7 +124,7 @@ export default function FraudHotspots() {
 
       {/* Top 15 Chart */}
       <div className="card p-5">
-        <h2 className="text-sm font-semibold text-gray-300 mb-4 uppercase tracking-wider">
+        <h2 className="text-base font-semibold text-gray-300 mb-4 uppercase tracking-wider">
           Top 15 Hotspots by Composite Score
         </h2>
         <ResponsiveContainer width="100%" height={380}>

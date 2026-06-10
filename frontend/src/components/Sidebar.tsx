@@ -46,7 +46,7 @@ function SidebarSection({
       {!collapsed && (
         <button
           onClick={onToggle}
-          className={`w-full flex items-center justify-between px-3 py-2 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+          className={`w-full flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
             hasActive ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'
           }`}
           aria-expanded={open}

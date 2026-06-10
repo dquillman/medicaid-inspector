@@ -16,7 +16,7 @@ function TrendArrow({ direction }: { direction: 'up' | 'down' | 'flat' }) {
 function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
     <div className="card p-4 flex flex-col gap-1">
-      <span className="text-[10px] text-gray-500 uppercase tracking-wider font-semibold">{label}</span>
+      <span className="text-xs text-gray-500 uppercase tracking-wider font-semibold">{label}</span>
       <span className="text-2xl font-bold text-white">{value}</span>
       {sub && <span className="text-xs text-gray-400">{sub}</span>}
     </div>
@@ -216,7 +216,7 @@ export default function TrendDivergence() {
               </Bar>
             </BarChart>
           </ResponsiveContainer>
-          <p className="text-[10px] text-gray-600 mt-2">Click a bar to view detailed state breakdown. Red = flagged divergence.</p>
+          <p className="text-xs text-gray-600 mt-2">Click a bar to view detailed state breakdown. Red = flagged divergence.</p>
         </div>
       )}
 
@@ -228,7 +228,7 @@ export default function TrendDivergence() {
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="text-[10px] text-gray-500 uppercase tracking-wider border-b border-gray-800">
+              <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
                 <th className="px-4 py-2 text-left">State</th>
                 <th className="px-4 py-2 text-center">Enrollment Trend</th>
                 <th className="px-4 py-2 text-center">Billing Trend</th>
@@ -257,13 +257,13 @@ export default function TrendDivergence() {
                   </td>
                   <td className="px-4 py-2 text-center">
                     {s.flagged ? (
-                      <span className="inline-block px-2 py-0.5 bg-red-900/40 text-red-400 text-[10px] font-bold uppercase rounded">
+                      <span className="inline-block px-2 py-0.5 bg-red-900/40 text-red-400 text-xs font-bold uppercase rounded">
                         Flagged
                       </span>
                     ) : s.has_billing_data ? (
                       <span className="text-gray-600 text-xs">--</span>
                     ) : (
-                      <span className="text-gray-700 text-[10px]">No data</span>
+                      <span className="text-gray-700 text-xs">No data</span>
                     )}
                   </td>
                 </tr>
@@ -280,7 +280,7 @@ export default function TrendDivergence() {
             <h3 className="text-base font-bold text-white">
               {selectedRecord.state} — Detailed Breakdown
               {selectedRecord.flagged && (
-                <span className="ml-3 inline-block px-2 py-0.5 bg-red-900/40 text-red-400 text-[10px] font-bold uppercase rounded align-middle">
+                <span className="ml-3 inline-block px-2 py-0.5 bg-red-900/40 text-red-400 text-xs font-bold uppercase rounded align-middle">
                   Divergence Flagged
                 </span>
               )}
@@ -296,15 +296,15 @@ export default function TrendDivergence() {
           {/* Summary stats for this state */}
           <div className="grid grid-cols-3 gap-4 mb-6">
             <div className="bg-gray-800/50 rounded p-3">
-              <span className="text-[10px] text-gray-500 uppercase block">Divergence Score</span>
+              <span className="text-xs text-gray-500 uppercase block">Divergence Score</span>
               <span className="text-lg font-bold text-white">{selectedRecord.divergence_score.toFixed(1)}</span>
             </div>
             <div className="bg-gray-800/50 rounded p-3">
-              <span className="text-[10px] text-gray-500 uppercase block">Consec. Divergent Years</span>
+              <span className="text-xs text-gray-500 uppercase block">Consec. Divergent Years</span>
               <span className="text-lg font-bold text-white">{selectedRecord.consecutive_divergent_years}</span>
             </div>
             <div className="bg-gray-800/50 rounded p-3">
-              <span className="text-[10px] text-gray-500 uppercase block">Latest Enrollment</span>
+              <span className="text-xs text-gray-500 uppercase block">Latest Enrollment</span>
               <span className="text-lg font-bold text-white">
                 {selectedRecord.yearly[selectedRecord.yearly.length - 1]?.enrollment_millions}M
               </span>
@@ -324,7 +324,7 @@ export default function TrendDivergence() {
             <h4 className="text-sm font-semibold text-gray-300 mb-3">Yearly Data</h4>
             <table className="w-full text-xs">
               <thead>
-                <tr className="text-[10px] text-gray-500 uppercase tracking-wider border-b border-gray-800">
+                <tr className="text-xs text-gray-500 uppercase tracking-wider border-b border-gray-800">
                   <th className="px-3 py-2 text-left">Year</th>
                   <th className="px-3 py-2 text-right">Enrollment (M)</th>
                   <th className="px-3 py-2 text-right">Total Billing</th>

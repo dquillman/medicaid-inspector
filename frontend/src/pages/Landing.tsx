@@ -257,7 +257,7 @@ export default function Landing({ onLogin }: Props) {
                   { label: 'Active Signals', value: '18 / 18', color: 'text-green-400' },
                 ].map(m => (
                   <div key={m.label} className="bg-gray-900 rounded-lg p-3 border border-gray-800">
-                    <p className="text-[10px] text-gray-500 uppercase tracking-wider">{m.label}</p>
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">{m.label}</p>
                     <p className={`text-xl font-bold mt-1 ${m.color}`}>{m.value}</p>
                   </div>
                 ))}

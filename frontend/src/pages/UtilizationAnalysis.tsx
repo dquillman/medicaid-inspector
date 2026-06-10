@@ -117,7 +117,7 @@ export default function UtilizationAnalysis() {
 
           {/* Bar chart — Top 10 states */}
           <div className="card p-5">
-            <h2 className="text-sm font-semibold text-gray-300 mb-4">
+            <h2 className="text-base font-semibold text-gray-300 mb-4">
               Top 10 States: Claims per 1,000 Enrollees vs National Average
             </h2>
             {chartData.length > 0 ? (

@@ -110,7 +110,7 @@ export default function OwnershipNetwork({ data, currentNpi }: { data: Ownership
               </div>
 
               {isCurrent && (
-                <div className="mt-2 text-[10px] text-blue-400 uppercase tracking-wider font-semibold">
+                <div className="mt-2 text-xs text-blue-400 uppercase tracking-wider font-semibold">
                   Current Provider
                 </div>
               )}

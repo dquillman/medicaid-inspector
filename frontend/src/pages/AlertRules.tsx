@@ -373,7 +373,7 @@ export default function AlertRules() {
 
       {/* Rules List */}
       <div>
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">
+        <h2 className="text-base font-semibold text-gray-400 uppercase tracking-wider mb-2">
           Rules ({rules.length})
         </h2>
         {isLoading ? (
@@ -398,7 +398,7 @@ export default function AlertRules() {
 
       {/* Results */}
       <div>
-        <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-2">
+        <h2 className="text-base font-semibold text-gray-400 uppercase tracking-wider mb-2">
           Evaluation Results
         </h2>
         <ResultsSection results={results} />
