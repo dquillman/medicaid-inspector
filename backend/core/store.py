@@ -119,6 +119,16 @@ def get_provider_by_npi(npi: str) -> dict | None:
         return _npi_index.get(npi)
 
 
+def get_prescanned_snapshot() -> list[dict]:
+    """Return the live provider list WITHOUT copying — treat as read-only.
+
+    Updates always rebind the module global (set/append/reset/load all assign a
+    new list, never mutate in place), so the returned object is a stable
+    snapshot and its identity is a valid cache key for derived lookups.
+    """
+    return prescanned_providers
+
+
 def load_prescanned_from_disk(filename: str = "prescan_cache.json") -> bool:
     """Call once at startup. Returns True if cache was loaded successfully."""
     return load_from_disk(filename)

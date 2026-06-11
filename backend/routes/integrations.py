@@ -101,16 +101,12 @@ async def email_status():
 @provider_router.get("/{npi}/fhir")
 async def provider_fhir(npi: str):
     """Return provider data as FHIR R4 Practitioner JSON."""
-    from core.store import get_prescanned
+    from core.store import get_provider_by_npi
     from data.nppes_client import get_provider
     from services.fhir_exporter import provider_to_fhir_practitioner
 
     # Get scoring data from prescan cache
-    scoring = {}
-    for p in get_prescanned():
-        if p.get("npi") == npi:
-            scoring = p
-            break
+    scoring = get_provider_by_npi(npi) or {}
 
     # Get NPPES data
     nppes_data = {}
@@ -128,16 +124,12 @@ async def provider_fhir(npi: str):
 @provider_router.get("/{npi}/fhir/report")
 async def provider_fhir_report(npi: str):
     """Return investigation findings as FHIR R4 DocumentReference JSON."""
-    from core.store import get_prescanned
+    from core.store import get_provider_by_npi
     from data.nppes_client import get_provider
     from services.fhir_exporter import investigation_to_fhir_document_reference
 
     # Get scoring data from prescan cache
-    scoring = {}
-    for p in get_prescanned():
-        if p.get("npi") == npi:
-            scoring = p
-            break
+    scoring = get_provider_by_npi(npi) or {}
 
     if not scoring:
         raise HTTPException(status_code=404, detail=f"Provider {npi} not found in scan results")

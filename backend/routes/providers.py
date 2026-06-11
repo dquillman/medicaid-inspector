@@ -1,3 +1,4 @@
+import asyncio as _asyncio
 import io as _io
 import csv as _csv
 import json as _json
@@ -8,6 +9,7 @@ from datetime import datetime as _dt
 from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from data.duckdb_client import query_async, provider_aggregate_sql, get_parquet_path
+from services.slim_cache_enricher import parquet_is_local
 
 
 # ── Input validation helpers (prevent SQL injection in DuckDB queries) ────────
@@ -376,19 +378,33 @@ def _build_signal_proof(provider: dict, hcpcs_list: list, timeline: list, signal
                 proof["upcoding_pattern"] = _proof_box("E/M Code Distribution", body)
                 break
 
-    # Address cluster
-    if "address_cluster_risk" in flagged_keys:
-        addr = nppes.get("address") or {}
-        zip5 = (addr.get("zip") or "")[:5]
-        line1 = (addr.get("line1") or "").upper().strip()
-        co_located = []
-        if zip5 and line1:
-            for p in get_prescanned():
-                if p["npi"] == provider.get("npi"):
-                    continue
-                pa = (p.get("nppes") or {}).get("address") or {}
+    # Address cluster + corporate shell both need a pass over the full cache —
+    # share a single pass instead of scanning 106k records twice.
+    addr = nppes.get("address") or {}
+    zip5 = (addr.get("zip") or "")[:5]
+    line1 = (addr.get("line1") or "").upper().strip()
+    auth = nppes.get("authorized_official") or {}
+    auth_name = (auth.get("name") or "").lower().strip()
+    want_addr = "address_cluster_risk" in flagged_keys and zip5 and line1
+    want_shell = "corporate_shell_risk" in flagged_keys and auth_name
+    co_located: list[dict] = []
+    siblings: list[dict] = []
+    if want_addr or want_shell:
+        self_npi = provider.get("npi")
+        for p in get_prescanned():
+            if p["npi"] == self_npi:
+                continue
+            pn = p.get("nppes") or {}
+            if want_addr:
+                pa = pn.get("address") or {}
                 if (pa.get("zip", "")[:5] == zip5 and (pa.get("line1") or "").upper().strip() == line1):
                     co_located.append(p)
+            if want_shell:
+                po = pn.get("authorized_official") or {}
+                if (po.get("name") or "").lower().strip() == auth_name:
+                    siblings.append(p)
+
+    if "address_cluster_risk" in flagged_keys:
         if co_located:
             rows = ""
             for p in co_located[:10]:
@@ -402,16 +418,6 @@ def _build_signal_proof(provider: dict, hcpcs_list: list, timeline: list, signal
 
     # Corporate shell
     if "corporate_shell_risk" in flagged_keys:
-        auth = nppes.get("authorized_official") or {}
-        auth_name = (auth.get("name") or "").lower().strip()
-        siblings = []
-        if auth_name:
-            for p in get_prescanned():
-                if p["npi"] == provider.get("npi"):
-                    continue
-                pa = (p.get("nppes") or {}).get("authorized_official") or {}
-                if (pa.get("name") or "").lower().strip() == auth_name:
-                    siblings.append(p)
         if siblings:
             rows = ""
             for p in siblings[:10]:
@@ -751,30 +757,42 @@ async def export_providers_csv():
     if not prescanned:
         raise HTTPException(404, "No scanned providers available")
 
-    output = _io.StringIO()
-    writer = _csv.writer(output)
-    writer.writerow(["NPI", "Name", "Specialty", "State", "Risk Score", "Total Paid", "Flag Count", "Flags"])
-    for p in sorted(prescanned, key=lambda x: -(x.get("risk_score") or 0)):
-        nppes = p.get("nppes") or {}
-        # Slim cache stores name/specialty at top level; fall back to nppes fields
-        name = p.get("provider_name") or nppes.get("name", "")
-        specialty = p.get("specialty") or nppes.get("specialty", "") or (nppes.get("taxonomy") or {}).get("description", "")
-        state = p.get("state") or nppes.get("address", {}).get("state", "")
-        flags = p.get("flags") or []
-        flag_names = "; ".join(f.get("signal", "") if isinstance(f, dict) else str(f) for f in flags)
-        writer.writerow([
-            p.get("npi", ""),
-            name,
-            specialty,
-            state,
-            f'{p.get("risk_score", 0):.1f}',
-            f'{p.get("total_paid", 0):.2f}',
-            len(flags),
-            flag_names,
-        ])
-    output.seek(0)
+    # Stream in ~2000-row chunks instead of one fully-built string. Starlette
+    # iterates sync generators in a threadpool with one thread hop per yield —
+    # chunking keeps that to ~50 hops (per-row yields cost minutes at 106k
+    # rows) while still bounding memory and keeping work off the event loop.
+    def _iter_chunks():
+        buf = _io.StringIO()
+        writer = _csv.writer(buf)
+        writer.writerow(["NPI", "Name", "Specialty", "State", "Risk Score", "Total Paid", "Flag Count", "Flags"])
+        count = 0
+        for p in sorted(prescanned, key=lambda x: -(x.get("risk_score") or 0)):
+            nppes = p.get("nppes") or {}
+            # Slim cache stores name/specialty at top level; fall back to nppes fields
+            name = p.get("provider_name") or nppes.get("name", "")
+            specialty = p.get("specialty") or nppes.get("specialty", "") or (nppes.get("taxonomy") or {}).get("description", "")
+            state = p.get("state") or nppes.get("address", {}).get("state", "")
+            flags = p.get("flags") or []
+            flag_names = "; ".join(f.get("signal", "") if isinstance(f, dict) else str(f) for f in flags)
+            writer.writerow([
+                p.get("npi", ""),
+                name,
+                specialty,
+                state,
+                f'{p.get("risk_score", 0):.1f}',
+                f'{p.get("total_paid", 0):.2f}',
+                len(flags),
+                flag_names,
+            ])
+            count += 1
+            if count % 2000 == 0:
+                yield buf.getvalue()
+                buf.seek(0)
+                buf.truncate(0)
+        yield buf.getvalue()
+
     return StreamingResponse(
-        iter([output.getvalue()]),
+        _iter_chunks(),
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=providers_export.csv"},
     )
@@ -927,7 +945,14 @@ async def list_providers(
 
         return {"providers": enriched_slice, "page": page, "limit": limit, "total": total}
 
-    # Fallback: query remote Parquet (no cache available yet)
+    # Fallback: query Parquet directly (no cache available yet)
+    if not parquet_is_local():
+        # A whole-dataset GROUP BY against the remote parquet takes minutes and
+        # 503s on Cloud Run — return an empty page with a note instead.
+        return {
+            "providers": [], "page": page, "limit": limit, "total": 0,
+            "note": "Scan cache is empty and the dataset is remote — restore the cache or run a scan.",
+        }
     offset = (page - 1) * limit
     conditions = []
     if search and search.isdigit():
@@ -1003,6 +1028,14 @@ async def get_provider_detail(npi: str):
         }
 
     # Fallback: provider not in cache yet — query Parquet + NPPES in parallel
+    if not parquet_is_local():
+        # Even a single-NPI WHERE clause is a full scan of the remote 2.94 GB
+        # parquet (30-100s) — fail fast rather than hang the detail page.
+        raise HTTPException(
+            404,
+            f"NPI {npi} is not in the scan cache, and on-demand dataset lookups "
+            "are unavailable on this deployment (remote dataset).",
+        )
     nppes_task = get_provider(npi)
     agg_sql = provider_aggregate_sql(
         where=f"BILLING_PROVIDER_NPI_NUM = '{npi}'",
@@ -1047,7 +1080,9 @@ async def export_provider_package(npi: str):
     hcpcs_descriptions = await _fetch_hcpcs_descriptions(codes)
 
     provider = {**cached, "nppes": nppes_data}
-    report_html = _build_report_html(provider, review_item, hcpcs_descriptions)
+    # The report builder scans the full prescan cache (address/shell proofs) —
+    # run it off the event loop so it can't stall other requests.
+    report_html = await _asyncio.to_thread(_build_report_html, provider, review_item, hcpcs_descriptions)
 
     buf    = _io.BytesIO()
     prefix = f"provider_{npi}"
@@ -1158,23 +1193,27 @@ async def get_address_cluster(npi: str):
         slim_addr = {"zip": cached.get("zip", ""), "state": cached.get("state", ""), "city": cached.get("city", "")}
         return {"npi": npi, "address": addr or slim_addr, "cluster": [], "cluster_count": 0, "note": "Address clustering requires full NPPES data"}
 
-    cluster = []
-    for p in get_prescanned():
-        if p["npi"] == npi:
-            continue
-        p_addr  = (p.get("nppes") or {}).get("address") or {}
-        p_zip5  = (p_addr.get("zip") or "").strip()[:5]
-        p_line1 = (p_addr.get("line1") or "").strip().upper()
-        if p_zip5 == zip5 and p_line1 == line1:
-            cluster.append({
-                "npi":           p["npi"],
-                "provider_name": p.get("provider_name") or (p.get("nppes") or {}).get("name") or "",
-                "risk_score":    p.get("risk_score", 0),
-                "total_paid":    p.get("total_paid", 0),
-                "flag_count":    len(p.get("flags") or []),
-                "specialty":     (p.get("nppes") or {}).get("taxonomy", {}).get("description") or "",
-            })
+    def _scan_cluster() -> list[dict]:
+        cluster = []
+        for p in get_prescanned():
+            if p["npi"] == npi:
+                continue
+            p_addr  = (p.get("nppes") or {}).get("address") or {}
+            p_zip5  = (p_addr.get("zip") or "").strip()[:5]
+            p_line1 = (p_addr.get("line1") or "").strip().upper()
+            if p_zip5 == zip5 and p_line1 == line1:
+                cluster.append({
+                    "npi":           p["npi"],
+                    "provider_name": p.get("provider_name") or (p.get("nppes") or {}).get("name") or "",
+                    "risk_score":    p.get("risk_score", 0),
+                    "total_paid":    p.get("total_paid", 0),
+                    "flag_count":    len(p.get("flags") or []),
+                    "specialty":     (p.get("nppes") or {}).get("taxonomy", {}).get("description") or "",
+                })
+        return cluster
 
+    # Full-cache scan — run in a worker thread so it can't stall the event loop
+    cluster = await _asyncio.to_thread(_scan_cluster)
     cluster.sort(key=lambda x: x["risk_score"], reverse=True)
     return {"npi": npi, "address": addr, "cluster": cluster, "cluster_count": len(cluster)}
 
@@ -1199,27 +1238,31 @@ async def get_provider_peers(npi: str):
     if not top_code:
         return {"npi": npi, "top_hcpcs": None, "peer_count": 0, "stats": None}
 
-    # Gather peer values (exclude this provider)
-    rpb_vals:  list[float] = []
-    cpb_vals:  list[float] = []
-    paid_vals: list[float] = []
+    # Gather peer values (exclude this provider) — full-cache scan, so run it
+    # in a worker thread to keep the event loop free
+    def _gather_peer_vals() -> tuple[list[float], list[float], list[float]]:
+        rpb_vals:  list[float] = []
+        cpb_vals:  list[float] = []
+        paid_vals: list[float] = []
+        for p in get_prescanned():
+            if p["npi"] == npi:
+                continue
+            p_code = p.get("top_hcpcs") or ""
+            if not p_code:
+                hl = p.get("hcpcs") or []
+                if hl:
+                    p_code = hl[0].get("hcpcs_code", "")
+            if p_code != top_code:
+                continue
+            rpb   = float(p.get("revenue_per_beneficiary") or 0)
+            cpb   = float(p.get("claims_per_beneficiary") or 0)
+            spend = float(p.get("total_paid") or 0)
+            if rpb   > 0: rpb_vals.append(rpb)
+            if cpb   > 0: cpb_vals.append(cpb)
+            if spend > 0: paid_vals.append(spend)
+        return rpb_vals, cpb_vals, paid_vals
 
-    for p in get_prescanned():
-        if p["npi"] == npi:
-            continue
-        p_code = p.get("top_hcpcs") or ""
-        if not p_code:
-            hl = p.get("hcpcs") or []
-            if hl:
-                p_code = hl[0].get("hcpcs_code", "")
-        if p_code != top_code:
-            continue
-        rpb   = float(p.get("revenue_per_beneficiary") or 0)
-        cpb   = float(p.get("claims_per_beneficiary") or 0)
-        spend = float(p.get("total_paid") or 0)
-        if rpb   > 0: rpb_vals.append(rpb)
-        if cpb   > 0: cpb_vals.append(cpb)
-        if spend > 0: paid_vals.append(spend)
+    rpb_vals, cpb_vals, paid_vals = await _asyncio.to_thread(_gather_peer_vals)
 
     def calc_stats(vals: list[float]) -> dict | None:
         if not vals:
@@ -1349,21 +1392,54 @@ async def provider_signal_evidence(npi: str, signal: str):
         raise HTTPException(400, f"Unknown signal '{signal}'")
 
     # Find provider in prescan cache
-    provider = None
-    for p in get_prescanned():
-        if p["npi"] == npi:
-            provider = p
-            break
+    provider = get_provider_by_npi(npi)
     if not provider:
         return {"error": "Provider not found in cache"}
 
-    # Fetch supporting data
-    hcpcs_rows = await query_async(_hcpcs_sql(npi))
-    timeline_rows = await query_async(_timeline_sql(npi))
-    peer_rows = await query_async(_peer_stats_sql(npi))
-    peer = peer_rows[0] if peer_rows else {}
-    peer_mean = float(peer.get("mean_rpb") or 0)
-    peer_std = float(peer.get("std_rpb") or 0)
+    # Fetch supporting data. When the dataset parquet is remote (slim Cloud Run
+    # deployment) each of these scans takes 30-180s and 503s the request — use
+    # the local HCPCS index + cached fields instead.
+    if parquet_is_local():
+        hcpcs_rows = await query_async(*_hcpcs_sql(npi))
+        timeline_rows = await query_async(*_timeline_sql(npi))
+        peer_rows = await query_async(*_peer_stats_sql(npi))
+        peer = peer_rows[0] if peer_rows else {}
+        peer_mean = float(peer.get("mean_rpb") or 0)
+        peer_std = float(peer.get("std_rpb") or 0)
+    else:
+        hcpcs_rows = provider.get("hcpcs") or []
+        if not hcpcs_rows:
+            from routes.billing_codes import _HCPCS_INDEX
+            if _HCPCS_INDEX.exists():
+                idx = str(_HCPCS_INDEX).replace("\\", "/")
+                hcpcs_rows = await query_async(
+                    "SELECT HCPCS_CODE AS hcpcs_code, TOTAL_PAID AS total_paid,"
+                    " TOTAL_CLAIMS AS total_claims"
+                    f" FROM read_parquet('{idx}')"
+                    " WHERE BILLING_PROVIDER_NPI_NUM = ?"
+                    " ORDER BY TOTAL_PAID DESC LIMIT 50",
+                    (npi,),
+                )
+        timeline_rows = provider.get("timeline") or []
+        top_code = provider.get("top_hcpcs") or ((hcpcs_rows[0].get("hcpcs_code") or "") if hcpcs_rows else "")
+
+        def _peer_stats_from_cache() -> tuple[float, float]:
+            import statistics as _st
+            vals = [
+                float(p.get("revenue_per_beneficiary") or 0)
+                for p in get_prescanned()
+                if p.get("npi") != npi
+                and (p.get("top_hcpcs") or "") == top_code
+                and float(p.get("revenue_per_beneficiary") or 0) > 0
+            ]
+            if len(vals) >= 2:
+                return _st.mean(vals), _st.stdev(vals)
+            return 0.0, 0.0
+
+        if top_code:
+            peer_mean, peer_std = await _asyncio.to_thread(_peer_stats_from_cache)
+        else:
+            peer_mean, peer_std = 0.0, 0.0
 
     evidence: dict = {"signal": signal, "npi": npi}
 

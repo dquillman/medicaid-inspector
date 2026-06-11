@@ -17,7 +17,7 @@ from core.referral_workflow import (
     REFERRAL_STAGES,
     VALID_OUTCOMES,
 )
-from core.store import get_prescanned
+from core.store import get_provider_by_npi
 from core.audit_log import log_action
 from core.phi_logger import log_phi_access
 from routes.auth import require_user
@@ -27,8 +27,7 @@ router = APIRouter(prefix="/api/referrals", tags=["referrals"], dependencies=[De
 
 def _enrich_referral(ref: dict) -> dict:
     """Attach provider_name and state from prescan cache."""
-    by_npi = {p["npi"]: p for p in get_prescanned()}
-    p = by_npi.get(ref["npi"], {})
+    p = get_provider_by_npi(ref["npi"]) or {}
     name = p.get("provider_name") or (p.get("nppes") or {}).get("name") or ""
     state = p.get("state") or (p.get("nppes") or {}).get("address", {}).get("state") or ""
     risk_score = p.get("risk_score", 0)

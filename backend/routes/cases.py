@@ -15,7 +15,7 @@ from core.review_store import (
     get_review_item,
     VALID_PRIORITIES,
 )
-from core.store import get_prescanned
+from core.store import get_provider_by_npi
 
 from routes.auth import require_user
 
@@ -24,8 +24,7 @@ router = APIRouter(prefix="/api/cases", tags=["cases"], dependencies=[Depends(re
 
 def _enrich_item(item: dict) -> dict:
     """Attach provider_name and state from prescan cache."""
-    by_npi = {p["npi"]: p for p in get_prescanned()}
-    p = by_npi.get(item["npi"], {})
+    p = get_provider_by_npi(item["npi"]) or {}
     name = p.get("provider_name") or (p.get("nppes") or {}).get("name") or ""
     state = p.get("state") or (p.get("nppes") or {}).get("address", {}).get("state") or ""
     return {**item, "provider_name": name, "state": state}
@@ -111,12 +110,5 @@ async def case_stats():
 async def overdue_cases():
     """Return cases past their due date that are still open."""
     items = get_overdue_cases()
-    # Enrich each item
-    by_npi = {p["npi"]: p for p in get_prescanned()}
-    enriched = []
-    for item in items:
-        p = by_npi.get(item["npi"], {})
-        name = p.get("provider_name") or (p.get("nppes") or {}).get("name") or ""
-        state = p.get("state") or (p.get("nppes") or {}).get("address", {}).get("state") or ""
-        enriched.append({**item, "provider_name": name, "state": state})
+    enriched = [_enrich_item(item) for item in items]
     return {"items": enriched, "total": len(enriched)}

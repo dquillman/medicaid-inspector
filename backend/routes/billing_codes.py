@@ -65,10 +65,20 @@ def _has_hcpcs_in_cache() -> bool:
     return has_hcpcs_detail()
 
 
+# Rebuilt only when the prescan list is rebound (scan/restore) — building this
+# 106k-entry dict per request costs tens of ms on every billing-codes call.
+_enrich_cache: tuple[object, dict[str, dict]] | None = None
+
+
 def _npi_enrichment_map() -> dict[str, dict]:
     """Lookup of {npi: {provider_name, provider_type, state, risk_score}} from the cache."""
+    global _enrich_cache
+    from core.store import get_prescanned_snapshot
+    current = get_prescanned_snapshot()
+    if _enrich_cache is not None and _enrich_cache[0] is current:
+        return _enrich_cache[1]
     out: dict[str, dict] = {}
-    for p in get_prescanned():
+    for p in current:
         npi = p.get("npi")
         if not npi:
             continue
@@ -78,6 +88,7 @@ def _npi_enrichment_map() -> dict[str, dict]:
             "state": p.get("state", ""),
             "risk_score": p.get("risk_score", 0),
         }
+    _enrich_cache = (current, out)
     return out
 
 

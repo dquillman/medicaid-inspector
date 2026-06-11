@@ -8,7 +8,8 @@ import re
 
 from fastapi import APIRouter, HTTPException, Depends
 from data.duckdb_client import query_async, get_parquet_path
-from core.store import get_prescanned
+from core.store import get_prescanned_snapshot
+from services.slim_cache_enricher import parquet_is_local
 from routes.auth import require_user
 
 _log = logging.getLogger(__name__)
@@ -30,7 +31,9 @@ def _validate_npi(npi: str) -> str:
 
 def _prescan_lookup() -> dict[str, dict]:
     global _prescan_cache
-    current = get_prescanned()
+    # get_prescanned() copies the list each call, so identity checks against it
+    # never hit — use the no-copy snapshot, which is rebound only on updates.
+    current = get_prescanned_snapshot()
     if _prescan_cache is None or _prescan_cache[0] is not current:
         _prescan_cache = (current, {p["npi"]: p for p in current})
     return _prescan_cache[1]
@@ -125,33 +128,41 @@ async def get_related_providers(npi: str, limit: int = 30):
     LIMIT 50
     """
 
-    # Run all three queries in parallel
-    try:
-        billing_rows, servicing_rows, bene_rows = await asyncio.gather(
-            query_async(shared_billing_sql),
-            query_async(shared_servicing_sql),
-            query_async(shared_bene_sql),
-        )
-    except Exception as e:
-        # BENE_ID column may not exist in all data sets — retry without beneficiary overlap
-        _log.warning("Shared-beneficiary query failed for NPI %s (retrying without BENE_ID): %s", npi, e)
+    # Run all three queries in parallel. These are full JOIN/GROUP BY passes —
+    # against the remote parquet they take minutes and 503 on Cloud Run, so on
+    # slim deployments skip them and rely on the cache-based address matching.
+    if not parquet_is_local():
+        billing_rows, servicing_rows, bene_rows = [], [], []
+    else:
         try:
-            billing_rows, servicing_rows = await asyncio.gather(
+            billing_rows, servicing_rows, bene_rows = await asyncio.gather(
                 query_async(shared_billing_sql),
                 query_async(shared_servicing_sql),
+                query_async(shared_bene_sql),
             )
-            bene_rows = []
         except Exception as e:
-            raise HTTPException(500, f"Query error: {e}")
+            # BENE_ID column may not exist in all data sets — retry without beneficiary overlap
+            _log.warning("Shared-beneficiary query failed for NPI %s (retrying without BENE_ID): %s", npi, e)
+            try:
+                billing_rows, servicing_rows = await asyncio.gather(
+                    query_async(shared_billing_sql),
+                    query_async(shared_servicing_sql),
+                )
+                bene_rows = []
+            except Exception as e:
+                raise HTTPException(500, f"Query error: {e}")
 
     # ── 3. Same address/zip from prescan cache ─────────────────────────────
+    # Full-cache pass — run in a worker thread to keep the event loop free.
+    # `prescan` is also used by the enrichment step further down.
     prescan = _prescan_lookup()
-    target = prescan.get(npi)
-    address_matches: list[dict] = []
 
-    if target:
-        target_state = target.get("state", "")
-        target_city = target.get("city", "")
+    def _find_address_matches() -> list[dict]:
+        target = prescan.get(npi)
+        matches: list[dict] = []
+        if not target:
+            return matches
+
         target_zip = target.get("zip", "")[:5] if target.get("zip") else ""
         target_specialty = target.get("specialty", "")
 
@@ -159,8 +170,6 @@ async def get_related_providers(npi: str, limit: int = 30):
             if p_npi == npi:
                 continue
             p_zip = p.get("zip", "")[:5] if p.get("zip") else ""
-            p_state = p.get("state", "")
-            p_city = p.get("city", "")
 
             # Same zip code
             if target_zip and p_zip == target_zip:
@@ -170,11 +179,14 @@ async def get_related_providers(npi: str, limit: int = 30):
                     and p.get("specialty", "")
                     and target_specialty == p.get("specialty", "")
                 )
-                address_matches.append({
+                matches.append({
                     "related_npi": p_npi,
                     "shared_count": 2 if same_specialty else 1,
                     "relationship_type": "same_address" if same_specialty else "same_zip",
                 })
+        return matches
+
+    address_matches = await asyncio.to_thread(_find_address_matches)
 
     # ── Merge & score ──────────────────────────────────────────────────────
     # Collect all relationships per NPI
