@@ -57,6 +57,7 @@ import type {
   SystemTemporalPatterns,
   LicenseVerification,
   LicenseFlagsResponse,
+  FraudBrainResponse,
   PharmacyHighRiskResponse,
   PharmacyProviderDetail,
   DMEHighRiskResponse,
@@ -823,6 +824,10 @@ export const api = {
 
   scanHhsNews: () =>
     mutate<{ ok: boolean; fetched: number; message: string }>('POST', '/news/scan-hhs'),
+
+  // Fraud Brain — cross-source meta-analysis
+  fraudBrainTop: (limit = 10, refresh = false) =>
+    get<FraudBrainResponse>('/fraud-brain/top', { limit, refresh }),
 
   // License & Credential Verification
   providerLicense: (npi: string) => get<LicenseVerification>(`/license/providers/${npi}`),

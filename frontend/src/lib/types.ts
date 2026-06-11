@@ -1659,3 +1659,37 @@ export interface SupervisedPredictionsResponse {
   offset: number
   error?: string
 }
+
+// Fraud Brain — cross-source meta-analysis
+export interface FraudBrainEvidence {
+  source: string
+  detail: string
+  points: number
+}
+
+export interface FraudBrainProvider {
+  npi: string
+  provider_name: string
+  state: string
+  specialty: string
+  brain_score: number
+  total_paid: number
+  risk_score: number
+  flag_count: number
+  oig_excluded: boolean
+  corroborating_sources: number
+  components: Record<string, number>
+  evidence: FraudBrainEvidence[]
+}
+
+export interface FraudBrainResponse {
+  top: FraudBrainProvider[]
+  providers_evaluated: number
+  ml_model_used: boolean
+  corroborated_providers: number
+  weights: Record<string, number>
+  computed_in_ms: number
+  computed_at: number
+  cached?: boolean
+  note?: string
+}

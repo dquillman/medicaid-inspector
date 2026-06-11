@@ -24,6 +24,7 @@ import PopulationRatio from './pages/PopulationRatio'
 import TrendDivergence from './pages/TrendDivergence'
 import Watchlist from './pages/Watchlist'
 import FraudRings from './pages/FraudRings'
+import FraudBrain from './pages/FraudBrain'
 import NewsAlerts from './pages/NewsAlerts'
 import MLModel from './pages/MLModel'
 import ClaimPatterns from './pages/ClaimPatterns'
@@ -194,6 +195,7 @@ function AnimatedRoutes() {
           <Route path="/population"       element={<PopulationRatio />} />
           <Route path="/trends"           element={<TrendDivergence />} />
           <Route path="/rings"            element={<FraudRings />} />
+          <Route path="/fraud-brain"      element={<FraudBrain />} />
           <Route path="/news"             element={<NewsAlerts />} />
           <Route path="/ml-model"         element={<MLModel />} />
           <Route path="/billing-codes"   element={<BillingCodeSearch />} />

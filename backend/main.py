@@ -48,6 +48,7 @@ from routes import alerts, cases, audit, ownership, roi, exclusions, geography
 from routes import demographics, hotspots, beneficiary, utilization, population, trends
 from routes import timeline, temporal
 from routes import related
+from routes import fraud_brain as fraud_brain_routes
 from routes import watchlist
 from routes import rings
 from routes import specialty
@@ -369,6 +370,7 @@ app.include_router(evidence_routes.router)
 app.include_router(mfcu_referral.router)
 app.include_router(backup_routes.router)
 app.include_router(billing_codes.router)
+app.include_router(fraud_brain_routes.router)
 app.include_router(phi_admin.router)
 app.add_middleware(PHIAccessMiddleware)
 
