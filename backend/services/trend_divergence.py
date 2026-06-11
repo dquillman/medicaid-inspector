@@ -106,7 +106,24 @@ def _aggregate_billing_by_state_year() -> dict[str, dict[int, float]]:
     has_timeline = any(p.get("timeline") for p in providers[:200])
 
     if not has_timeline:
-        # Slim-cache path: one DuckDB pass over the whole dataset.
+        # Slim-cache path. Prefer the workstation-precomputed aggregation
+        # (scripts/precompute_analyses.py) — the live DuckDB pass below runs
+        # 60-300s against the remote parquet and trips the Cloud Run timeout.
+        from services.slim_cache_enricher import parquet_is_local
+        from services.precomputed_store import get_precomputed
+        pre = get_precomputed("billing_by_state_year")
+        if pre:
+            # JSON round-trip stringifies the year keys — convert back to int
+            return {
+                st: {int(y): float(v) for y, v in years.items()}
+                for st, years in pre.items()
+            }
+        if not parquet_is_local():
+            # No precomputed data and querying the remote parquet would hang:
+            # return empty so every state renders has_billing_data=False.
+            return {}
+
+        # Local parquet: one DuckDB pass over the whole dataset.
         # We get (npi, year, billing); state comes from the slim cache via
         # the npi-state map below.
         from data.duckdb_client import get_connection, get_parquet_path

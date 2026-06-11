@@ -7,8 +7,9 @@ container — it can neither load the 1.4 GB full cache nor query the remote
 parquet within the request timeout. So the analyses run here, on a machine
 with the full cache, and prod serves the stored results.
 
-Run after every full scan / dataset refresh:
-    python backend/scripts/precompute_analyses.py
+Run after every full scan / dataset refresh — use an interpreter that has the
+backend deps installed (duckdb etc.); on Dave's machine that's G:\Python311:
+    G:\Python311\python.exe backend/scripts/precompute_analyses.py
 Then upload to GCS (or let the next deploy pick it up):
     gcloud storage cp backend/precomputed_analyses.json gs://medicaid-inspector-data/
 
@@ -82,6 +83,23 @@ def main() -> int:
     out["doctor_shopping"] = asyncio.run(detect_doctor_shopping(limit=_LIMIT))
     print(f"  done in {time.time() - t:.0f}s "
           f"({out['doctor_shopping'].get('total_flagged', 0)} flagged)")
+
+    print("Computing billing top codes…")
+    t = time.time()
+    from routes.billing_codes import top_codes, diagnosis_flags
+    out["billing_top_codes"] = asyncio.run(top_codes(limit=200, min_providers=1))
+    print(f"  done in {time.time() - t:.0f}s ({out['billing_top_codes'].get('total_codes', 0)} codes)")
+
+    print("Computing diagnosis flags…")
+    t = time.time()
+    out["billing_diagnosis_flags"] = asyncio.run(diagnosis_flags(limit=_LIMIT))
+    print(f"  done in {time.time() - t:.0f}s ({out['billing_diagnosis_flags'].get('total', 0)} flagged)")
+
+    print("Computing state billing trends…")
+    t = time.time()
+    from services.trend_divergence import _aggregate_billing_by_state_year
+    out["billing_by_state_year"] = _aggregate_billing_by_state_year()
+    print(f"  done in {time.time() - t:.0f}s ({len(out['billing_by_state_year'])} states)")
 
     tmp = _OUT.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:

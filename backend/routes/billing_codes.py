@@ -234,17 +234,28 @@ async def top_codes(
             del stats["avg_risk_score_sum"]
             results.append(stats)
     else:
-        rows = await _ddb_top_codes(limit, min_providers)
-        # avg_risk_score requires per-NPI scores, which DuckDB doesn't have —
-        # leave as 0 in DDB path (the slim cache can't compute it without HCPCS rosters)
-        for r in rows:
-            results.append({
-                "code": r["code"],
-                "provider_count": r["provider_count"],
-                "total_paid": r["total_paid"] or 0,
-                "total_claims": r["total_claims"] or 0,
-                "avg_risk_score": 0.0,
-            })
+        from services.slim_cache_enricher import parquet_is_local
+        from services.precomputed_store import get_precomputed
+        pre = get_precomputed("billing_top_codes")
+        if pre:
+            results = [dict(c) for c in (pre.get("codes") or [])
+                       if c.get("provider_count", 0) >= min_providers]
+        elif not parquet_is_local():
+            # No precomputed data and the remote-parquet query would trip the
+            # Cloud Run timeout — return empty rather than hang.
+            results = []
+        else:
+            rows = await _ddb_top_codes(limit, min_providers)
+            # avg_risk_score requires per-NPI scores, which DuckDB doesn't have —
+            # leave as 0 in DDB path (the slim cache can't compute it without HCPCS rosters)
+            for r in rows:
+                results.append({
+                    "code": r["code"],
+                    "provider_count": r["provider_count"],
+                    "total_paid": r["total_paid"] or 0,
+                    "total_claims": r["total_claims"] or 0,
+                    "avg_risk_score": 0.0,
+                })
 
     results.sort(key=lambda x: x["total_paid"], reverse=True)
     results = results[:limit]
@@ -564,6 +575,20 @@ async def diagnosis_flags(limit: int = Query(100, ge=1, le=500)):
                 for iss in entry["issues"]:
                     category_counts[iss["category"]] = category_counts.get(iss["category"], 0) + 1
     else:
+        from services.slim_cache_enricher import parquet_is_local, SLIM_REMOTE_NOTE
+        from services.precomputed_store import get_precomputed
+        pre = get_precomputed("billing_diagnosis_flags")
+        if pre:
+            response = dict(pre)
+            response["flagged_providers"] = (pre.get("flagged_providers") or [])[:limit]
+            _cache_set(cache_key, response)
+            return response
+        if not parquet_is_local():
+            # Remote-parquet query would trip the Cloud Run timeout — degrade clearly.
+            response = {"flagged_providers": [], "total": 0, "category_counts": {},
+                        "note": SLIM_REMOTE_NOTE}
+            _cache_set(cache_key, response)
+            return response
         # DuckDB: only pull rows for the small set of HCPCS codes in our category rules
         all_rule_codes = sorted(_HCPCS_CATEGORIES.keys())
         placeholders = ", ".join("?" for _ in all_rule_codes)
