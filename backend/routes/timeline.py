@@ -7,6 +7,7 @@ import re
 from fastapi import APIRouter, HTTPException, Depends
 from core.store import get_prescanned, get_provider_by_npi
 from data.duckdb_client import query_async, get_parquet_path
+from services.slim_cache_enricher import parquet_is_local
 from routes.auth import require_user
 
 router = APIRouter(prefix="/api/providers", tags=["timeline"], dependencies=[Depends(require_user)])
@@ -116,13 +117,15 @@ async def get_timeline_analysis(npi: str):
     if cached and cached.get("timeline"):
         raw_timeline = cached["timeline"]
 
-    if not raw_timeline:
-        # Fallback: query Parquet directly
+    if not raw_timeline and parquet_is_local():
+        # Fallback: query Parquet directly. Guarded — on slim Cloud Run the
+        # parquet is remote and a per-NPI scan takes 30-180s; return the empty
+        # payload below instead (the slim cache stores no timeline data).
         sql = f"""
         SELECT
             CLAIM_FROM_MONTH                    AS month,
             SUM(TOTAL_PAID)                     AS total_paid,
-            SUM(TOTAL_CLAIM_COUNT)              AS claim_count,
+            SUM(TOTAL_CLAIMS)                   AS claim_count,
             COUNT(DISTINCT HCPCS_CODE)          AS unique_hcpcs_count,
             SUM(TOTAL_UNIQUE_BENEFICIARIES)     AS unique_beneficiaries
         FROM read_parquet('{get_parquet_path()}')

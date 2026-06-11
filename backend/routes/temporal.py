@@ -6,6 +6,7 @@ import re as _re
 from fastapi import APIRouter, HTTPException, Depends
 
 from services.temporal_analyzer import analyze_provider_temporal, get_system_temporal_patterns
+from services.slim_cache_enricher import parquet_is_local
 from routes.auth import require_user
 
 router = APIRouter(prefix="/api/temporal", tags=["temporal"], dependencies=[Depends(require_user)])
@@ -28,6 +29,11 @@ async def provider_temporal_analysis(npi: str):
     detected anomalies, and impossible day volumes.
     """
     npi = _validate_npi(npi)
+    # Temporal analysis scans the claims parquet per-NPI. Against the remote
+    # dataset (slim Cloud Run) that's 60-120s and a guaranteed 503 — fail fast
+    # with 404, which the frontend section treats as "hide this panel".
+    if not parquet_is_local():
+        raise HTTPException(404, "Temporal analysis requires the full local dataset — unavailable on this deployment")
     try:
         result = await analyze_provider_temporal(npi)
     except Exception as e:
@@ -45,6 +51,8 @@ async def system_patterns():
     """
     System-wide temporal patterns for baseline comparison.
     """
+    if not parquet_is_local():
+        raise HTTPException(404, "Temporal analysis requires the full local dataset — unavailable on this deployment")
     try:
         return await get_system_temporal_patterns()
     except Exception as e:

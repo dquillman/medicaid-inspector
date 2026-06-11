@@ -1837,11 +1837,8 @@ async def provider_sam_exclusion(npi: str):
     npi = _validate_npi(npi)
     from core.sam_store import check_sam_exclusion
     # Also try by name from NPPES data
-    name = ""
-    for p in get_prescanned():
-        if p["npi"] == npi:
-            name = p.get("nppes", {}).get("name", "")
-            break
+    p = get_provider_by_npi(npi) or {}
+    name = (p.get("nppes") or {}).get("name", "")
     return await check_sam_exclusion(npi=npi, name=name)
 
 

@@ -102,28 +102,45 @@ async def medicare_compare(npi: str):
             "ratio": None,
         })
 
-    # Get Medicaid HCPCS codes for comparison
+    # Get Medicaid HCPCS codes for comparison — from the prescan cache (full
+    # cache) or the local HCPCS index parquet (slim deployments). The previous
+    # dataset-parquet query used column names that don't exist in the dataset
+    # and tuple-indexed dict rows, so it never returned data.
     medicaid_hcpcs = []
     try:
-        from data.duckdb_client import query_async, get_parquet_path
-        parquet = get_parquet_path()
-        sql = f"""
-            SELECT hcpcs_code,
-                   SUM(medicaid_paid) AS total_paid,
-                   SUM(claims) AS total_claims
-            FROM read_parquet('{parquet}')
-            WHERE billing_npi = ?
-            GROUP BY hcpcs_code
-            ORDER BY total_paid DESC
-            LIMIT 10
-        """
-        rows = await query_async(sql, [npi])
-        medicaid_hcpcs = [
-            {"hcpcs_code": r[0], "total_paid": float(r[1]), "total_claims": int(r[2])}
-            for r in rows
-        ]
+        cached_hcpcs = medicaid_entry.get("hcpcs") or []
+        if cached_hcpcs:
+            medicaid_hcpcs = [
+                {
+                    "hcpcs_code": h.get("hcpcs_code", ""),
+                    "total_paid": float(h.get("total_paid") or 0),
+                    "total_claims": int(h.get("total_claims") or 0),
+                }
+                for h in cached_hcpcs[:10]
+            ]
+        else:
+            from routes.billing_codes import _HCPCS_INDEX
+            if _HCPCS_INDEX.exists():
+                from data.duckdb_client import query_async
+                idx = str(_HCPCS_INDEX).replace("\\", "/")
+                rows = await query_async(
+                    "SELECT HCPCS_CODE AS hcpcs_code, TOTAL_PAID AS total_paid,"
+                    " TOTAL_CLAIMS AS total_claims"
+                    f" FROM read_parquet('{idx}')"
+                    " WHERE BILLING_PROVIDER_NPI_NUM = ?"
+                    " ORDER BY TOTAL_PAID DESC LIMIT 10",
+                    (npi,),
+                )
+                medicaid_hcpcs = [
+                    {
+                        "hcpcs_code": r["hcpcs_code"],
+                        "total_paid": float(r["total_paid"]),
+                        "total_claims": int(r["total_claims"]),
+                    }
+                    for r in rows
+                ]
     except Exception as e:
-        logger.warning("Medicaid HCPCS cross-reference query failed for NPI %s: %s", npi, e)
+        logger.warning("Medicaid HCPCS cross-reference failed for NPI %s: %s", npi, e)
 
     return {
         "npi": npi,

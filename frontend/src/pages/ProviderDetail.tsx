@@ -22,19 +22,34 @@ import TemporalAnalysisSection from '../components/TemporalAnalysisSection'
 import type { ClusterProvider, OpenPaymentsData, SamExclusion, RelatedProvider, MedicareComparison, LicenseVerification, ScoreSnapshot, NewsAlert } from '../lib/types'
 
 
-/** Fires once when the element scrolls into the viewport (200px margin). */
+/** Fires once when the element scrolls into the viewport (200px margin).
+ *
+ * Uses a callback ref, NOT a mount-only effect: this page early-returns a
+ * spinner until the detail query resolves, so the observed element doesn't
+ * exist on first mount. A [] effect would grab ref.current === null and never
+ * re-run — the observer would never attach and dependent queries would never
+ * fire (panels stuck on "Loading…" forever).
+ */
 function useInView() {
-  const ref = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(false)
-  useEffect(() => {
-    const el = ref.current
+  const obsRef = useRef<IntersectionObserver | null>(null)
+  const ref = useCallback((el: HTMLDivElement | null) => {
+    obsRef.current?.disconnect()
+    obsRef.current = null
     if (!el) return
     const obs = new IntersectionObserver(
       ([e]) => { if (e.isIntersecting) { setVisible(true); obs.disconnect() } },
       { rootMargin: '200px' },
     )
     obs.observe(el)
-    return () => obs.disconnect()
+    obsRef.current = obs
+  }, [])
+  // Safety net: IntersectionObserver doesn't deliver in hidden/background
+  // tabs and can be flaky in embedded browsers — never leave a panel stuck
+  // on "Loading…" forever; load it anyway after 10s.
+  useEffect(() => {
+    const t = setTimeout(() => setVisible(true), 10_000)
+    return () => clearTimeout(t)
   }, [])
   return { ref, visible }
 }
