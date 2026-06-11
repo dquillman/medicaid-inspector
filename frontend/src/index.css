@@ -129,6 +129,26 @@
     background: rgba(17, 24, 39, 0.3);
   }
 
+  /* Landing hero — ambient network backdrop with a very slow drift */
+  .hero-bg {
+    background-image: url('/hero-network.jpg');
+    background-size: cover;
+    background-position: center;
+    opacity: 0.55;
+    animation: hero-drift 45s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+
+  /* Staggered one-shot entrance for hero content */
+  .hero-enter {
+    opacity: 0;
+    animation: hero-rise 0.7s ease-out forwards;
+  }
+  .hero-enter-1 { animation-delay: 0.1s; }
+  .hero-enter-2 { animation-delay: 0.2s; }
+  .hero-enter-3 { animation-delay: 0.3s; }
+  .hero-enter-4 { animation-delay: 0.45s; }
+
   /* Gradient divider */
   .divider {
     height: 1px;
@@ -140,6 +160,16 @@
 /* Smooth transitions for interactive elements */
 button, a, input, select, textarea, .card, tr {
   transition: all 0.2s ease;
+}
+
+@keyframes hero-drift {
+  0%   { transform: scale(1) translateY(0); }
+  100% { transform: scale(1.08) translateY(-1.5%); }
+}
+
+@keyframes hero-rise {
+  0%   { opacity: 0; transform: translateY(14px); }
+  100% { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes shimmer {

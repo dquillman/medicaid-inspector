@@ -200,24 +200,26 @@ export default function Landing({ onLogin }: Props) {
       </header>
 
       {/* Hero */}
-      <section className="pt-32 pb-20 px-6">
-        <div className="max-w-4xl mx-auto text-center">
-          <div className="inline-flex items-center gap-2 px-3 py-1 mb-6 bg-red-950/50 border border-red-800/50 rounded-full">
+      <section className="relative pt-32 pb-20 px-6 overflow-hidden">
+        <div className="absolute inset-0 hero-bg" aria-hidden="true" />
+        <div className="absolute inset-0 bg-gradient-to-b from-gray-950/60 via-gray-950/40 to-gray-950" aria-hidden="true" />
+        <div className="relative max-w-4xl mx-auto text-center">
+          <div className="hero-enter inline-flex items-center gap-2 px-3 py-1 mb-6 bg-red-950/50 border border-red-800/50 rounded-full">
             <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
             <span className="text-xs text-red-400 font-medium uppercase tracking-wider">Fraud Detection Platform</span>
           </div>
-          <h1 className="text-5xl md:text-6xl font-black text-white leading-tight mb-6">
+          <h1 className="hero-enter hero-enter-1 text-5xl md:text-6xl font-black text-white leading-tight mb-6">
             Detect Medicaid Fraud<br />
             <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
               Before It Costs Billions
             </span>
           </h1>
-          <p className="text-lg text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
+          <p className="hero-enter hero-enter-2 text-lg text-gray-400 max-w-2xl mx-auto mb-10 leading-relaxed">
             Scan over 100,000 Medicaid providers against 18 OIG-based fraud signals.
             Real-time risk scoring, network analysis, and case management —
             powered by CMS/HHS open data.
           </p>
-          <div className="flex items-center justify-center gap-4 mb-16">
+          <div className="hero-enter hero-enter-3 flex items-center justify-center gap-4 mb-16">
             <button onClick={onLogin} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3.5 rounded-xl text-base font-semibold transition-all hover:shadow-lg hover:shadow-blue-600/25">
               Start Free Trial
             </button>
@@ -227,7 +229,7 @@ export default function Landing({ onLogin }: Props) {
           </div>
 
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-3xl mx-auto">
+          <div className="hero-enter hero-enter-4 grid grid-cols-2 md:grid-cols-4 gap-6 max-w-3xl mx-auto">
             {STATS.map(s => (
               <div key={s.label} className="text-center">
                 <p className="text-3xl font-black text-white">{s.value}</p>
