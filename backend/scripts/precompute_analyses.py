@@ -155,6 +155,13 @@ def main() -> int:
     out["billing_by_state_year"] = _aggregate_billing_by_state_year()
     print(f"  done in {time.time() - t:.0f}s ({len(out['billing_by_state_year'])} states)")
 
+    print("Computing ownership networks…")
+    t = time.time()
+    from routes.ownership import compute_networks
+    out["ownership_networks"] = compute_networks(providers)
+    print(f"  done in {time.time() - t:.0f}s "
+          f"({out['ownership_networks']['total_networks']} networks)")
+
     print("Writing HCPCS index parquet (powers per-code search on prod)…")
     t = time.time()
     _write_hcpcs_index(providers)

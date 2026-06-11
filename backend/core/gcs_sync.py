@@ -35,6 +35,8 @@ _SYNC_FILES = [
     "precomputed_analyses.json",  # workstation-precomputed heavy analyses (few MB)
     "hcpcs_index.parquet",        # code-sorted (npi, code, paid, claims) index for per-code search
     "roi_data.json",
+    "supervised_model.json",  # trained supervised-ML metrics + per-NPI predictions
+    "ml_scores.json",         # Isolation Forest anomaly scores
     "notifications.json",
     "saved_searches.json",
     "referrals.json",

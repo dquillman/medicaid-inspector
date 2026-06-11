@@ -10,9 +10,11 @@ router = APIRouter(prefix="/api/ml/supervised", tags=["ml-supervised"], dependen
 @router.post("/train")
 async def train_supervised_model():
     """Train gradient boosting classifier from review queue labels."""
+    import asyncio
     from services.supervised_scorer import train_model
     try:
-        result = train_model()
+        # sklearn training + scoring 106k providers — keep it off the event loop
+        result = await asyncio.to_thread(train_model)
         return result
     except RuntimeError as e:
         raise HTTPException(500, str(e))

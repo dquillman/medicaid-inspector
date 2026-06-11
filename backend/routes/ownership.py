@@ -1,4 +1,6 @@
 """Ownership network analysis — group providers by authorized official."""
+import asyncio
+
 from fastapi import APIRouter, Depends
 from core.store import get_prescanned
 from routes.auth import require_admin
@@ -6,13 +8,17 @@ from routes.auth import require_admin
 router = APIRouter(prefix="/api/ownership", tags=["ownership"], dependencies=[Depends(require_admin)])
 
 
-@router.get("/networks")
-async def get_ownership_networks():
-    """Return all ownership networks with 3+ NPIs, sorted by total billing."""
-    # Group by authorized official name (lowercased, trimmed)
-    networks: dict[str, list[dict]] = {}
+def compute_networks(providers: list[dict]) -> dict:
+    """Group providers by authorized official; return networks with 3+ NPIs.
 
-    for p in get_prescanned():
+    Needs nppes.authorized_official on the providers, which only the FULL
+    cache has — on the slim cache this returns zero networks (the route
+    falls back to the precomputed section in that case).
+    """
+    networks: dict[str, list[dict]] = {}
+    off_key_to_official: dict[str, str] = {}
+
+    for p in providers:
         nppes = p.get("nppes") or {}
         auth_off = nppes.get("authorized_official") or {}
         off_name = (auth_off.get("name") or "").strip()
@@ -20,9 +26,10 @@ async def get_ownership_networks():
             continue
 
         off_key = off_name.lower().strip()
+        off_key_to_official.setdefault(off_key, off_name)
         p_addr = nppes.get("address") or {}
 
-        entry = {
+        networks.setdefault(off_key, []).append({
             "npi": p["npi"],
             "name": p.get("provider_name") or nppes.get("name") or "",
             "entity_type": nppes.get("entity_type") or "",
@@ -36,19 +43,8 @@ async def get_ownership_networks():
                 "state": p_addr.get("state", ""),
                 "zip": p_addr.get("zip", ""),
             },
-        }
-        networks.setdefault(off_key, []).append(entry)
+        })
 
-    # Build a lookup from off_key -> canonical official name to avoid re-scanning prescan list
-    off_key_to_official: dict[str, str] = {}
-    for p in get_prescanned():
-        p_nppes = p.get("nppes") or {}
-        p_auth = p_nppes.get("authorized_official") or {}
-        p_off = (p_auth.get("name") or "").strip()
-        if p_off:
-            off_key_to_official.setdefault(p_off.lower().strip(), p_off)
-
-    # Filter to 3+ NPIs and build response
     result = []
     for off_key, npis in networks.items():
         if len(npis) < 3:
@@ -58,13 +54,10 @@ async def get_ownership_networks():
         avg_risk = sum(n["risk_score"] for n in npis) / len(npis) if npis else 0
         top_risk = max(npis, key=lambda x: x["risk_score"])
 
-        # Use canonical official name from the prebuilt lookup; fall back to key
-        official_name = off_key_to_official.get(off_key, off_key)
-
         npis.sort(key=lambda x: x["risk_score"], reverse=True)
 
         result.append({
-            "official_name": official_name,
+            "official_name": off_key_to_official.get(off_key, off_key),
             "npi_count": len(npis),
             "total_billing": round(total_billing, 2),
             "avg_risk_score": round(avg_risk, 1),
@@ -78,3 +71,23 @@ async def get_ownership_networks():
 
     result.sort(key=lambda x: x["total_billing"], reverse=True)
     return {"networks": result, "total_networks": len(result)}
+
+
+@router.get("/networks")
+async def get_ownership_networks():
+    """Return all ownership networks with 3+ NPIs, sorted by total billing."""
+    live = await asyncio.to_thread(compute_networks, get_prescanned())
+    if live["total_networks"] > 0:
+        return live
+
+    # Slim cache (Cloud Run) strips nppes.authorized_official, so the live
+    # computation finds nothing — serve the workstation-precomputed networks.
+    from services.precomputed_store import get_precomputed
+    pre = get_precomputed("ownership_networks")
+    if pre:
+        return pre
+    return {
+        **live,
+        "note": "Ownership networks need full NPPES data (not in the slim cache) "
+                "and no precomputed copy is available — run the precompute script.",
+    }

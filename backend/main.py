@@ -517,9 +517,11 @@ async def prescan_status_endpoint():
 @app.post("/api/ml/train", dependencies=[Depends(require_analyst)])
 async def train_ml_model():
     """Train Isolation Forest on all cached providers and return anomaly scores."""
+    import asyncio as _asyncio
     from services.ml_scorer import train_and_score
     try:
-        result = train_and_score()
+        # sklearn training takes 10-30s on 106k providers — keep it off the event loop
+        result = await _asyncio.to_thread(train_and_score)
         return result
     except RuntimeError as e:
         raise HTTPException(500, str(e))

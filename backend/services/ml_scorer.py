@@ -6,7 +6,9 @@ across multiple provider-level features. Complements the rule-based
 risk score by surfacing providers that are statistically unusual even
 if they don't trigger specific fraud signals.
 """
+import json
 import logging
+import pathlib
 import threading
 import time
 
@@ -16,6 +18,44 @@ log = logging.getLogger(__name__)
 _lock = threading.Lock()
 _ml_scores: dict[str, dict] = {}  # keyed by NPI
 _training_stats: dict = {}
+
+# Scores persist as JSON (synced through GCS) so trained state survives
+# Cloud Run restarts — same rationale as supervised_scorer.
+_PERSIST_PATH = pathlib.Path(__file__).parent.parent / "ml_scores.json"
+_load_attempted = False
+
+
+def _persist_state(stats: dict, scores: dict[str, dict]) -> None:
+    try:
+        tmp = _PERSIST_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"training_stats": stats, "ml_scores": scores}, f, separators=(",", ":"))
+        tmp.replace(_PERSIST_PATH)
+        from core.gcs_sync import upload_file
+        upload_file(_PERSIST_PATH.name)
+    except Exception as e:
+        log.warning("Could not persist ML scores: %s", e)
+
+
+def _ensure_loaded() -> None:
+    """Restore persisted scores on first read after a restart."""
+    global _load_attempted, _ml_scores, _training_stats
+    with _lock:
+        if _load_attempted or _training_stats:
+            return
+        _load_attempted = True
+    if not _PERSIST_PATH.exists():
+        return
+    try:
+        with open(_PERSIST_PATH, encoding="utf-8") as f:
+            saved = json.load(f)
+        with _lock:
+            if not _training_stats:  # don't clobber a fresher in-memory train
+                _training_stats = saved.get("training_stats") or {}
+                _ml_scores = saved.get("ml_scores") or {}
+        log.info("Restored ML scores: %d providers", len(_ml_scores))
+    except Exception as e:
+        log.warning("Could not restore ML scores: %s", e)
 
 # Feature columns used for the model
 FEATURE_COLS = [
@@ -187,6 +227,8 @@ def train_and_score() -> dict:
         _ml_scores = new_ml_scores
         _training_stats = new_training_stats
 
+    _persist_state(new_training_stats, new_ml_scores)
+
     return {
         "scored": len(npis),
         "anomalies_detected": int(anomaly_mask.sum()),
@@ -199,6 +241,7 @@ def train_and_score() -> dict:
 
 def get_ml_score(npi: str) -> dict:
     """Return ML anomaly score for a single provider."""
+    _ensure_loaded()
     with _lock:
         scores_snapshot = _ml_scores
     if npi in scores_snapshot:
@@ -215,6 +258,7 @@ def get_ml_score(npi: str) -> dict:
 
 def get_ml_status() -> dict:
     """Return training stats and model status."""
+    _ensure_loaded()
     with _lock:
         stats_snapshot = dict(_training_stats)
         scores_len = len(_ml_scores)

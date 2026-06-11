@@ -5,7 +5,9 @@ confirmed fraud/cleared labels from the review queue.
 Uses scikit-learn's GradientBoostingClassifier to learn from human-reviewed
 labels and predict fraud probability for unreviewed providers.
 """
+import json
 import logging
+import pathlib
 import threading
 import time
 from typing import Optional
@@ -19,6 +21,51 @@ _scaler = None  # fitted StandardScaler
 _training_metrics: dict = {}
 _feature_names: list[str] = []
 _predictions: dict[str, dict] = {}  # NPI -> prediction dict
+
+# Metrics + predictions persist as JSON (synced through GCS) so the trained
+# state survives Cloud Run restarts. The sklearn model object itself is NOT
+# persisted — the predictions dict covers every scanned provider, and pickled
+# models are fragile across sklearn versions. On-the-fly scoring of brand-new
+# NPIs needs a retrain after a restart; everything else works from the JSON.
+_PERSIST_PATH = pathlib.Path(__file__).parent.parent / "supervised_model.json"
+_load_attempted = False
+
+
+def _persist_state(metrics: dict, feature_names: list[str], predictions: dict[str, dict]) -> None:
+    try:
+        tmp = _PERSIST_PATH.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(
+                {"training_metrics": metrics, "feature_names": feature_names, "predictions": predictions},
+                f, separators=(",", ":"),
+            )
+        tmp.replace(_PERSIST_PATH)
+        from core.gcs_sync import upload_file
+        upload_file(_PERSIST_PATH.name)
+    except Exception as e:
+        log.warning("Could not persist supervised model state: %s", e)
+
+
+def _ensure_loaded() -> None:
+    """Restore persisted metrics/predictions on first read after a restart."""
+    global _load_attempted, _training_metrics, _feature_names, _predictions
+    with _lock:
+        if _load_attempted or _training_metrics:
+            return
+        _load_attempted = True
+    if not _PERSIST_PATH.exists():
+        return
+    try:
+        with open(_PERSIST_PATH, encoding="utf-8") as f:
+            saved = json.load(f)
+        with _lock:
+            if not _training_metrics:  # don't clobber a fresher in-memory train
+                _training_metrics = saved.get("training_metrics") or {}
+                _feature_names = saved.get("feature_names") or []
+                _predictions = saved.get("predictions") or {}
+        log.info("Restored supervised model state: %d predictions", len(_predictions))
+    except Exception as e:
+        log.warning("Could not restore supervised model state: %s", e)
 
 # Features extracted from provider data
 FEATURE_COLS = [
@@ -319,6 +366,8 @@ def train_model() -> dict:
         _training_metrics = new_training_metrics
         _predictions = new_predictions
 
+    _persist_state(new_training_metrics, new_feature_names, new_predictions)
+
     return {
         **new_training_metrics,
         "providers_scored": len(new_predictions),
@@ -327,17 +376,20 @@ def train_model() -> dict:
 
 def predict_fraud_probability(npi: str) -> Optional[dict]:
     """Return fraud probability for a specific provider."""
+    _ensure_loaded()
     with _lock:
         current_model = _model
         current_scaler = _scaler
         preds_snapshot = _predictions
 
-    if current_model is None:
-        return {"error": "Model not trained yet. Call POST /api/ml/supervised/train first."}
-
-    # Check cached predictions first
+    # Persisted predictions work without the live model object
     if npi in preds_snapshot:
         return preds_snapshot[npi]
+
+    if current_model is None:
+        if preds_snapshot:
+            return {"error": f"NPI {npi} was not scored in the last training run. Retrain to score it."}
+        return {"error": "Model not trained yet. Call POST /api/ml/supervised/train first."}
 
     # Try to score on the fly
     from core.store import get_provider_by_npi
@@ -417,6 +469,7 @@ def _label_readiness() -> dict:
 
 def get_model_status() -> dict:
     """Return current model status and metrics."""
+    _ensure_loaded()
     with _lock:
         metrics_snapshot = dict(_training_metrics)
         preds_len = len(_predictions)
@@ -436,6 +489,7 @@ def get_model_status() -> dict:
 
 def get_feature_importance() -> dict:
     """Return ranked feature importances from the trained model."""
+    _ensure_loaded()
     with _lock:
         metrics_snapshot = dict(_training_metrics)
     if not metrics_snapshot or not metrics_snapshot.get("feature_importance"):
@@ -448,10 +502,11 @@ def get_feature_importance() -> dict:
 
 def get_all_predictions(limit: int = 100, offset: int = 0) -> dict:
     """Return all provider predictions ranked by fraud probability."""
+    _ensure_loaded()
     with _lock:
-        current_model = _model
         preds_snapshot = dict(_predictions)
-    if current_model is None:
+    # Persisted predictions are servable even without the live model object
+    if not preds_snapshot:
         return {"error": "Model not trained yet.", "predictions": [], "total": 0}
 
     sorted_preds = sorted(
