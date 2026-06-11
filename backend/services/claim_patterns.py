@@ -138,16 +138,25 @@ def _compute_all_from_cache(limit: int = 100) -> dict[str, list[dict]]:
     queries — see services/slim_cache_enricher.py.
     """
     from core.store import get_prescanned
-    from services.slim_cache_enricher import has_hcpcs_detail, enrich_top_providers
+    from services.slim_cache_enricher import (
+        has_hcpcs_detail, enrich_top_providers, parquet_is_local, SLIM_REMOTE_NOTE,
+    )
+
+    _empty = {"unbundling": [], "duplicates": [], "pos": [], "modifiers": [], "impossible": []}
 
     providers = get_prescanned()
     if not providers:
-        return {"unbundling": [], "duplicates": [], "pos": [], "modifiers": [], "impossible": []}
+        return _empty
 
     if not has_hcpcs_detail():
+        if not parquet_is_local():
+            # Slim cache + remote parquet: enrichment would run 60-300s and
+            # trip the Cloud Run timeout (the page spins forever). Short-circuit
+            # so the UI can render a clear note instead.
+            return {**_empty, "note": SLIM_REMOTE_NOTE}
         providers = enrich_top_providers(include_timeline=True)
         if not providers:
-            return {"unbundling": [], "duplicates": [], "pos": [], "modifiers": [], "impossible": []}
+            return _empty
 
     t0 = _time.time()
     unbundling_results: list[dict] = []

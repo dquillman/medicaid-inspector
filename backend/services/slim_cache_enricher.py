@@ -25,6 +25,29 @@ logger = logging.getLogger(__name__)
 DEFAULT_TOPN = 500
 
 
+def parquet_is_local() -> bool:
+    """True when the DuckDB parquet source is a local file.
+
+    The enrichment queries below are fine against a local parquet (~seconds)
+    but run 60-300s against the remote 2.94 GB parquet over httpfs — long
+    enough to trip the Cloud Run request timeout. Callers on the slim-cache
+    path must check this before calling enrich_top_providers and short-circuit
+    with a "requires full cache" note when the parquet is remote (same
+    pattern as the v3.1.5 beneficiary-fraud fix).
+    """
+    from data.duckdb_client import get_parquet_path
+    path = str(get_parquet_path())
+    return not path.startswith(("http://", "https://", "s3://", "gs://", "az://", "abfss://"))
+
+
+SLIM_REMOTE_NOTE = (
+    "This analysis requires per-claim HCPCS detail, which is only present in the "
+    "full prescan cache. The server is running on the slim cache with a remote "
+    "dataset, so computing it live would exceed the request timeout. Run a fresh "
+    "scan or restore the full cache from GCS to enable it."
+)
+
+
 def has_hcpcs_detail(sample_size: int = 200) -> bool:
     """True if the loaded prescan cache carries per-HCPCS arrays (full cache).
 

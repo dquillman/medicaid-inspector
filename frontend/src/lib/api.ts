@@ -873,7 +873,7 @@ export const api = {
 
   // Claim-Level Fraud Patterns
   claimPatternAll: (limit = 100) =>
-    get<{ unbundling: unknown[]; duplicates: unknown[]; pos: unknown[]; modifiers: unknown[]; impossible: unknown[] }>(
+    get<{ unbundling: unknown[]; duplicates: unknown[]; pos: unknown[]; modifiers: unknown[]; impossible: unknown[]; note?: string }>(
       '/claim-patterns/all', { limit },
     ),
 

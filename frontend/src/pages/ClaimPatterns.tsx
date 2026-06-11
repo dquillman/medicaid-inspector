@@ -384,7 +384,7 @@ export default function ClaimPatterns() {
   const [tab, setTab] = useState<TabId>('unbundling')
 
   // Single query fetches all 5 analyses at once
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['claim-patterns-all'],
     queryFn: () => api.claimPatternAll(),
     staleTime: 300_000,
@@ -427,6 +427,18 @@ export default function ClaimPatterns() {
             </svg>
             <span className="text-sm text-gray-300">Analyzing claim patterns across all providers...</span>
           </div>
+        </div>
+      )}
+
+      {error != null && !data && (
+        <div className="card border-red-800 bg-red-950/20 p-5 text-sm text-red-300">
+          Claim-pattern analysis failed: {error instanceof Error ? error.message : 'request error'}. Try reloading the page.
+        </div>
+      )}
+
+      {data?.note && (
+        <div className="card border-yellow-800 bg-yellow-950/20 p-5 text-sm text-yellow-300">
+          {data.note}
         </div>
       )}
 
