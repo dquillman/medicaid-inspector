@@ -84,3 +84,4 @@ backend/data/*.duckdb
 .env.*.local
 !.env.example
 backend/precomputed_analyses.json
+backend/hcpcs_index.parquet

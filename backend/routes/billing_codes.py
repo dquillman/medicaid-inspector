@@ -7,6 +7,7 @@ when those arrays are absent we fall back to a DuckDB query against the
 Parquet dataset and enrich each row with the provider's name/state/
 risk_score from the slim cache. Responses are cached for 10 minutes.
 """
+import pathlib as _pathlib
 import time as _time
 from typing import Any
 
@@ -17,6 +18,20 @@ from data.cpt_descriptions import CPT_DESCRIPTIONS
 from data.duckdb_client import get_parquet_path, query_async
 from data.icd10_descriptions import ICD10_DESCRIPTIONS, HCPCS_TO_ICD10
 from routes.auth import require_user
+
+# Workstation-generated (npi, code, paid, claims) aggregate, code-sorted —
+# see scripts/precompute_analyses.py. Synced from GCS at startup. Column
+# names match the big dataset parquet so the SQL below runs unchanged;
+# querying this ~50 MB local file takes milliseconds vs 30-180s against the
+# remote 2.94 GB parquet (which 503s the per-code search on Cloud Run).
+_HCPCS_INDEX = _pathlib.Path(__file__).parent.parent / "hcpcs_index.parquet"
+
+
+def _search_parquet() -> str:
+    """Path for per-code SQL: the local HCPCS index when present, else the dataset parquet."""
+    if _HCPCS_INDEX.exists() and _HCPCS_INDEX.stat().st_size > 1_000:
+        return str(_HCPCS_INDEX).replace("\\", "/")
+    return get_parquet_path()
 
 router = APIRouter(
     prefix="/api/billing-codes",
@@ -76,7 +91,7 @@ async def _ddb_providers_by_code(code: str, limit: int) -> list[dict]:
         BILLING_PROVIDER_NPI_NUM        AS npi,
         SUM(TOTAL_PAID)                 AS total_paid,
         SUM(TOTAL_CLAIMS)               AS total_claims
-    FROM read_parquet('{get_parquet_path()}')
+    FROM read_parquet('{_search_parquet()}')
     WHERE UPPER(HCPCS_CODE) = ?
     GROUP BY npi
     ORDER BY total_paid DESC
@@ -93,7 +108,7 @@ async def _ddb_top_codes(limit: int, min_providers: int) -> list[dict]:
         COUNT(DISTINCT BILLING_PROVIDER_NPI_NUM)     AS provider_count,
         SUM(TOTAL_PAID)                              AS total_paid,
         SUM(TOTAL_CLAIMS)                            AS total_claims
-    FROM read_parquet('{get_parquet_path()}')
+    FROM read_parquet('{_search_parquet()}')
     WHERE HCPCS_CODE IS NOT NULL
     GROUP BY UPPER(HCPCS_CODE)
     HAVING provider_count >= ?
@@ -112,7 +127,7 @@ async def _ddb_providers_by_codes(codes: list[str]) -> list[dict]:
         UPPER(HCPCS_CODE)               AS hcpcs_code,
         SUM(TOTAL_PAID)                 AS total_paid,
         SUM(TOTAL_CLAIMS)               AS total_claims
-    FROM read_parquet('{get_parquet_path()}')
+    FROM read_parquet('{_search_parquet()}')
     WHERE UPPER(HCPCS_CODE) IN ({placeholders})
     GROUP BY npi, hcpcs_code
     """
@@ -598,7 +613,7 @@ async def diagnosis_flags(limit: int = Query(100, ge=1, le=500)):
             UPPER(HCPCS_CODE)               AS hcpcs_code,
             SUM(TOTAL_PAID)                 AS total_paid,
             SUM(TOTAL_CLAIMS)               AS total_claims
-        FROM read_parquet('{get_parquet_path()}')
+        FROM read_parquet('{_search_parquet()}')
         WHERE UPPER(HCPCS_CODE) IN ({placeholders})
         GROUP BY npi, hcpcs_code
         """

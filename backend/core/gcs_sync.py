@@ -33,6 +33,7 @@ _SYNC_FILES = [
     "watchlist.json",
     "prescan_slim.json",  # 54MB slim index — safe to load at startup
     "precomputed_analyses.json",  # workstation-precomputed heavy analyses (few MB)
+    "hcpcs_index.parquet",        # code-sorted (npi, code, paid, claims) index for per-code search
     "roi_data.json",
     "notifications.json",
     "saved_searches.json",

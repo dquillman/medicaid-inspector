@@ -35,6 +35,60 @@ _OUT = _BACKEND / "precomputed_analyses.json"
 _LIMIT = 500  # matches the max limit the API routes accept
 
 
+_INDEX_OUT = _BACKEND / "hcpcs_index.parquet"
+
+
+def _write_hcpcs_index(providers: list[dict]) -> None:
+    """Flatten per-provider HCPCS aggregates into a code-sorted parquet.
+
+    Column names match the big dataset parquet so routes/billing_codes.py can
+    run its existing SQL against this file unchanged. Sorting by HCPCS_CODE
+    gives DuckDB row-group pruning on per-code lookups.
+    """
+    import csv
+    import tempfile
+
+    import duckdb
+
+    # dir=_BACKEND: the default %TEMP% lives on C:, which is chronically full
+    # on this machine — keep the ~150 MB scratch CSV on the same drive as the
+    # repo instead.
+    with tempfile.NamedTemporaryFile(
+        "w", newline="", encoding="utf-8", suffix=".csv", delete=False, dir=str(_BACKEND),
+    ) as f:
+        tmp_csv = f.name
+        w = csv.writer(f)
+        w.writerow(["BILLING_PROVIDER_NPI_NUM", "HCPCS_CODE", "TOTAL_PAID", "TOTAL_CLAIMS"])
+        n = 0
+        for p in providers:
+            npi = p.get("npi")
+            if not npi:
+                continue
+            for h in (p.get("hcpcs") or []):
+                code = (h.get("hcpcs_code") or "").strip().upper()
+                if not code:
+                    continue
+                w.writerow([npi, code,
+                            float(h.get("total_paid") or 0),
+                            int(h.get("total_claims") or 0)])
+                n += 1
+    con = duckdb.connect()
+    csv_path = tmp_csv.replace("\\", "/")
+    out_path = str(_INDEX_OUT).replace("\\", "/")
+    con.execute(f"""
+        COPY (
+            SELECT * FROM read_csv('{csv_path}', header=true,
+                columns={{'BILLING_PROVIDER_NPI_NUM':'VARCHAR','HCPCS_CODE':'VARCHAR',
+                          'TOTAL_PAID':'DOUBLE','TOTAL_CLAIMS':'BIGINT'}})
+            ORDER BY HCPCS_CODE, TOTAL_PAID DESC
+        ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
+    """)
+    con.close()
+    pathlib.Path(tmp_csv).unlink(missing_ok=True)
+    size_mb = _INDEX_OUT.stat().st_size / (1024 * 1024)
+    print(f"  {n:,} rows -> {_INDEX_OUT.name} ({size_mb:.1f} MB)")
+
+
 def main() -> int:
     from core.store import load_prescanned_from_disk, get_prescanned
 
@@ -101,6 +155,11 @@ def main() -> int:
     out["billing_by_state_year"] = _aggregate_billing_by_state_year()
     print(f"  done in {time.time() - t:.0f}s ({len(out['billing_by_state_year'])} states)")
 
+    print("Writing HCPCS index parquet (powers per-code search on prod)…")
+    t = time.time()
+    _write_hcpcs_index(providers)
+    print(f"  done in {time.time() - t:.0f}s")
+
     tmp = _OUT.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, separators=(",", ":"), default=str)
@@ -109,6 +168,7 @@ def main() -> int:
     print(f"Wrote {_OUT} ({size_mb:.1f} MB)")
     print("Next: upload to GCS ->")
     print('  gcloud storage cp backend/precomputed_analyses.json gs://medicaid-inspector-data/')
+    print('  gcloud storage cp backend/hcpcs_index.parquet gs://medicaid-inspector-data/')
     return 0
 
 
