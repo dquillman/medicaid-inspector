@@ -227,6 +227,14 @@ async def get_high_risk_providers(limit: int = 50) -> dict:
     if not has_hcpcs_detail():
         if not parquet_is_local():
             # Slim cache + remote parquet: enrichment trips the Cloud Run timeout.
+            # Serve precomputed results when available, else a clear note.
+            from services.precomputed_store import get_precomputed
+            pre = get_precomputed("dme_high_risk")
+            if pre:
+                result = dict(pre)
+                result["providers"] = (pre.get("providers") or [])[:limit]
+                _cache_set(f"dme_high_risk:{limit}", result)
+                return result
             return {"available": False, "note": SLIM_REMOTE_NOTE,
                     "providers": [], "total": 0, "kpis": _empty_kpis()}
         import asyncio as _asyncio

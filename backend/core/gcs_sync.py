@@ -32,6 +32,7 @@ _SYNC_FILES = [
     "score_history.json",
     "watchlist.json",
     "prescan_slim.json",  # 54MB slim index — safe to load at startup
+    "precomputed_analyses.json",  # workstation-precomputed heavy analyses (few MB)
     "roi_data.json",
     "notifications.json",
     "saved_searches.json",

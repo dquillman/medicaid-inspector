@@ -95,11 +95,16 @@ async def detect_doctor_shopping(limit: int = 100) -> dict:
     if not has_hcpcs_detail():
         # Slim cache path. The "right" answer requires a GROUP BY over the
         # entire 2.94 GB remote parquet (220M rows), which takes 60-300s
-        # on Cloud Run cold start and trips the request timeout. Short-circuit
-        # with an empty result so the /all endpoint can complete; the page
-        # will render with a clear "data not available" note instead of
-        # hanging forever. Full analysis runs when the local prescan cache
-        # has per-NPI HCPCS detail (i.e., after a full scan, not slim).
+        # on Cloud Run cold start and trips the request timeout. Serve the
+        # workstation-precomputed results when available (see
+        # scripts/precompute_analyses.py), else short-circuit with a note.
+        from services.precomputed_store import get_precomputed
+        pre = get_precomputed("doctor_shopping")
+        if pre:
+            result = dict(pre)
+            result["flagged"] = (pre.get("flagged") or [])[:limit]
+            _cache_set(f"doctor_shopping:{limit}", result)
+            return result
         result = {
             "flagged": [],
             "total_flagged": 0,

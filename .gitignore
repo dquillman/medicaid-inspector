@@ -83,3 +83,4 @@ backend/data/*.duckdb
 .env.local
 .env.*.local
 !.env.example
+backend/precomputed_analyses.json

@@ -151,8 +151,12 @@ def _compute_all_from_cache(limit: int = 100) -> dict[str, list[dict]]:
     if not has_hcpcs_detail():
         if not parquet_is_local():
             # Slim cache + remote parquet: enrichment would run 60-300s and
-            # trip the Cloud Run timeout (the page spins forever). Short-circuit
-            # so the UI can render a clear note instead.
+            # trip the Cloud Run timeout (the page spins forever). Serve the
+            # workstation-precomputed results when available, else a clear note.
+            from services.precomputed_store import get_precomputed
+            pre = get_precomputed("claim_patterns")
+            if pre:
+                return {k: (v[:limit] if isinstance(v, list) else v) for k, v in pre.items()}
             return {**_empty, "note": SLIM_REMOTE_NOTE}
         providers = enrich_top_providers(include_timeline=True)
         if not providers:
