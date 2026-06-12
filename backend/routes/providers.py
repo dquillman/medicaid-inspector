@@ -1316,6 +1316,12 @@ async def get_timeline(npi: str):
     if cached and cached.get("timeline"):
         return {"npi": npi, "timeline": cached["timeline"]}
 
+    # Slim cache has no timelines and the remote parquet scan would just burn
+    # 25s before timing out — fail fast on Cloud Run.
+    from services.slim_cache_enricher import parquet_is_local
+    if not parquet_is_local():
+        return {"npi": npi, "timeline": [], "note": "Timeline data not available on this deployment"}
+
     # Fallback: query Parquet (provider not yet scanned)
     # Wrap in a timeout to avoid Cloud Run request timeouts
     sql = f"""
@@ -1346,24 +1352,42 @@ async def get_hcpcs(npi: str):
     if cached and cached.get("hcpcs"):
         rows = cached["hcpcs"]
     else:
-        # Fallback: query Parquet (provider not yet scanned)
-        # Wrap in a timeout to avoid Cloud Run request timeouts
-        sql = f"""
-        SELECT
-            HCPCS_CODE          AS hcpcs_code,
-            SUM(TOTAL_PAID)     AS total_paid,
-            SUM(TOTAL_CLAIMS)   AS total_claims,
-            SUM(TOTAL_UNIQUE_BENEFICIARIES) AS total_beneficiaries
-        FROM read_parquet('{get_parquet_path()}')
-        WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
-        GROUP BY HCPCS_CODE
-        ORDER BY total_paid DESC
-        LIMIT 20
-        """
-        try:
-            rows = await asyncio.wait_for(query_async(sql), timeout=25.0)
-        except asyncio.TimeoutError:
+        from routes.billing_codes import _HCPCS_INDEX
+        from services.slim_cache_enricher import parquet_is_local
+        if _HCPCS_INDEX.exists():
+            # Local per-(npi, code) index — milliseconds, present on Cloud Run
+            # (synced at startup). The slim cache strips per-provider hcpcs
+            # arrays, so this is the normal prod path. The index has no
+            # beneficiary counts; the breakdown renders codes/paid/claims.
+            idx = str(_HCPCS_INDEX).replace("\\", "/")
+            rows = await query_async(
+                "SELECT HCPCS_CODE AS hcpcs_code, TOTAL_PAID AS total_paid,"
+                " TOTAL_CLAIMS AS total_claims"
+                f" FROM read_parquet('{idx}')"
+                " WHERE BILLING_PROVIDER_NPI_NUM = ?"
+                " ORDER BY TOTAL_PAID DESC LIMIT 20",
+                (npi,),
+            )
+        elif not parquet_is_local():
             return {"npi": npi, "hcpcs": [], "note": "HCPCS data not available — run a full scan to populate"}
+        else:
+            # Full local dataset, provider not yet scanned
+            sql = f"""
+            SELECT
+                HCPCS_CODE          AS hcpcs_code,
+                SUM(TOTAL_PAID)     AS total_paid,
+                SUM(TOTAL_CLAIMS)   AS total_claims,
+                SUM(TOTAL_UNIQUE_BENEFICIARIES) AS total_beneficiaries
+            FROM read_parquet('{get_parquet_path()}')
+            WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
+            GROUP BY HCPCS_CODE
+            ORDER BY total_paid DESC
+            LIMIT 20
+            """
+            try:
+                rows = await asyncio.wait_for(query_async(sql), timeout=25.0)
+            except asyncio.TimeoutError:
+                return {"npi": npi, "hcpcs": [], "note": "HCPCS data not available — run a full scan to populate"}
 
     # Fetch descriptions for all unique codes in one concurrent batch
     codes = list({r.get("hcpcs_code", "") for r in rows if r.get("hcpcs_code")})
