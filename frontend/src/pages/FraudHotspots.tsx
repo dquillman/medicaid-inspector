@@ -18,7 +18,9 @@ const SEVERITY_BG: Record<string, string> = {
   NORMAL:   'bg-green-900/40 text-green-300 border-green-700',
 }
 
-const FILTERS = ['All', 'CRITICAL', 'HIGH', 'ELEVATED'] as const
+// 'Flagged' (everything above NORMAL) is the default view — NORMAL areas are
+// noise for investigators and only appear when 'All Areas' is chosen.
+const FILTERS = ['Flagged', 'CRITICAL', 'HIGH', 'ELEVATED', 'All'] as const
 
 function fmt$(n: number) {
   if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`
@@ -29,7 +31,7 @@ function fmt$(n: number) {
 
 export default function FraudHotspots() {
   const navigate = useNavigate()
-  const [filter, setFilter] = useState<string>('All')
+  const [filter, setFilter] = useState<string>('Flagged')
   const [expandedZip, setExpandedZip] = useState<string | null>(null)
 
   const { data, isLoading, error } = useQuery({
@@ -74,7 +76,9 @@ export default function FraudHotspots() {
 
   const filtered = filter === 'All'
     ? hotspots
-    : hotspots.filter(h => h.severity === filter)
+    : filter === 'Flagged'
+      ? hotspots.filter(h => h.severity !== 'NORMAL')
+      : hotspots.filter(h => h.severity === filter)
 
   // Top 15 for the chart
   const chartData = hotspots.slice(0, 15).map(h => ({
@@ -162,10 +166,15 @@ export default function FraudHotspots() {
                 : 'btn-ghost'
             }
           >
-            {f === 'All' ? 'All Areas' : f}
-            {f !== 'All' && (
+            {f === 'All' ? 'All Areas (incl. Normal)' : f === 'Flagged' ? 'Flagged Areas' : f}
+            {f !== 'All' && f !== 'Flagged' && (
               <span className="ml-1.5 text-xs opacity-70">
                 ({severity_counts[f] ?? 0})
+              </span>
+            )}
+            {f === 'Flagged' && (
+              <span className="ml-1.5 text-xs opacity-70">
+                ({(severity_counts.CRITICAL ?? 0) + (severity_counts.HIGH ?? 0) + (severity_counts.ELEVATED ?? 0)})
               </span>
             )}
           </button>
