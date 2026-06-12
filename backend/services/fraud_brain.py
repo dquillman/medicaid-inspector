@@ -34,9 +34,11 @@ W_ML_ANOMALY   = 0.25   # Isolation Forest score
 W_CORROBORATION = 0.20  # independent claim-level analyses that also flagged the NPI
 W_DOLLARS      = 0.10   # total_paid percentile
 W_FLAG_BREADTH = 0.10   # how many distinct signals fired
-# OIG-excluded providers are SKIPPED entirely — they're already barred from
-# the program and live on the dedicated Excluded page, so ranking them as
-# "probable frauds to investigate" wastes a slot.
+# OIG-excluded providers are SKIPPED — they're already barred from the
+# program and live on the dedicated Excluded page — UNLESS the review queue
+# marks them confirmed_fraud: a confirmed fraud belongs in the ranking, and
+# its exclusion becomes scoring evidence (flat boost on top, capped at 100).
+OIG_BOOST = 25.0
 
 _lock = threading.Lock()
 _cache: dict = {"result": None, "computed_at": 0.0}
@@ -113,6 +115,12 @@ def compute_top_frauds(limit: int = 10) -> dict:
     ml_trained = bool(get_ml_status().get("trained"))
     corroboration = _corroboration_index()
 
+    # Excluded providers re-enter the ranking only when confirmed fraud
+    from core.review_store import get_review_queue
+    confirmed_fraud_npis = {
+        i.get("npi") for i in get_review_queue() if i.get("status") == "confirmed_fraud"
+    }
+
     # total_paid percentile lookup (sorted once, bisect per provider)
     paid_sorted = sorted(float(p.get("total_paid") or 0) for p in providers)
     n_paid = len(paid_sorted)
@@ -123,8 +131,10 @@ def compute_top_frauds(limit: int = 10) -> dict:
         if not npi:
             continue
 
-        # Already barred from the program — belongs on the Excluded page
-        if is_excluded(npi)[0]:
+        # Already barred from the program — belongs on the Excluded page,
+        # unless the review queue confirmed the fraud
+        oig = is_excluded(npi)[0]
+        if oig and npi not in confirmed_fraud_npis:
             continue
 
         total_paid = float(p.get("total_paid") or 0)
@@ -192,6 +202,15 @@ def compute_top_frauds(limit: int = 10) -> dict:
 
         score = sum(components.values())
 
+        if oig:  # only reachable when confirmed_fraud
+            score += OIG_BOOST
+            evidence.append({
+                "source": "OIG LEIE exclusion (confirmed fraud)",
+                "detail": "Marked confirmed fraud in the Review Queue AND on the "
+                          "federal exclusion list while present in Medicaid billing data",
+                "points": OIG_BOOST,
+            })
+
         scored.append({
             "npi": npi,
             "provider_name": p.get("provider_name")
@@ -204,7 +223,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
             "total_paid": round(total_paid, 2),
             "risk_score": round(risk, 1),
             "flag_count": flag_count,
-            "oig_excluded": False,  # excluded providers are skipped above
+            "oig_excluded": oig,
             "corroborating_sources": len(corr_sources),
             "components": {k: round(v, 1) for k, v in components.items()},
             "evidence": sorted(evidence, key=lambda e: -e["points"]),

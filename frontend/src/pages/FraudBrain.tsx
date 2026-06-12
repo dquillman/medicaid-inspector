@@ -124,7 +124,8 @@ export default function FraudBrain() {
             claim-level pattern analyses (unbundling, duplicates, impossible volume), pharmacy/DME
             findings, doctor-shopping overlap, diagnosis mismatches, and financial exposure into
             one ranked list of the most probable frauds. OIG-excluded providers are omitted —
-            they're already barred and live on the Excluded page.
+            they're already barred and live on the Excluded page — unless the Review Queue
+            marks them confirmed fraud, which brings them back with their exclusion as evidence.
           </p>
         </div>
         <button
