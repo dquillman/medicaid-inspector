@@ -28,12 +28,18 @@ log = logging.getLogger(__name__)
 
 CACHE_TTL_SEC = 15 * 60
 
-# Component weights — must sum to 1.0 (OIG boost applies on top, capped at 100)
+# Component weights — must sum to 1.0 (boosts apply on top, capped at 100)
 W_RULE_SIGNALS = 0.35   # composite risk_score from the 18 signals
 W_ML_ANOMALY   = 0.25   # Isolation Forest score
 W_CORROBORATION = 0.20  # independent claim-level analyses that also flagged the NPI
 W_DOLLARS      = 0.10   # total_paid percentile
 W_FLAG_BREADTH = 0.10   # how many distinct signals fired
+
+# When the SUPERVISED model is trained (learned from the user's own
+# confirmed-fraud/dismissed labels in the Review Queue), its fraud
+# probability joins the blend at this weight and the base components are
+# scaled by (1 - W_SUPERVISED) so the total still sums to 1.0.
+W_SUPERVISED = 0.25
 # Review-queue confirmed frauds always get a flat boost so they surface on
 # the board regardless of dollar size. OIG-excluded providers are SKIPPED —
 # they're already barred and live on the dedicated Excluded page — UNLESS
@@ -123,6 +129,13 @@ def compute_top_frauds(limit: int = 10) -> dict:
         i.get("npi") for i in get_review_queue() if i.get("status") == "confirmed_fraud"
     }
 
+    # Label-trained supervised model — empty dict until the user has labeled
+    # >=10 providers and trained it (ML Model page)
+    from services.supervised_scorer import get_predictions_snapshot
+    supervised = get_predictions_snapshot()
+    sup_active = bool(supervised)
+    base_scale = (1.0 - W_SUPERVISED) if sup_active else 1.0
+
     # total_paid percentile lookup (sorted once, bisect per provider)
     paid_sorted = sorted(float(p.get("total_paid") or 0) for p in providers)
     n_paid = len(paid_sorted)
@@ -202,6 +215,19 @@ def compute_top_frauds(limit: int = 10) -> dict:
         # 5. Flag breadth
         components["flag_breadth"] = min(flag_count / 18.0, 1.0) * 100 * W_FLAG_BREADTH
 
+        # Supervised model trained on the user's review labels
+        if sup_active:
+            for k in components:
+                components[k] *= base_scale
+            prob = float((supervised.get(npi) or {}).get("fraud_probability") or 0.0)
+            components["supervised_ml"] = prob * 100 * W_SUPERVISED
+            if prob >= 0.5:
+                evidence.append({
+                    "source": "Supervised ML (trained on your labels)",
+                    "detail": f"{prob:.0%} fraud probability from the review-queue-trained model",
+                    "points": round(components["supervised_ml"], 1),
+                })
+
         score = sum(components.values())
 
         confirmed = npi in confirmed_fraud_npis
@@ -246,6 +272,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
         "top": scored[:limit],
         "providers_evaluated": len(scored),
         "ml_model_used": ml_trained,
+        "supervised_model_used": sup_active,
         "corroborated_providers": len(corroboration),
         "weights": {
             "rule_signals": W_RULE_SIGNALS, "ml_anomaly": W_ML_ANOMALY,

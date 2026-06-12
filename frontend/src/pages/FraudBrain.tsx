@@ -9,6 +9,7 @@ import type { FraudBrainProvider } from '../lib/types'
 const COMPONENT_LABELS: Record<string, string> = {
   rule_signals: '18 Fraud Signals',
   ml_anomaly: 'ML Anomaly',
+  supervised_ml: 'Your-Labels ML',
   corroboration: 'Claim-Level Analyses',
   dollars: 'Dollars at Risk',
   flag_breadth: 'Signal Breadth',

@@ -1686,6 +1686,7 @@ export interface FraudBrainResponse {
   top: FraudBrainProvider[]
   providers_evaluated: number
   ml_model_used: boolean
+  supervised_model_used?: boolean
   corroborated_providers: number
   weights: Record<string, number>
   computed_in_ms: number

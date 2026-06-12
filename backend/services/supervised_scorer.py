@@ -467,6 +467,17 @@ def _label_readiness() -> dict:
     }
 
 
+def get_predictions_snapshot() -> dict[str, dict]:
+    """All current predictions keyed by NPI ({} when untrained).
+
+    Used by the Fraud Brain to fold the label-trained model into its ranking
+    without per-NPI lock traffic.
+    """
+    _ensure_loaded()
+    with _lock:
+        return dict(_predictions)
+
+
 def get_model_status() -> dict:
     """Return current model status and metrics."""
     _ensure_loaded()
