@@ -17,6 +17,11 @@ backend/data/*.json
 backend/.tmp/
 backend/prescan_cache.json
 backend/prescan_slim.json
+backend/hcpcs_index.parquet
+backend/ml_scores.json
+backend/supervised_model.json
+backend/precomputed_analyses.json
+backend/oig_exclusions_cache.json
 backend/.prescan_cache_*.tmp
 backend/*.tmp
 backend/oig_exclusions.json
