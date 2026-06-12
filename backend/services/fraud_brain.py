@@ -34,10 +34,12 @@ W_ML_ANOMALY   = 0.25   # Isolation Forest score
 W_CORROBORATION = 0.20  # independent claim-level analyses that also flagged the NPI
 W_DOLLARS      = 0.10   # total_paid percentile
 W_FLAG_BREADTH = 0.10   # how many distinct signals fired
-# OIG-excluded providers are SKIPPED — they're already barred from the
-# program and live on the dedicated Excluded page — UNLESS the review queue
-# marks them confirmed_fraud: a confirmed fraud belongs in the ranking, and
-# its exclusion becomes scoring evidence (flat boost on top, capped at 100).
+# Review-queue confirmed frauds always get a flat boost so they surface on
+# the board regardless of dollar size. OIG-excluded providers are SKIPPED —
+# they're already barred and live on the dedicated Excluded page — UNLESS
+# they're confirmed_fraud, in which case the exclusion stacks as additional
+# evidence. Total score stays capped at 100.
+CONFIRMED_FRAUD_BOOST = 25.0
 OIG_BOOST = 25.0
 
 _lock = threading.Lock()
@@ -202,12 +204,20 @@ def compute_top_frauds(limit: int = 10) -> dict:
 
         score = sum(components.values())
 
+        confirmed = npi in confirmed_fraud_npis
+        if confirmed:
+            score += CONFIRMED_FRAUD_BOOST
+            evidence.append({
+                "source": "Confirmed fraud",
+                "detail": "Marked confirmed_fraud in the Review Queue",
+                "points": CONFIRMED_FRAUD_BOOST,
+            })
         if oig:  # only reachable when confirmed_fraud
             score += OIG_BOOST
             evidence.append({
-                "source": "OIG LEIE exclusion (confirmed fraud)",
-                "detail": "Marked confirmed fraud in the Review Queue AND on the "
-                          "federal exclusion list while present in Medicaid billing data",
+                "source": "OIG LEIE exclusion",
+                "detail": "On the federal exclusion list while present in "
+                          "Medicaid billing data",
                 "points": OIG_BOOST,
             })
 
@@ -224,6 +234,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
             "risk_score": round(risk, 1),
             "flag_count": flag_count,
             "oig_excluded": oig,
+            "confirmed_fraud": confirmed,
             "corroborating_sources": len(corr_sources),
             "components": {k: round(v, 1) for k, v in components.items()},
             "evidence": sorted(evidence, key=lambda e: -e["points"]),
@@ -240,6 +251,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
             "rule_signals": W_RULE_SIGNALS, "ml_anomaly": W_ML_ANOMALY,
             "corroboration": W_CORROBORATION, "dollars_at_risk": W_DOLLARS,
             "flag_breadth": W_FLAG_BREADTH,
+            "confirmed_fraud_boost": CONFIRMED_FRAUD_BOOST, "oig_boost": OIG_BOOST,
         },
         "computed_in_ms": int((time.time() - t0) * 1000),
         "computed_at": time.time(),
