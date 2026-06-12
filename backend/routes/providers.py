@@ -1357,17 +1357,28 @@ async def get_hcpcs(npi: str):
         if _HCPCS_INDEX.exists():
             # Local per-(npi, code) index — milliseconds, present on Cloud Run
             # (synced at startup). The slim cache strips per-provider hcpcs
-            # arrays, so this is the normal prod path. The index has no
-            # beneficiary counts; the breakdown renders codes/paid/claims.
+            # arrays, so this is the normal prod path.
             idx = str(_HCPCS_INDEX).replace("\\", "/")
-            rows = await query_async(
-                "SELECT HCPCS_CODE AS hcpcs_code, TOTAL_PAID AS total_paid,"
-                " TOTAL_CLAIMS AS total_claims"
-                f" FROM read_parquet('{idx}')"
-                " WHERE BILLING_PROVIDER_NPI_NUM = ?"
-                " ORDER BY TOTAL_PAID DESC LIMIT 20",
-                (npi,),
-            )
+            try:
+                rows = await query_async(
+                    "SELECT HCPCS_CODE AS hcpcs_code, TOTAL_PAID AS total_paid,"
+                    " TOTAL_CLAIMS AS total_claims,"
+                    " TOTAL_UNIQUE_BENEFICIARIES AS total_beneficiaries"
+                    f" FROM read_parquet('{idx}')"
+                    " WHERE BILLING_PROVIDER_NPI_NUM = ?"
+                    " ORDER BY TOTAL_PAID DESC LIMIT 20",
+                    (npi,),
+                )
+            except Exception:
+                # Pre-v3.1.18 index without the beneficiary column
+                rows = await query_async(
+                    "SELECT HCPCS_CODE AS hcpcs_code, TOTAL_PAID AS total_paid,"
+                    " TOTAL_CLAIMS AS total_claims"
+                    f" FROM read_parquet('{idx}')"
+                    " WHERE BILLING_PROVIDER_NPI_NUM = ?"
+                    " ORDER BY TOTAL_PAID DESC LIMIT 20",
+                    (npi,),
+                )
         elif not parquet_is_local():
             return {"npi": npi, "hcpcs": [], "note": "HCPCS data not available — run a full scan to populate"}
         else:

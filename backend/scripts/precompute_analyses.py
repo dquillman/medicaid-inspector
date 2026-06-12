@@ -39,16 +39,47 @@ _INDEX_OUT = _BACKEND / "hcpcs_index.parquet"
 
 
 def _write_hcpcs_index(providers: list[dict]) -> None:
-    """Flatten per-provider HCPCS aggregates into a code-sorted parquet.
+    """Build a code-sorted per-(npi, code) aggregate parquet.
 
     Column names match the big dataset parquet so routes/billing_codes.py can
     run its existing SQL against this file unchanged. Sorting by HCPCS_CODE
     gives DuckDB row-group pruning on per-code lookups.
+
+    Preferred source is the LOCAL dataset parquet — it yields every code per
+    NPI (the cache stores only the top 50) and includes beneficiary counts,
+    which the cache's hcpcs arrays never had. Falls back to flattening the
+    cache when the dataset isn't on disk.
     """
     import csv
     import tempfile
 
     import duckdb
+
+    dataset = _BACKEND / "data" / "medicaid-provider-spending.parquet"
+    if dataset.exists() and dataset.stat().st_size > 1_000_000:
+        src = str(dataset).replace("\\", "/")
+        out_path = str(_INDEX_OUT).replace("\\", "/")
+        con = duckdb.connect()
+        con.execute(f"""
+            COPY (
+                SELECT
+                    BILLING_PROVIDER_NPI_NUM,
+                    HCPCS_CODE,
+                    SUM(TOTAL_PAID)                  AS TOTAL_PAID,
+                    SUM(TOTAL_CLAIMS)                AS TOTAL_CLAIMS,
+                    SUM(TOTAL_UNIQUE_BENEFICIARIES)  AS TOTAL_UNIQUE_BENEFICIARIES
+                FROM read_parquet('{src}')
+                WHERE BILLING_PROVIDER_NPI_NUM IS NOT NULL
+                  AND HCPCS_CODE IS NOT NULL
+                GROUP BY BILLING_PROVIDER_NPI_NUM, HCPCS_CODE
+                ORDER BY HCPCS_CODE, TOTAL_PAID DESC
+            ) TO '{out_path}' (FORMAT PARQUET, COMPRESSION ZSTD)
+        """)
+        n = con.execute(f"SELECT COUNT(*) FROM read_parquet('{out_path}')").fetchone()[0]
+        con.close()
+        size_mb = _INDEX_OUT.stat().st_size / (1024 * 1024)
+        print(f"  {n:,} rows (from local dataset, with beneficiaries) -> {_INDEX_OUT.name} ({size_mb:.1f} MB)")
+        return
 
     # dir=_BACKEND: the default %TEMP% lives on C:, which is chronically full
     # on this machine — keep the ~150 MB scratch CSV on the same drive as the
