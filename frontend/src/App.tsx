@@ -25,6 +25,7 @@ import TrendDivergence from './pages/TrendDivergence'
 import Watchlist from './pages/Watchlist'
 import FraudRings from './pages/FraudRings'
 import FraudBrain from './pages/FraudBrain'
+import Excluded from './pages/Excluded'
 import NewsAlerts from './pages/NewsAlerts'
 import MLModel from './pages/MLModel'
 import ClaimPatterns from './pages/ClaimPatterns'
@@ -196,6 +197,7 @@ function AnimatedRoutes() {
           <Route path="/trends"           element={<TrendDivergence />} />
           <Route path="/rings"            element={<FraudRings />} />
           <Route path="/fraud-brain"      element={<FraudBrain />} />
+          <Route path="/excluded"         element={<Excluded />} />
           <Route path="/news"             element={<NewsAlerts />} />
           <Route path="/ml-model"         element={<MLModel />} />
           <Route path="/billing-codes"   element={<BillingCodeSearch />} />

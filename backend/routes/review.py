@@ -66,7 +66,9 @@ async def list_review_queue(
     page: int = 1,
     limit: int = 50,
 ):
-    all_items = get_review_queue(status_filter=status)
+    from core.oig_store import is_excluded
+    # OIG-excluded providers live on the Excluded page, not the worklist
+    all_items = [i for i in get_review_queue(status_filter=status) if not is_excluded(i.get("npi", ""))[0]]
     enriched  = _enrich_items(all_items)
     total     = len(enriched)
     start     = (page - 1) * limit

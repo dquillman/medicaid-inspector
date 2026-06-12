@@ -1693,3 +1693,22 @@ export interface FraudBrainResponse {
   cached?: boolean
   note?: string
 }
+
+// Excluded providers (OIG LEIE)
+export interface ExcludedProvider {
+  npi: string
+  provider_name: string
+  state: string
+  specialty: string
+  total_paid: number
+  risk_score: number
+  flag_count: number
+  excl_type: string
+  excl_date: string
+}
+
+export interface ExcludedProvidersResponse {
+  providers: ExcludedProvider[]
+  total: number
+  total_paid: number
+}

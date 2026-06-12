@@ -752,8 +752,9 @@ async def get_provider_facets():
 
 @router.get("/export/csv")
 async def export_providers_csv():
-    """Export all scanned providers as a CSV download."""
-    prescanned = get_prescanned()
+    """Export all scanned providers as a CSV download (OIG-excluded omitted)."""
+    from core.oig_store import is_excluded as _excl
+    prescanned = [p for p in get_prescanned() if not _excl(p.get("npi", ""))[0]]
     if not prescanned:
         raise HTTPException(404, "No scanned providers available")
 
@@ -824,7 +825,12 @@ async def list_providers(
 
     # Serve from prescan cache when available — avoids remote Parquet queries
     if prescanned:
-        pool = list(prescanned)
+        # OIG-excluded providers live on the dedicated Excluded page — they're
+        # already barred from the program, so they don't belong in worklists.
+        # (Direct import: _oig_check is bound by a LATER local import in this
+        # function, so referencing it here would be an unbound-local error.)
+        from core.oig_store import is_excluded as _excl
+        pool = [p for p in prescanned if not _excl(p.get("npi", ""))[0]]
 
         if search:
             q = search.lower()

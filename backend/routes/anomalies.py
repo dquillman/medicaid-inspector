@@ -39,7 +39,11 @@ async def list_anomalies(
     """
     prescanned: list[dict] = get_prescanned()
 
-    filtered = [p for p in prescanned if p["risk_score"] > settings.RISK_THRESHOLD]
+    from core.oig_store import is_excluded
+    filtered = [
+        p for p in prescanned
+        if p["risk_score"] > settings.RISK_THRESHOLD and not is_excluded(p.get("npi", ""))[0]
+    ]
 
     if signal and signal in VALID_SIGNALS:
         filtered = [

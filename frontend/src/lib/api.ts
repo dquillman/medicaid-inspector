@@ -58,6 +58,7 @@ import type {
   LicenseVerification,
   LicenseFlagsResponse,
   FraudBrainResponse,
+  ExcludedProvidersResponse,
   PharmacyHighRiskResponse,
   PharmacyProviderDetail,
   DMEHighRiskResponse,
@@ -824,6 +825,9 @@ export const api = {
 
   scanHhsNews: () =>
     mutate<{ ok: boolean; fetched: number; message: string }>('POST', '/news/scan-hhs'),
+
+  // Excluded providers (OIG LEIE)
+  excludedProviders: () => get<ExcludedProvidersResponse>('/exclusions/excluded'),
 
   // Fraud Brain — cross-source meta-analysis
   fraudBrainTop: (limit = 10, refresh = false) =>

@@ -122,8 +122,9 @@ export default function FraudBrain() {
           <p className="text-sm text-gray-500 mt-1 max-w-3xl">
             Cross-source meta-analysis: fuses the 18 rule-based signals, ML anomaly detection,
             claim-level pattern analyses (unbundling, duplicates, impossible volume), pharmacy/DME
-            findings, doctor-shopping overlap, diagnosis mismatches, OIG exclusions, and financial
-            exposure into one ranked list of the most probable frauds.
+            findings, doctor-shopping overlap, diagnosis mismatches, and financial exposure into
+            one ranked list of the most probable frauds. OIG-excluded providers are omitted —
+            they're already barred and live on the Excluded page.
           </p>
         </div>
         <button

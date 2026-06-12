@@ -34,7 +34,9 @@ W_ML_ANOMALY   = 0.25   # Isolation Forest score
 W_CORROBORATION = 0.20  # independent claim-level analyses that also flagged the NPI
 W_DOLLARS      = 0.10   # total_paid percentile
 W_FLAG_BREADTH = 0.10   # how many distinct signals fired
-OIG_BOOST      = 25.0   # flat boost for billing while OIG-excluded
+# OIG-excluded providers are SKIPPED entirely — they're already barred from
+# the program and live on the dedicated Excluded page, so ranking them as
+# "probable frauds to investigate" wastes a slot.
 
 _lock = threading.Lock()
 _cache: dict = {"result": None, "computed_at": 0.0}
@@ -121,6 +123,10 @@ def compute_top_frauds(limit: int = 10) -> dict:
         if not npi:
             continue
 
+        # Already barred from the program — belongs on the Excluded page
+        if is_excluded(npi)[0]:
+            continue
+
         total_paid = float(p.get("total_paid") or 0)
         risk = float(p.get("risk_score") or 0)
 
@@ -186,17 +192,6 @@ def compute_top_frauds(limit: int = 10) -> dict:
 
         score = sum(components.values())
 
-        # 6. OIG exclusion — flat boost on top
-        oig, oig_record = is_excluded(npi)
-        if oig:
-            score += OIG_BOOST
-            evidence.append({
-                "source": "OIG LEIE exclusion",
-                "detail": "Provider is on the federal exclusion list while present "
-                          "in Medicaid billing data",
-                "points": OIG_BOOST,
-            })
-
         scored.append({
             "npi": npi,
             "provider_name": p.get("provider_name")
@@ -209,7 +204,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
             "total_paid": round(total_paid, 2),
             "risk_score": round(risk, 1),
             "flag_count": flag_count,
-            "oig_excluded": oig,
+            "oig_excluded": False,  # excluded providers are skipped above
             "corroborating_sources": len(corr_sources),
             "components": {k: round(v, 1) for k, v in components.items()},
             "evidence": sorted(evidence, key=lambda e: -e["points"]),
@@ -225,7 +220,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
         "weights": {
             "rule_signals": W_RULE_SIGNALS, "ml_anomaly": W_ML_ANOMALY,
             "corroboration": W_CORROBORATION, "dollars_at_risk": W_DOLLARS,
-            "flag_breadth": W_FLAG_BREADTH, "oig_boost": OIG_BOOST,
+            "flag_breadth": W_FLAG_BREADTH,
         },
         "computed_in_ms": int((time.time() - t0) * 1000),
         "computed_at": time.time(),
