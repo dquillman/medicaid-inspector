@@ -4,7 +4,7 @@ import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { ReviewItem, ReviewCounts, AuditEntry } from '../lib/types'
 import { fmt } from '../lib/format'
-import { riskChipClass } from '../lib/risk'
+import { threatColor, magnitudeGlyph } from '../lib/threat'
 import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
 import { ArrowDownTrayIcon } from '../components/icons'
 import EmptyState from '../components/EmptyState'
@@ -14,8 +14,12 @@ type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirme
 
 function RiskBadge({ score }: { score: number }) {
   return (
-    <span className={`px-2 py-0.5 rounded text-xs font-mono font-bold ${riskChipClass(score)}`}>
-      {score.toFixed(1)}
+    <span
+      className="inline-flex items-center gap-1 font-mono tabular-nums text-xs font-semibold"
+      style={{ color: threatColor(score) }}
+      title={`Risk ${score.toFixed(1)}/100`}
+    >
+      <span aria-hidden="true">{magnitudeGlyph(score)}</span>{score.toFixed(1)}
     </span>
   )
 }
@@ -210,9 +214,12 @@ function ReviewRow({
   const isFraud = item.status === 'confirmed_fraud'
   return (
     <>
-      <tr className={`border-b border-gray-800 hover:bg-gray-800/40 transition-colors ${
-        selected ? 'bg-blue-900/20' : isFraud ? 'bg-red-950/20' : rowIndex % 2 === 1 ? 'bg-gray-900/30' : ''
-      } ${isFraud ? 'row-fraud' : ''}`}>
+      <tr
+        className={`border-b border-gray-800 hover:bg-gray-800/40 transition-colors ${
+          selected ? 'bg-blue-900/20' : isFraud ? 'bg-red-950/20' : rowIndex % 2 === 1 ? 'bg-gray-900/30' : ''
+        } ${isFraud ? 'row-fraud' : ''}`}
+        style={isFraud ? undefined : { borderLeft: `3px solid ${threatColor(item.risk_score)}` }}
+      >
         <td className="px-3 py-3">
           <input
             type="checkbox"

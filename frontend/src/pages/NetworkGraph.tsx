@@ -1,14 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import NetworkGraphCanvas from '../components/NetworkGraphCanvas'
+import { isWebGLAvailable } from '../lib/webgl'
+
+const NetworkGraph3D = lazy(() => import('../components/NetworkGraph3D'))
 
 export default function NetworkGraph() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const [npiInput, setNpiInput] = useState(searchParams.get('npi') ?? '')
   const [activeNpi, setActiveNpi] = useState(searchParams.get('npi') ?? '')
+  const [view3d, setView3d] = useState(false)
+  const [webglOk] = useState(() => typeof window !== 'undefined' && isWebGLAvailable())
 
   const { data, isLoading, error } = useQuery({
     queryKey: ['network', activeNpi],
@@ -49,9 +54,27 @@ export default function NetworkGraph() {
           Load Network
         </button>
         {activeNpi && data && (
-          <span className="text-gray-500 text-sm self-center">
+          <span className="text-ink-tertiary text-sm self-center font-mono tabular-nums">
             {data.nodes.length} nodes · {data.edges.length} edges
           </span>
+        )}
+        {webglOk && (
+          <div className="ml-auto self-center inline-flex rounded-lg border border-hairline overflow-hidden text-xs font-mono uppercase tracking-wider">
+            <button
+              type="button"
+              onClick={() => setView3d(false)}
+              className={`px-3 py-1.5 transition-colors ${!view3d ? 'bg-filament-core/15 text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'}`}
+            >
+              2D
+            </button>
+            <button
+              type="button"
+              onClick={() => setView3d(true)}
+              className={`px-3 py-1.5 transition-colors border-l border-hairline ${view3d ? 'bg-filament-core/15 text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'}`}
+            >
+              3D
+            </button>
+          </div>
         )}
       </form>
 

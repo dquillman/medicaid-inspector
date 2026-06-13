@@ -6,6 +6,7 @@ import { fmt } from '../lib/format'
 import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
 import { FunnelIcon, FunnelSolidIcon, ExclamationTriangleIcon } from '../components/icons'
 import RiskScoreBadge from '../components/RiskScoreBadge'
+import { threatColor } from '../lib/threat'
 import BulkActionBar from '../components/BulkActionBar'
 import Sparkline from '../components/Sparkline'
 import EmptyState from '../components/EmptyState'
@@ -802,6 +803,7 @@ export default function ProviderExplorer() {
                             ? 'bg-gray-900/30 hover:bg-gray-800/50'
                             : 'hover:bg-gray-800/50'
                   }`}
+                  style={{ borderLeft: `3px solid ${threatColor(p.risk_score)}` }}
                   onClick={() => navigate(`/providers/${p.npi}`)}
                   onMouseEnter={() => setFocusedRow(idx)}
                 >

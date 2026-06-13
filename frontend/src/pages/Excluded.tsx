@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
+import { threatColor } from '../lib/threat'
 import Breadcrumbs from '../components/Breadcrumbs'
 
 export default function Excluded() {
@@ -74,7 +75,7 @@ export default function Excluded() {
             </thead>
             <tbody>
               {data.providers.map(p => (
-                <tr key={p.npi} className="border-b border-gray-900 hover:bg-gray-900/40">
+                <tr key={p.npi} className="border-b border-gray-900 hover:bg-gray-900/40" style={{ borderLeft: `3px solid ${threatColor(p.risk_score)}` }}>
                   <td className="py-2 pr-4 font-mono text-xs">
                     <Link to={`/providers/${p.npi}`} className="text-blue-400 hover:underline">{p.npi}</Link>
                   </td>
