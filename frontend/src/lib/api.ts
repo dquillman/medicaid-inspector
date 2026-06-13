@@ -59,6 +59,8 @@ import type {
   LicenseFlagsResponse,
   FraudBrainResponse,
   ExcludedProvidersResponse,
+  MethodsResponse,
+  OigTipResponse,
   PharmacyHighRiskResponse,
   PharmacyProviderDetail,
   DMEHighRiskResponse,
@@ -832,6 +834,10 @@ export const api = {
   // Fraud Brain — cross-source meta-analysis
   fraudBrainTop: (limit = 10, refresh = false) =>
     get<FraudBrainResponse>('/fraud-brain/top', { limit, refresh }),
+
+  // Methodology (public) + OIG Hotline tip export
+  methods: () => get<MethodsResponse>('/methods'),
+  oigTip: (npi: string) => get<OigTipResponse>(`/providers/${npi}/oig-tip`),
 
   // License & Credential Verification
   providerLicense: (npi: string) => get<LicenseVerification>(`/license/providers/${npi}`),

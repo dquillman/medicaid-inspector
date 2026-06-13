@@ -209,6 +209,9 @@ export default function ProviderDetail() {
   const [watchlistMsg, setWatchlistMsg] = useState('')
   const [exportStatus, setExportStatus] = useState<'idle' | 'loading' | 'error'>('idle')
   const [exportError, setExportError] = useState('')
+  const [oigTipText, setOigTipText] = useState<string | null>(null)
+  const [oigTipLoading, setOigTipLoading] = useState(false)
+  const [oigCopied, setOigCopied] = useState(false)
 
   // TODO: Consider batch /api/providers/{npi}/full-profile endpoint
   // ── Primary query (loads first) ─────────────────────────────────────────
@@ -500,7 +503,53 @@ export default function ProviderDetail() {
           >
             <ArrowDownTrayIcon /> {exportStatus === 'loading' ? 'Exporting...' : 'Export Fraud Package'}
           </button>
+          <button
+            onClick={async () => {
+              setOigTipLoading(true); setExportError('')
+              try { const r = await api.oigTip(npi!); setOigTipText(r.text); setOigCopied(false) }
+              catch (e) { setExportError(e instanceof Error ? e.message : 'Failed') }
+              finally { setOigTipLoading(false) }
+            }}
+            disabled={oigTipLoading}
+            className="px-4 py-2 bg-filament-core/15 hover:bg-filament-core/25 border border-filament-dim hover:border-filament-core text-filament-core text-sm font-medium rounded transition-colors flex items-center gap-2 disabled:opacity-50"
+            title="Generate a copy-paste HHS-OIG Hotline tip for this provider"
+          >
+            <DocumentTextIcon /> {oigTipLoading ? 'Drafting…' : 'OIG Hotline Tip'}
+          </button>
           {exportError && <p className="text-xs text-red-400">{exportError}</p>}
+          {oigTipText && (
+            <div className="fixed inset-0 z-[80] flex items-center justify-center bg-void/80 p-4" onClick={() => setOigTipText(null)}>
+              <div className="bg-surface-1 border border-hairline rounded-xl w-full max-w-2xl max-h-[85vh] flex flex-col shadow-glow-filament" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-center justify-between px-5 py-3 border-b border-hairline">
+                  <h3 className="font-display font-semibold text-ink-primary text-sm">HHS-OIG Hotline Tip</h3>
+                  <button onClick={() => setOigTipText(null)} className="text-ink-tertiary hover:text-ink-primary text-lg leading-none">×</button>
+                </div>
+                <pre className="flex-1 overflow-auto px-5 py-4 text-xs font-mono text-ink-secondary whitespace-pre-wrap">{oigTipText}</pre>
+                <div className="flex items-center gap-2 px-5 py-3 border-t border-hairline">
+                  <button
+                    onClick={() => { navigator.clipboard?.writeText(oigTipText); setOigCopied(true); setTimeout(() => setOigCopied(false), 2000) }}
+                    className="px-3 py-1.5 text-xs font-medium bg-filament-core text-void rounded hover:bg-filament-core/90 transition-colors"
+                  >
+                    {oigCopied ? 'Copied ✓' : 'Copy to clipboard'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const blob = new Blob([oigTipText], { type: 'text/plain' })
+                      const url = URL.createObjectURL(blob)
+                      const a = document.createElement('a'); a.href = url; a.download = `oig-tip-${npi}.txt`; a.click()
+                      URL.revokeObjectURL(url)
+                    }}
+                    className="px-3 py-1.5 text-xs font-medium bg-surface-2 border border-hairline text-ink-secondary rounded hover:border-filament-dim transition-colors"
+                  >
+                    Download .txt
+                  </button>
+                  <a href="https://oig.hhs.gov/fraud/report-fraud/" target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-filament-dim hover:text-filament-core transition-colors">
+                    Open OIG Hotline form ↗
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
           {watchlistStatus?.watched ? (
             <button
               onClick={() => removeFromWatchlistMutation.mutate()}

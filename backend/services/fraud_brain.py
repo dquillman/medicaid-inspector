@@ -48,6 +48,31 @@ W_SUPERVISED = 0.25
 CONFIRMED_FRAUD_BOOST = 25.0
 OIG_BOOST = 25.0
 
+# Size-bias correction. The single biggest ranking flaw was giant institutions
+# (hospital systems) topping the board purely on scale. Two fixes:
+#  (a) "dollars at risk" is a WITHIN-COHORT percentile (cohort = taxonomy /
+#      specialty), so a hospital's spend is judged against other hospitals, not
+#      against strip-mall PCA mills.
+#  (b) providers that look institutional (hospital-ish taxonomy, or a very broad
+#      code mix across a very large beneficiary panel) get their score dampened
+#      UNLESS a provider-specific (non-size) signal fires — confirmed fraud, OIG
+#      exclusion, any claim-level corroboration, or a strong ML anomaly.
+# Strict large-institution terms only. NOT "clinic"/"center" — a fraud PCA mill
+# is often a "Clinic/Center", and those must NOT be dampened.
+INSTITUTIONAL_KEYWORDS = (
+    "hospital", "health system", "medical center", "health network",
+    "healthcare system", "health care system", "regional medical",
+)
+# A genuine institution bills a BROAD code mix to a LARGE panel. A fraud mill
+# bills a NARROW mix (high concentration) — so this size+breadth test cleanly
+# separates "real hospital/FQHC" from "PCA/NEMT mill" and only dampens the
+# former. ML anomaly and claim-level corroboration are EXCLUDED from the
+# exemption below because, for huge institutions, those fire as a function of
+# size — only confirmed-fraud and OIG exclusion are truly size-independent.
+INSTITUTIONAL_DISTINCT_HCPCS = 80   # broad code mix
+INSTITUTIONAL_BENES = 5000          # large panel
+INSTITUTIONAL_DAMPEN = 0.45         # multiplier applied to a size-only giant
+
 _lock = threading.Lock()
 _cache: dict = {"result": None, "computed_at": 0.0}
 
@@ -140,6 +165,16 @@ def compute_top_frauds(limit: int = 10) -> dict:
     paid_sorted = sorted(float(p.get("total_paid") or 0) for p in providers)
     n_paid = len(paid_sorted)
 
+    # within-cohort dollar percentile — cohort = taxonomy/specialty bucket
+    from collections import defaultdict
+    def _cohort_key(prov: dict) -> str:
+        return (prov.get("specialty") or "").strip().lower() or "unknown"
+    cohort_paid: dict[str, list[float]] = defaultdict(list)
+    for p in providers:
+        cohort_paid[_cohort_key(p)].append(float(p.get("total_paid") or 0))
+    for arr in cohort_paid.values():
+        arr.sort()
+
     scored: list[dict] = []
     for p in providers:
         npi = p.get("npi")
@@ -174,12 +209,14 @@ def compute_top_frauds(limit: int = 10) -> dict:
 
         # 2. ML anomaly
         ml_component = 0.0
+        ml_raw = 0.0
         if ml_trained:
             ml = get_ml_score(npi)
             ml_score = ml.get("ml_anomaly_score")
             if ml_score is not None:
-                ml_component = float(ml_score) * W_ML_ANOMALY
-                if float(ml_score) >= 50:
+                ml_raw = float(ml_score)
+                ml_component = ml_raw * W_ML_ANOMALY
+                if ml_raw >= 50:
                     evidence.append({
                         "source": "ML anomaly detection",
                         "detail": f"Isolation Forest score {ml_score:.0f}/100 "
@@ -201,14 +238,18 @@ def compute_top_frauds(limit: int = 10) -> dict:
             })
         components["corroboration"] = min(corr_raw, 100) * W_CORROBORATION
 
-        # 4. Dollars at risk
-        pct = bisect.bisect_left(paid_sorted, total_paid) / n_paid * 100 if n_paid else 0
+        # 4. Dollars at risk — WITHIN-COHORT percentile (not global), so scale
+        #    is judged against same-specialty peers.
+        ck = _cohort_key(p)
+        cohort_arr = cohort_paid.get(ck) or paid_sorted
+        n_cohort = len(cohort_arr)
+        pct = bisect.bisect_left(cohort_arr, total_paid) / n_cohort * 100 if n_cohort else 0
         components["dollars"] = pct * W_DOLLARS
         if pct >= 95:
             evidence.append({
                 "source": "Financial exposure",
-                "detail": f"${total_paid:,.0f} total Medicaid paid "
-                          f"(top {100 - pct:.1f}% of all providers)",
+                "detail": f"${total_paid:,.0f} Medicaid paid — top {100 - pct:.1f}% "
+                          f"among {ck} peers (n={n_cohort:,})",
                 "points": round(components["dollars"], 1),
             })
 
@@ -231,6 +272,32 @@ def compute_top_frauds(limit: int = 10) -> dict:
         score = sum(components.values())
 
         confirmed = npi in confirmed_fraud_npis
+
+        # Institutional-giant suppression: a large institution with NO
+        # provider-specific signal beyond raw scale gets dampened so it stops
+        # crowding out small, genuinely anomalous billers.
+        specialty_l = (p.get("specialty") or "").lower()
+        distinct_hcpcs = float(p.get("distinct_hcpcs") or 0)
+        benes = float(p.get("total_beneficiaries") or 0)
+        is_institutional = (
+            any(kw in specialty_l for kw in INSTITUTIONAL_KEYWORDS)
+            or (distinct_hcpcs >= INSTITUTIONAL_DISTINCT_HCPCS and benes >= INSTITUTIONAL_BENES)
+        )
+        # Only confirmed-fraud / OIG are size-independent. ML + claim-level
+        # corroboration fire on hospitals BECAUSE they're huge, so they do not
+        # rescue a giant from dampening.
+        strong_specific = confirmed or oig
+        dampened = is_institutional and not strong_specific
+        if dampened:
+            score *= INSTITUTIONAL_DAMPEN
+            evidence.append({
+                "source": "Size adjustment",
+                "detail": "Large institutional provider with no provider-specific "
+                          "fraud signal beyond scale — score dampened to avoid "
+                          "crowding out smaller anomalies",
+                "points": 0,
+            })
+
         if confirmed:
             score += CONFIRMED_FRAUD_BOOST
             evidence.append({
@@ -261,6 +328,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
             "flag_count": flag_count,
             "oig_excluded": oig,
             "confirmed_fraud": confirmed,
+            "size_dampened": dampened,
             "corroborating_sources": len(corr_sources),
             "components": {k: round(v, 1) for k, v in components.items()},
             "evidence": sorted(evidence, key=lambda e: -e["points"]),

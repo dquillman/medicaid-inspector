@@ -2427,6 +2427,111 @@ async def provider_narrative(npi: str, enhance: str = "auto"):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+@router.get("/{npi}/oig-tip")
+async def provider_oig_tip(npi: str):
+    """
+    Generate an HHS-OIG Hotline-ready tip packet for a provider.
+
+    The MFCU referral packet is a long investigation document; the OIG Hotline
+    (oig.hhs.gov/fraud/report-fraud, 1-800-HHS-TIPS) wants short structured
+    intake fields. This emits both a copy-paste text block tuned to those
+    fields and the structured fields themselves. Honest by construction: it
+    frames findings as automated indicators from public data, never as proven
+    fraud, and never claims total paid == improper paid.
+    """
+    npi = _validate_npi(npi)
+    cached = get_provider_by_npi(npi)
+    if not cached:
+        raise HTTPException(404, f"Provider {npi} not in scan cache")
+
+    from services.narrative_generator import _SIGNAL_META
+
+    nppes = cached.get("nppes") or {}
+    name = cached.get("provider_name") or nppes.get("name") or npi
+    addr = nppes.get("address") or {}
+    address_str = ", ".join(
+        x for x in [
+            addr.get("line1"), addr.get("city"),
+            addr.get("state") or cached.get("state"),
+            (addr.get("zip") or cached.get("zip") or "")[:5],
+        ] if x
+    ) or "(address not on file in NPPES)"
+    specialty = cached.get("specialty") or (nppes.get("taxonomy") or {}).get("description") or "(unknown)"
+    risk = float(cached.get("risk_score") or 0)
+    total_paid = float(cached.get("total_paid") or 0)
+    first_m = cached.get("first_month") or "?"
+    last_m = cached.get("last_month") or "?"
+
+    flags = [f for f in (cached.get("signal_results") or cached.get("flags") or []) if f.get("flagged")]
+    indicators = []
+    for f in flags:
+        sig = f.get("signal", "")
+        meta = _SIGNAL_META.get(sig, {})
+        indicators.append({
+            "signal": sig,
+            "label": meta.get("label", sig.replace("_", " ").title()),
+            "finding": f.get("reason", "") or meta.get("explanation", "")[:160],
+            "citations": meta.get("citations", []),
+        })
+
+    ind_lines = "\n".join(
+        f"  - {ind['label']}: {ind['finding']}"
+        + (f"\n      Regulatory basis: {'; '.join(ind['citations'])}" if ind["citations"] else "")
+        for ind in indicators
+    ) or "  - (no individual signals fired; flagged on composite score)"
+
+    text = (
+        "HHS-OIG HOTLINE COMPLAINT — Suspected Medicaid Provider Fraud\n"
+        "Submit at: https://oig.hhs.gov/fraud/report-fraud/ (or 1-800-HHS-TIPS)\n"
+        "\n"
+        "SUBJECT OF COMPLAINT\n"
+        f"  Provider name: {name}\n"
+        f"  NPI: {npi}\n"
+        f"  Provider type / taxonomy: {specialty}\n"
+        f"  Address of record (NPPES): {address_str}\n"
+        f"  Program: Medicaid (Title XIX)\n"
+        "\n"
+        "NATURE OF THE ALLEGATION\n"
+        f"  Automated analysis of public CMS/HHS Medicaid payment data flagged this provider\n"
+        f"  with a composite risk score of {risk:.0f}/100 across {len(flags)} independent fraud\n"
+        f"  indicator(s). The indicators below are statistical/anomaly findings consistent with\n"
+        f"  patterns in OIG enforcement actions; they are leads for investigation, not proof of fraud.\n"
+        "\n"
+        f"  TIME PERIOD OF ACTIVITY: {first_m} to {last_m}\n"
+        f"  TOTAL MEDICAID PAID TO SUBJECT (period): ${total_paid:,.0f}\n"
+        f"    (basis for potential exposure; not an assertion that all payments are improper)\n"
+        "\n"
+        f"SUPPORTING INDICATORS ({len(flags)})\n"
+        f"{ind_lines}\n"
+        "\n"
+        "HOW THIS WAS IDENTIFIED\n"
+        "  Open-source analysis of the public HHS \"Medicaid Provider Spending by HCPCS\"\n"
+        "  dataset (T-MSIS-derived, 2018–2024), cross-referenced with NPPES, the OIG LEIE,\n"
+        "  and SAM.gov. Methodology: medicaid-inspector.web.app/methods\n"
+        "\n"
+        "  No protected health information (PHI) is included; all figures derive from public\n"
+        "  aggregate provider-level data.\n"
+    )
+
+    return {
+        "npi": npi,
+        "text": text,
+        "fields": {
+            "subject_name": name,
+            "npi": npi,
+            "provider_type": specialty,
+            "address": address_str,
+            "program": "Medicaid",
+            "risk_score": round(risk, 1),
+            "time_period": f"{first_m} to {last_m}",
+            "total_medicaid_paid": round(total_paid, 2),
+            "indicators": indicators,
+            "source": "Public HHS T-MSIS Medicaid Provider Spending + NPPES + OIG LEIE + SAM.gov",
+        },
+        "signal_count": len(flags),
+    }
+
+
 @router.get("/{npi}/exclusion-summary")
 async def provider_exclusion_summary(npi: str):
     """Consolidated exclusion check across all sources for a single provider."""

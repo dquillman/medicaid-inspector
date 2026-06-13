@@ -1714,3 +1714,45 @@ export interface ExcludedProvidersResponse {
   total: number
   total_paid: number
 }
+
+// Methodology page (/methods)
+export interface MethodSignal {
+  signal: string
+  label: string
+  explanation: string
+  citations: string[]
+  precision: number | null
+  true_positives: number
+  false_positives: number
+  sample_size: number
+  weight_adjustment: number
+}
+export interface MethodsProvenance {
+  core_dataset: string
+  is_real_medicaid: boolean
+  coverage: string
+  free_and_dua_free: boolean
+  known_limits: string[]
+  medicare_proxy_note: string
+  enrichment_sources: string[]
+}
+export interface MethodsResponse {
+  signal_count: number
+  signals: MethodSignal[]
+  provenance: MethodsProvenance
+  composite_methodology: string
+  feedback_totals: {
+    dispositions: number
+    true_positive_signal_hits: number
+    false_positive_signal_hits: number
+  }
+}
+
+// OIG Hotline tip export
+export interface OigTipIndicator { signal: string; label: string; finding: string; citations: string[] }
+export interface OigTipResponse {
+  npi: string
+  text: string
+  fields: Record<string, unknown>
+  signal_count: number
+}
