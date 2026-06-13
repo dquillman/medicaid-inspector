@@ -1677,6 +1677,7 @@ export interface FraudBrainProvider {
   risk_score: number
   flag_count: number
   oig_excluded: boolean
+  confirmed_fraud?: boolean
   corroborating_sources: number
   components: Record<string, number>
   evidence: FraudBrainEvidence[]

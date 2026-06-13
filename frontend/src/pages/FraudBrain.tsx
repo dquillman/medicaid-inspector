@@ -1,9 +1,13 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import Breadcrumbs from '../components/Breadcrumbs'
+import Reticle from '../components/Reticle'
+import RedactionField from '../components/RedactionField'
+import { threatColor, threatBand, magnitudeGlyph } from '../lib/threat'
+import { gsap, useGSAP, EASE, DUR, prefersReducedMotion } from '../lib/motion'
 import type { FraudBrainProvider } from '../lib/types'
 
 const COMPONENT_LABELS: Record<string, string> = {
@@ -15,75 +19,110 @@ const COMPONENT_LABELS: Record<string, string> = {
   flag_breadth: 'Signal Breadth',
 }
 
-function scoreColor(score: number) {
-  if (score >= 75) return 'text-red-400'
-  if (score >= 55) return 'text-orange-400'
-  if (score >= 35) return 'text-yellow-400'
-  return 'text-blue-400'
+function BrainScore({ score }: { score: number }) {
+  const color = threatColor(score)
+  return (
+    <span
+      role="img"
+      aria-label={`Brain score ${score.toFixed(1)} of 100, ${threatBand(score)}`}
+      className="font-mono tabular-nums inline-flex items-baseline gap-2"
+    >
+      <span aria-hidden="true" style={{ color }} className="text-[0.7em]">{magnitudeGlyph(score)}</span>
+      <span
+        aria-hidden="true"
+        className="js-brain-score font-semibold"
+        data-score={score.toFixed(1)}
+        style={{ color }}
+      >
+        {score.toFixed(1)}
+      </span>
+    </span>
+  )
 }
 
 function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
   const [expanded, setExpanded] = useState(rank <= 3)
   const maxComponent = Math.max(...Object.values(p.components), 1)
+  const prime = rank === 1
+  const color = threatColor(p.brain_score)
 
   return (
-    <div className={`card ${p.brain_score >= 75 ? 'border-red-900/60' : ''}`}>
+    <div
+      data-rank-card
+      data-rank={rank}
+      className={`relative card ${
+        prime ? 'border-threat-critical/60 shadow-glow-critical' : p.brain_score >= 75 ? 'border-threat-high/40' : ''
+      }`}
+    >
+      {prime && <Reticle />}
       <div className="flex items-start gap-4">
-        <div className="text-3xl font-bold text-gray-700 w-12 text-center shrink-0">#{rank}</div>
+        <div
+          className="font-mono font-bold w-12 text-center shrink-0 leading-none"
+          style={{ fontSize: prime ? '2.6rem' : '1.9rem', color: prime ? color : 'var(--hairline-hot)' }}
+        >
+          {rank}
+        </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-3 flex-wrap">
-            <Link to={`/providers/${p.npi}`} className="text-base font-semibold text-blue-400 hover:underline truncate">
-              {p.provider_name || p.npi}
-            </Link>
-            <span className="font-mono text-xs text-gray-500">{p.npi}</span>
-            {p.state && <span className="text-xs px-2 py-0.5 bg-gray-800 border border-gray-700 rounded text-gray-400">{p.state}</span>}
+          <div className="flex items-center gap-3 flex-wrap">
+            <RedactionField delay={rank * 0.06}>
+              <Link
+                to={`/providers/${p.npi}`}
+                className={`font-display font-semibold text-ink-primary hover:text-filament-core transition-colors truncate ${prime ? 'text-lg' : 'text-base'}`}
+              >
+                {p.provider_name || p.npi}
+              </Link>
+            </RedactionField>
+            <span className="font-mono text-xs text-ink-tertiary tracking-wide">{p.npi}</span>
+            {p.state && (
+              <span className="text-[10px] px-2 py-0.5 bg-surface-2 border border-hairline rounded text-ink-secondary font-mono">{p.state}</span>
+            )}
+            {prime && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-threat-critical border border-threat-critical/60 bg-threat-critical/10">
+                Prime Suspect
+              </span>
+            )}
+            {p.confirmed_fraud && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-threat-critical border border-threat-critical/60 bg-threat-critical/10">
+                Confirmed Fraud
+              </span>
+            )}
             {p.oig_excluded && (
-              <span className="text-xs px-2 py-0.5 bg-red-900 border border-red-700 rounded-full text-red-300 font-bold">
-                OIG EXCLUDED
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-threat-high border border-threat-high/50 bg-threat-high/10">
+                OIG Excluded
               </span>
             )}
           </div>
-          <p className="text-xs text-gray-500 mt-0.5 truncate">{p.specialty || '—'}</p>
+          <p className="text-xs text-ink-tertiary mt-0.5 truncate">{p.specialty || '—'}</p>
 
-          <div className="flex items-center gap-6 mt-3">
+          <div className="flex items-center gap-7 mt-3 flex-wrap">
             <div>
-              <p className="text-[10px] text-gray-600 uppercase tracking-wider">Brain Score</p>
-              <p className={`text-2xl font-bold ${scoreColor(p.brain_score)}`}>{p.brain_score.toFixed(1)}</p>
+              <p className="text-[10px] text-ink-tertiary uppercase tracking-[0.14em] label-stamp">Brain Score</p>
+              <div className={prime ? 'text-3xl mt-0.5' : 'text-2xl mt-0.5'}><BrainScore score={p.brain_score} /></div>
             </div>
-            <div>
-              <p className="text-[10px] text-gray-600 uppercase tracking-wider">Total Paid</p>
-              <p className="text-lg font-semibold text-gray-300">{fmt(p.total_paid)}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-gray-600 uppercase tracking-wider">Signals Fired</p>
-              <p className="text-lg font-semibold text-gray-300">{p.flag_count}</p>
-            </div>
-            <div>
-              <p className="text-[10px] text-gray-600 uppercase tracking-wider">Corroborating Analyses</p>
-              <p className="text-lg font-semibold text-gray-300">{p.corroborating_sources}</p>
-            </div>
+            <Stat label="Total Paid" value={fmt(p.total_paid)} />
+            <Stat label="Signals Fired" value={String(p.flag_count)} />
+            <Stat label="Corroborating" value={String(p.corroborating_sources)} />
           </div>
 
-          {/* Component bars */}
-          <div className="mt-3 space-y-1">
+          {/* Component contribution bars */}
+          <div className="mt-4 space-y-1.5">
             {Object.entries(p.components).map(([key, value]) => (
-              <div key={key} className="flex items-center gap-2">
-                <span className="text-[10px] text-gray-500 w-36 shrink-0">{COMPONENT_LABELS[key] ?? key}</span>
-                <div className="flex-1 h-1.5 bg-gray-800 rounded overflow-hidden">
+              <div key={key} className="flex items-center gap-3">
+                <span className="text-[10px] text-ink-tertiary w-36 shrink-0 uppercase tracking-wider">{COMPONENT_LABELS[key] ?? key}</span>
+                <div className="flex-1 h-1.5 bg-surface-2 rounded overflow-hidden">
                   <div
-                    className="h-full bg-blue-600 rounded"
-                    style={{ width: `${Math.min((value / maxComponent) * 100, 100)}%` }}
+                    className="js-fill h-full rounded"
+                    style={{ width: `${Math.min((value / maxComponent) * 100, 100)}%`, background: color, transformOrigin: 'left center' }}
                   />
                 </div>
-                <span className="text-[10px] font-mono text-gray-500 w-8 text-right">{value.toFixed(1)}</span>
+                <span className="text-[10px] font-mono tabular-nums text-ink-tertiary w-9 text-right">{value.toFixed(1)}</span>
               </div>
             ))}
           </div>
 
-          {/* Evidence */}
           <button
             onClick={() => setExpanded(!expanded)}
-            className="mt-3 text-xs text-blue-500 hover:text-blue-400"
+            className="mt-3 text-xs text-filament-dim hover:text-filament-core transition-colors"
           >
             {expanded ? '▾ Hide' : '▸ Show'} evidence ({p.evidence.length})
           </button>
@@ -91,10 +130,10 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
             <ul className="mt-2 space-y-1.5">
               {p.evidence.map((e, i) => (
                 <li key={i} className="flex items-start gap-2 text-xs">
-                  <span className="font-mono text-gray-600 w-10 text-right shrink-0">+{e.points.toFixed(1)}</span>
+                  <span className="font-mono tabular-nums text-filament-dim w-10 text-right shrink-0">+{e.points.toFixed(1)}</span>
                   <div>
-                    <span className="text-gray-400 font-medium">{e.source}:</span>{' '}
-                    <span className="text-gray-500">{e.detail}</span>
+                    <span className="text-ink-secondary font-medium">{e.source}:</span>{' '}
+                    <span className="text-ink-tertiary">{e.detail}</span>
                   </div>
                 </li>
               ))}
@@ -106,12 +145,60 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
   )
 }
 
+function Stat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <p className="text-[10px] text-ink-tertiary uppercase tracking-[0.14em]">{label}</p>
+      <p className="text-lg font-mono tabular-nums text-ink-secondary mt-0.5">{value}</p>
+    </div>
+  )
+}
+
 export default function FraudBrain() {
+  const boardRef = useRef<HTMLDivElement>(null)
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['fraud-brain'],
     queryFn: () => api.fraudBrainTop(10),
     staleTime: 5 * 60_000,
   })
+
+  // The reveal: cards seat in sequence, score bars sweep up the threat ramp,
+  // brain scores count up, #1 locks. Re-runs on Recompute (data identity changes).
+  useGSAP(
+    () => {
+      const board = boardRef.current
+      if (!board || !data?.top?.length) return
+      const cards = Array.from(board.querySelectorAll<HTMLElement>('[data-rank-card]'))
+      if (!cards.length) return
+
+      const setFinal = () => {
+        gsap.set(cards, { opacity: 1, y: 0 })
+        board.querySelectorAll<HTMLElement>('.js-fill').forEach((f) => gsap.set(f, { scaleX: 1 }))
+        board.querySelectorAll<HTMLElement>('.js-brain-score').forEach((el) => { el.textContent = el.dataset.score ?? '' })
+      }
+
+      if (prefersReducedMotion()) { setFinal(); return }
+
+      gsap.set(cards, { opacity: 0, y: 24 })
+      board.querySelectorAll<HTMLElement>('.js-fill').forEach((f) => gsap.set(f, { scaleX: 0, transformOrigin: 'left center' }))
+
+      const tl = gsap.timeline()
+      cards.forEach((card, i) => {
+        const first = i === 0
+        const at = i * 0.12
+        tl.to(card, { opacity: 1, y: 0, duration: first ? DUR.cinematic : DUR.standard, ease: first ? EASE.lock : EASE.track }, at)
+        const fills = card.querySelectorAll<HTMLElement>('.js-fill')
+        if (fills.length) tl.to(fills, { scaleX: 1, duration: DUR.standard, ease: EASE.acquire, stagger: 0.04 }, at + 0.08)
+        const scoreEl = card.querySelector<HTMLElement>('.js-brain-score')
+        if (scoreEl) {
+          const target = parseFloat(scoreEl.dataset.score ?? '0')
+          const o = { v: 0 }
+          tl.to(o, { v: target, duration: DUR.cinematic, ease: EASE.acquire, onUpdate: () => { scoreEl.textContent = o.v.toFixed(1) } }, at)
+        }
+      })
+    },
+    { dependencies: [data?.top], scope: boardRef },
+  )
 
   return (
     <div className="space-y-5">
@@ -119,8 +206,8 @@ export default function FraudBrain() {
 
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-gray-200">Fraud Brain</h1>
-          <p className="text-sm text-gray-500 mt-1 max-w-3xl">
+          <h1 className="text-xl font-display font-bold text-ink-primary tracking-tight">Fraud Brain</h1>
+          <p className="text-sm text-ink-tertiary mt-1 max-w-3xl leading-relaxed">
             Cross-source meta-analysis: fuses the 18 rule-based signals, ML anomaly detection,
             claim-level pattern analyses (unbundling, duplicates, impossible volume), pharmacy/DME
             findings, doctor-shopping overlap, diagnosis mismatches, and financial exposure into
@@ -133,52 +220,49 @@ export default function FraudBrain() {
         <button
           onClick={() => refetch()}
           disabled={isFetching}
-          className="shrink-0 px-3 py-1.5 text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded text-gray-300 disabled:opacity-50"
+          className="shrink-0 px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-surface-2 hover:bg-hairline border border-hairline hover:border-filament-dim rounded text-ink-secondary hover:text-filament-core transition-colors disabled:opacity-50"
         >
-          {isFetching ? 'Computing…' : 'Recompute'}
+          {isFetching ? 'Re-acquiring…' : 'Recompute'}
         </button>
       </div>
 
       {data && (
-        <div className="grid grid-cols-4 gap-4">
-          <div className="card py-3">
-            <p className="text-[10px] text-gray-600 uppercase tracking-wider">Providers Evaluated</p>
-            <p className="text-xl font-bold text-gray-200">{data.providers_evaluated.toLocaleString()}</p>
-          </div>
-          <div className="card py-3">
-            <p className="text-[10px] text-gray-600 uppercase tracking-wider">ML Model</p>
-            <p className={`text-xl font-bold ${data.ml_model_used ? 'text-green-400' : 'text-gray-500'}`}>
-              {data.ml_model_used ? 'Active' : 'Untrained'}
-            </p>
-          </div>
-          <div className="card py-3">
-            <p className="text-[10px] text-gray-600 uppercase tracking-wider">Corroborated Providers</p>
-            <p className="text-xl font-bold text-gray-200">{data.corroborated_providers.toLocaleString()}</p>
-          </div>
-          <div className="card py-3">
-            <p className="text-[10px] text-gray-600 uppercase tracking-wider">Computed In</p>
-            <p className="text-xl font-bold text-gray-200">
-              {data.cached ? 'cached' : `${(data.computed_in_ms / 1000).toFixed(1)}s`}
-            </p>
-          </div>
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <MetaStat label="Providers Evaluated" value={data.providers_evaluated.toLocaleString()} />
+          <MetaStat
+            label="ML Model"
+            value={data.ml_model_used ? 'Active' : 'Untrained'}
+            tone={data.ml_model_used ? 'on' : 'off'}
+          />
+          <MetaStat label="Corroborated Providers" value={data.corroborated_providers.toLocaleString()} />
+          <MetaStat label="Computed In" value={data.cached ? 'cached' : `${(data.computed_in_ms / 1000).toFixed(1)}s`} />
         </div>
       )}
 
       {isLoading && (
-        <div className="card h-40 flex items-center justify-center text-gray-600 text-sm">
+        <div className="card h-40 flex items-center justify-center text-ink-tertiary text-sm font-mono">
           Scoring all providers across every data source…
         </div>
       )}
       {error != null && (
-        <div className="card border-red-900/60">
-          <p className="text-sm text-red-400">Fraud Brain failed: {String(error)}</p>
+        <div className="card border-threat-critical/60">
+          <p className="text-sm text-threat-high">Fraud Brain failed: {String(error)}</p>
         </div>
       )}
-      {data?.note && <div className="card"><p className="text-sm text-gray-500">{data.note}</p></div>}
+      {data?.note && <div className="card"><p className="text-sm text-ink-tertiary">{data.note}</p></div>}
 
-      <div className="space-y-4">
+      <div ref={boardRef} className="space-y-4">
         {data?.top.map((p, i) => <RankCard key={p.npi} rank={i + 1} p={p} />)}
       </div>
+    </div>
+  )
+}
+
+function MetaStat({ label, value, tone }: { label: string; value: string; tone?: 'on' | 'off' }) {
+  return (
+    <div className="card py-3">
+      <p className="text-[10px] text-ink-tertiary uppercase tracking-[0.14em] label-stamp">{label}</p>
+      <p className={`text-xl font-mono tabular-nums mt-0.5 ${tone === 'on' ? 'text-threat-clear' : tone === 'off' ? 'text-ink-tertiary' : 'text-ink-primary'}`}>{value}</p>
     </div>
   )
 }

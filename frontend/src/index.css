@@ -2,6 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+/* NOCTURNE — design tokens for the JS / WebGL / threat layer (mirrors tailwind.config) */
+:root {
+  --filament-core: #E8B45A;
+  --filament-dim: #9A7B3E;
+  --filament-glow: rgba(232, 180, 90, 0.14);
+  --threat-clear: #3FBF8F;
+  --threat-low: #7FB04A;
+  --threat-medium: #E0A53A;
+  --threat-high: #E2603A;
+  --threat-critical: #D7263D;
+  --threat-critical-glow: rgba(215, 38, 61, 0.22);
+  --surface-0: #0A0F18;
+  --surface-1: #0E141F;
+  --surface-2: #141C2A;
+  --hairline: #1C2636;
+  --hairline-hot: #2A3850;
+}
+
 @media print {
   .no-print { display: none !important; }
   body { background: white !important; color: black !important; }
@@ -28,7 +46,11 @@
   .dark body {
     background: linear-gradient(180deg, #030712 0%, #0a0f1a 50%, #060b14 100%);
     background-attachment: fixed;
-    color: #f3f4f6;
+    color: #EAF0F8;
+  }
+  /* Every number reads like a ledger — tabular figures everywhere mono is used. */
+  .font-mono, code, kbd, samp {
+    font-variant-numeric: tabular-nums;
   }
   ::-webkit-scrollbar {
     width: 6px;
@@ -58,7 +80,14 @@
 
 @layer components {
   .card {
-    @apply bg-white border border-gray-200 rounded-xl p-5 dark:bg-gray-900 dark:border-gray-800;
+    @apply bg-white border border-gray-200 rounded-xl p-5 dark:bg-surface-1 dark:border-hairline;
+  }
+  /* Classified-label motif — a leading filament tick on label-tier strings. */
+  .label-stamp::before {
+    content: '▍';
+    color: var(--filament-dim);
+    margin-right: 0.4em;
+    font-weight: 400;
   }
   .btn-primary {
     @apply bg-brand-600 hover:bg-brand-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors;
@@ -99,9 +128,10 @@
     letter-spacing: 0.05em;
   }
 
-  /* Confirmed fraud row -- red left border */
+  /* Confirmed fraud row -- arterial left border + critical halo */
   .row-fraud {
-    border-left: 4px solid #dc2626;
+    border-left: 4px solid var(--threat-critical);
+    box-shadow: inset 1px 0 0 0 var(--threat-critical), var(--threat-critical-glow) 0 0 16px -6px;
   }
 
   /* Metric sizing utilities */
@@ -117,16 +147,16 @@
 
   /* Card glow on hover */
   .card-glow {
-    @apply transition-all duration-200;
+    @apply transition-[border-color,box-shadow] duration-200;
   }
   .card-glow:hover {
-    border-color: rgba(148, 163, 184, 0.25);
-    box-shadow: 0 0 15px 2px rgba(148, 163, 184, 0.07), 0 0 4px 1px rgba(59, 130, 246, 0.1);
+    border-color: var(--hairline-hot);
+    box-shadow: var(--filament-glow) 0 0 18px 2px, rgba(232, 180, 90, 0.10) 0 0 4px 1px;
   }
 
   /* Striped table rows */
   .table-striped tr:nth-child(even) {
-    background: rgba(17, 24, 39, 0.3);
+    background: rgba(20, 28, 42, 0.35);
   }
 
   /* Landing hero — ambient network backdrop with a very slow drift */
@@ -149,6 +179,13 @@
   .hero-enter-3 { animation-delay: 0.3s; }
   .hero-enter-4 { animation-delay: 0.45s; }
 
+  /* Ambient lamp haze — a single warm source drifting very slowly behind the app */
+  .app-haze {
+    background: radial-gradient(55% 45% at 80% 6%, rgba(232, 180, 90, 0.06), transparent 60%);
+    animation: lamp-drift 60s ease-in-out infinite alternate;
+    will-change: transform;
+  }
+
   /* Gradient divider */
   .divider {
     height: 1px;
@@ -157,14 +194,22 @@
   }
 }
 
-/* Smooth transitions for interactive elements */
+/* Smooth transitions for interactive elements.
+   Explicit properties only — `transition: all` on 100+ table rows is a latent
+   paint bug (every layout change animates). Keep it to compositor-friendly +
+   color props. */
 button, a, input, select, textarea, .card, tr {
-  transition: all 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, opacity 0.2s ease;
 }
 
 @keyframes hero-drift {
   0%   { transform: scale(1) translateY(0); }
   100% { transform: scale(1.08) translateY(-1.5%); }
+}
+
+@keyframes lamp-drift {
+  from { transform: translate3d(0, 0, 0); }
+  to   { transform: translate3d(-2.5%, 2%, 0); }
 }
 
 @keyframes hero-rise {

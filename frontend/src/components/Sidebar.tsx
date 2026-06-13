@@ -46,8 +46,8 @@ function SidebarSection({
       {!collapsed && (
         <button
           onClick={onToggle}
-          className={`w-full flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-wider transition-colors ${
-            hasActive ? 'text-blue-400' : 'text-gray-500 hover:text-gray-300'
+          className={`label-stamp w-full flex items-center justify-between px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] transition-colors ${
+            hasActive ? 'text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'
           }`}
           aria-expanded={open}
         >
@@ -74,12 +74,12 @@ function SidebarSection({
               onClick={onNavClick}
               title={collapsed ? label : undefined}
               className={({ isActive }) =>
-                `flex items-center gap-2.5 rounded-md transition-colors text-sm ${
+                `flex items-center gap-2.5 rounded-md transition-colors text-sm border-l-2 ${
                   collapsed ? 'justify-center px-2 py-2' : 'px-3 py-1.5'
                 } ${
                   isActive
-                    ? 'bg-blue-600/20 text-blue-400'
-                    : 'text-gray-400 hover:text-white hover:bg-gray-800'
+                    ? 'bg-filament-core/10 text-filament-core border-filament-core'
+                    : 'text-ink-secondary hover:text-ink-primary hover:bg-surface-2 border-transparent'
                 }`
               }
             >

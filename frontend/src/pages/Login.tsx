@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { motion, useReducedMotion } from 'framer-motion'
 
 interface Props {
   onLogin: (username: string, password: string) => Promise<string | null>
@@ -40,6 +41,7 @@ declare global {
 }
 
 export default function Login({ onLogin, onRegister, onGoogleCredential, onBack }: Props) {
+  const reduced = useReducedMotion()
   const [isSignUp, setIsSignUp] = useState(false)
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
@@ -123,8 +125,22 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-6">
-      <div className="w-full max-w-sm">
+    <div className="relative min-h-screen flex items-center justify-center px-6 overflow-hidden">
+      {/* lamp vignette — the desk lamp in the dark evidence room */}
+      <div
+        aria-hidden="true"
+        className="absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(80% 60% at 50% 38%, rgba(232,180,90,0.08), rgba(3,7,18,0) 60%)',
+        }}
+      />
+      <motion.div
+        className="relative w-full max-w-sm"
+        initial={reduced ? false : { opacity: 0, y: 16, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.5, ease: [0.34, 1.56, 0.64, 1] }}
+      >
         {/* Logo */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2.5 mb-4">
@@ -139,9 +155,9 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
               <text x="46" y="22" textAnchor="middle" fontFamily="Arial, sans-serif" fontWeight="bold" fontSize="9" fill="white">!</text>
             </svg>
           </div>
-          <h1 className="text-2xl font-bold text-white">{isSignUp ? 'Create Account' : 'Welcome Back'}</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {isSignUp ? 'Sign up for Medicaid Inspector' : 'Sign in to Medicaid Inspector'}
+          <h1 className="text-2xl font-display font-bold text-ink-primary tracking-tight">{isSignUp ? 'Create Account' : 'Watchfloor Access'}</h1>
+          <p className="text-sm text-ink-tertiary mt-1 font-mono uppercase tracking-[0.14em] text-xs">
+            {isSignUp ? 'Provision Inspector credentials' : 'Authenticate to Medicaid Inspector'}
           </p>
         </div>
 
@@ -154,7 +170,7 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
           )}
 
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5 uppercase tracking-wider">Username</label>
+            <label className="block text-xs text-ink-secondary mb-1.5 uppercase tracking-[0.14em] label-stamp">Username</label>
             <input
               type="text"
               value={username}
@@ -167,7 +183,7 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
 
           {isSignUp && (
             <div>
-              <label className="block text-xs text-gray-400 mb-1.5 uppercase tracking-wider">Display Name</label>
+              <label className="block text-xs text-ink-secondary mb-1.5 uppercase tracking-[0.14em] label-stamp">Display Name</label>
               <input
                 type="text"
                 value={displayName}
@@ -179,7 +195,7 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
           )}
 
           <div>
-            <label className="block text-xs text-gray-400 mb-1.5 uppercase tracking-wider">Password</label>
+            <label className="block text-xs text-ink-secondary mb-1.5 uppercase tracking-[0.14em] label-stamp">Password</label>
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -213,9 +229,9 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
           <button
             type="submit"
             disabled={loading}
-            className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white py-2.5 rounded-lg font-semibold text-sm transition-colors"
+            className="w-full bg-filament-core hover:bg-filament-core/90 disabled:opacity-50 text-void py-2.5 rounded-lg font-semibold text-sm transition-all hover:shadow-glow-filament"
           >
-            {loading ? (isSignUp ? 'Creating account...' : 'Signing in...') : (isSignUp ? 'Create Account' : 'Sign In')}
+            {loading ? (isSignUp ? 'Creating account...' : 'Authenticating...') : (isSignUp ? 'Create Account' : 'Sign In')}
           </button>
 
           {GOOGLE_CLIENT_ID ? (
@@ -247,7 +263,7 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
             </button>
           </div>
         </div>
-      </div>
+      </motion.div>
     </div>
   )
 }

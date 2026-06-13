@@ -1,6 +1,10 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useReducedMotion } from 'framer-motion'
 import { mutate } from '../lib/api'
+import { isWebGLAvailable } from '../lib/webgl'
+
+const HeroConstellation = lazy(() => import('../components/HeroConstellation'))
 
 const PLANS = [
   {
@@ -130,6 +134,9 @@ interface Props {
 export default function Landing({ onLogin }: Props) {
   const [email, setEmail] = useState('')
   const navigate = useNavigate()
+  const reduced = useReducedMotion()
+  const [webglOk] = useState(() => typeof window !== 'undefined' && isWebGLAvailable())
+  const showConstellation = !reduced && webglOk
 
   const handleCheckout = async (priceId: string) => {
     if (priceId === 'enterprise') {
@@ -200,17 +207,31 @@ export default function Landing({ onLogin }: Props) {
       </header>
 
       {/* Hero */}
-      <section className="relative pt-32 pb-20 px-6 overflow-hidden">
-        <div className="absolute inset-0 hero-bg" aria-hidden="true" />
-        <div className="absolute inset-0 bg-gradient-to-b from-gray-950/60 via-gray-950/40 to-gray-950" aria-hidden="true" />
-        <div className="relative max-w-4xl mx-auto text-center">
-          <div className="hero-enter inline-flex items-center gap-2 px-3 py-1 mb-6 bg-red-950/50 border border-red-800/50 rounded-full">
-            <span className="w-2 h-2 bg-red-500 rounded-full animate-pulse" />
-            <span className="text-xs text-red-400 font-medium uppercase tracking-wider">Fraud Detection Platform</span>
+      <section className="relative pt-32 pb-24 px-6 overflow-hidden min-h-[88vh] flex items-center">
+        {/* static lamp-lit base — always present; this is the no-WebGL / reduced-motion fallback */}
+        <div
+          aria-hidden="true"
+          className="absolute inset-0"
+          style={{
+            background:
+              'radial-gradient(120% 90% at 18% 12%, rgba(232,180,90,0.10), rgba(3,7,18,0) 45%), radial-gradient(100% 80% at 72% 82%, rgba(215,38,61,0.06), rgba(3,7,18,0) 50%)',
+          }}
+        />
+        {showConstellation && (
+          <Suspense fallback={null}>
+            <HeroConstellation />
+          </Suspense>
+        )}
+        {/* legibility wash */}
+        <div className="absolute inset-0 bg-gradient-to-b from-void/30 via-void/20 to-void" aria-hidden="true" />
+        <div className="relative max-w-4xl mx-auto text-center w-full">
+          <div className="hero-enter inline-flex items-center gap-2 px-3 py-1 mb-6 bg-filament-core/10 border border-filament-dim/50 rounded-full">
+            <span className="w-2 h-2 bg-filament-core rounded-full animate-pulse" />
+            <span className="text-xs text-filament-core font-medium uppercase tracking-[0.2em]">Fraud Intelligence Watchfloor</span>
           </div>
-          <h1 className="hero-enter hero-enter-1 text-5xl md:text-6xl font-black text-white leading-tight mb-6">
+          <h1 className="hero-enter hero-enter-1 font-display text-5xl md:text-6xl font-black text-ink-primary leading-tight mb-6 tracking-tight">
             Detect Medicaid Fraud<br />
-            <span className="bg-gradient-to-r from-blue-400 via-blue-500 to-purple-500 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-filament-core via-filament-core to-filament-dim bg-clip-text text-transparent">
               Before It Costs Billions
             </span>
           </h1>
@@ -220,10 +241,10 @@ export default function Landing({ onLogin }: Props) {
             powered by CMS/HHS open data.
           </p>
           <div className="hero-enter hero-enter-3 flex items-center justify-center gap-4 mb-16">
-            <button onClick={onLogin} className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3.5 rounded-xl text-base font-semibold transition-all hover:shadow-lg hover:shadow-blue-600/25">
+            <button onClick={onLogin} className="bg-filament-core hover:bg-filament-core/90 text-void px-8 py-3.5 rounded-xl text-base font-semibold transition-all hover:shadow-glow-filament">
               Start Free Trial
             </button>
-            <a href="#features" className="text-gray-400 hover:text-white px-6 py-3.5 rounded-xl text-base font-medium border border-gray-700 hover:border-gray-500 transition-all">
+            <a href="#features" className="text-ink-secondary hover:text-ink-primary px-6 py-3.5 rounded-xl text-base font-medium border border-hairline hover:border-hairline-hot transition-all">
               See How It Works
             </a>
           </div>
@@ -232,8 +253,8 @@ export default function Landing({ onLogin }: Props) {
           <div className="hero-enter hero-enter-4 grid grid-cols-2 md:grid-cols-4 gap-6 max-w-3xl mx-auto">
             {STATS.map(s => (
               <div key={s.label} className="text-center">
-                <p className="text-3xl font-black text-white">{s.value}</p>
-                <p className="text-xs text-gray-500 mt-1 uppercase tracking-wider">{s.label}</p>
+                <p className="text-3xl font-mono tabular-nums font-bold text-ink-primary">{s.value}</p>
+                <p className="text-xs text-ink-tertiary mt-1 uppercase tracking-[0.14em]">{s.label}</p>
               </div>
             ))}
           </div>

@@ -330,6 +330,9 @@ export default function App() {
         />
       ) : (
       <div className="min-h-screen flex flex-col" lang="en">
+        {/* Ambient lamp haze behind the whole watchfloor (CSS-only; the global
+            prefers-reduced-motion rule freezes the drift). */}
+        <div aria-hidden="true" className="app-haze fixed inset-0 -z-10" />
         {/* Slim top bar */}
         <header className="no-print h-12 bg-gray-900 border-b border-gray-800 flex items-center px-4 z-50 fixed top-0 left-0 right-0">
           {/* Mobile hamburger */}
