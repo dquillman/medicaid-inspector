@@ -37,6 +37,7 @@ _SYNC_FILES = [
     "roi_data.json",
     "supervised_model.json",  # trained supervised-ML metrics + per-NPI predictions
     "ml_scores.json",         # Isolation Forest anomaly scores
+    "npi_deactivations.json", # deactivated-NPI lookup (dead_npi_billing signal)
     "notifications.json",
     "saved_searches.json",
     "referrals.json",

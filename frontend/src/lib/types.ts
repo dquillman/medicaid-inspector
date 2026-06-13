@@ -1678,6 +1678,8 @@ export interface FraudBrainProvider {
   flag_count: number
   oig_excluded: boolean
   confirmed_fraud?: boolean
+  deactivated_npi?: boolean
+  size_dampened?: boolean
   corroborating_sources: number
   components: Record<string, number>
   evidence: FraudBrainEvidence[]

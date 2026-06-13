@@ -91,6 +91,11 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
                 OIG Excluded
               </span>
             )}
+            {p.deactivated_npi && (
+              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-threat-high border border-threat-high/50 bg-threat-high/10">
+                Deactivated NPI
+              </span>
+            )}
           </div>
           <p className="text-xs text-ink-tertiary mt-0.5 truncate">{p.specialty || '—'}</p>
 

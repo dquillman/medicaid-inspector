@@ -22,6 +22,7 @@ backend/ml_scores.json
 backend/supervised_model.json
 backend/precomputed_analyses.json
 backend/oig_exclusions_cache.json
+backend/npi_deactivations.json
 backend/.prescan_cache_*.tmp
 backend/*.tmp
 backend/oig_exclusions.json

@@ -47,6 +47,7 @@ W_SUPERVISED = 0.25
 # evidence. Total score stays capped at 100.
 CONFIRMED_FRAUD_BOOST = 25.0
 OIG_BOOST = 25.0
+DEACTIVATED_NPI_BOOST = 20.0  # billing Medicaid under a CMS-deactivated NPI
 
 # Size-bias correction. The single biggest ranking flaw was giant institutions
 # (hospital systems) topping the board purely on scale. Two fixes:
@@ -137,6 +138,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
     """Score every scanned provider across all sources; return the top N."""
     from core.store import get_prescanned
     from core.oig_store import is_excluded
+    from core.deactivation_store import get_deactivation
     from services.ml_scorer import get_ml_score, get_ml_status
 
     t0 = time.time()
@@ -186,6 +188,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
         oig = is_excluded(npi)[0]
         if oig and npi not in confirmed_fraud_npis:
             continue
+        deact_date = get_deactivation(npi)
 
         total_paid = float(p.get("total_paid") or 0)
         risk = float(p.get("risk_score") or 0)
@@ -283,10 +286,10 @@ def compute_top_frauds(limit: int = 10) -> dict:
             any(kw in specialty_l for kw in INSTITUTIONAL_KEYWORDS)
             or (distinct_hcpcs >= INSTITUTIONAL_DISTINCT_HCPCS and benes >= INSTITUTIONAL_BENES)
         )
-        # Only confirmed-fraud / OIG are size-independent. ML + claim-level
-        # corroboration fire on hospitals BECAUSE they're huge, so they do not
-        # rescue a giant from dampening.
-        strong_specific = confirmed or oig
+        # Only confirmed-fraud / OIG / deactivated-NPI are size-independent. ML +
+        # claim-level corroboration fire on hospitals BECAUSE they're huge, so
+        # they do not rescue a giant from dampening.
+        strong_specific = confirmed or oig or bool(deact_date)
         dampened = is_institutional and not strong_specific
         if dampened:
             score *= INSTITUTIONAL_DAMPEN
@@ -313,6 +316,14 @@ def compute_top_frauds(limit: int = 10) -> dict:
                           "Medicaid billing data",
                 "points": OIG_BOOST,
             })
+        if deact_date:
+            score += DEACTIVATED_NPI_BOOST
+            evidence.append({
+                "source": "Deactivated NPI",
+                "detail": f"Billing Medicaid under an NPI CMS deactivated on {deact_date} "
+                          "— per-se unauthorized billing / possible identity theft (NPPES)",
+                "points": DEACTIVATED_NPI_BOOST,
+            })
 
         scored.append({
             "npi": npi,
@@ -328,6 +339,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
             "flag_count": flag_count,
             "oig_excluded": oig,
             "confirmed_fraud": confirmed,
+            "deactivated_npi": bool(deact_date),
             "size_dampened": dampened,
             "corroborating_sources": len(corr_sources),
             "components": {k: round(v, 1) for k, v in components.items()},

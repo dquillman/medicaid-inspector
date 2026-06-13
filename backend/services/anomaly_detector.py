@@ -792,6 +792,25 @@ def dead_npi_billing(row: dict) -> SignalResult:
     identity fraud rings where deactivated NPIs of deceased physicians are
     used to bill millions in fabricated services.
     """
+    # Authoritative source first: the NPPES deactivated-NPI set. The cached
+    # nppes blob rarely carries deactivation status (deactivated NPIs are
+    # dropped from the active dissemination file), so consult the dedicated
+    # store built from the NPPES "NPI Deactivation Date" column.
+    npi = row.get("npi") or (row.get("nppes") or {}).get("npi") or ""
+    if npi:
+        try:
+            from core.deactivation_store import get_deactivation
+            dd = get_deactivation(npi)
+        except Exception:  # noqa: BLE001
+            dd = None
+        if dd:
+            return _result(
+                "dead_npi_billing", 1.0, 10,
+                f"NPI deactivated by CMS on {dd} (NPPES) but has Medicaid billing "
+                f"activity — per-se unauthorized billing / possible identity theft",
+                True,
+            )
+
     nppes = row.get("nppes") or {}
     if not nppes:
         return _result(
