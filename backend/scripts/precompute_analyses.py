@@ -120,6 +120,53 @@ def _write_hcpcs_index(providers: list[dict]) -> None:
     print(f"  {n:,} rows -> {_INDEX_OUT.name} ({size_mb:.1f} MB)")
 
 
+def backfill_slim_fields(providers: list[dict]) -> int:
+    """Fill empty top-level fields in prescan_slim.json from the full cache.
+
+    The slim cache was generated without specialty (and with gaps in
+    name/state/city/zip), which left prod's Specialty Benchmark comparing
+    every provider against one giant 'Unknown' bucket. Returns count fixed.
+    """
+    slim_path = _BACKEND / "prescan_slim.json"
+    if not slim_path.exists():
+        return 0
+
+    lookup: dict[str, dict] = {}
+    for p in providers:
+        npi = p.get("npi")
+        if not npi:
+            continue
+        nppes = p.get("nppes") or {}
+        addr = nppes.get("address") or {}
+        lookup[npi] = {
+            "specialty": (nppes.get("taxonomy") or {}).get("description") or "",
+            "provider_name": nppes.get("name") or p.get("provider_name") or "",
+            "state": addr.get("state") or p.get("state") or "",
+            "city": addr.get("city") or p.get("city") or "",
+            "zip": addr.get("zip") or p.get("zip") or "",
+        }
+
+    with open(slim_path, encoding="utf-8") as f:
+        slim = json.load(f)
+    fixed = 0
+    for sp in slim.get("providers", []):
+        src = lookup.get(sp.get("npi"))
+        if not src:
+            continue
+        changed = False
+        for k, v in src.items():
+            if v and not (sp.get(k) or "").strip():
+                sp[k] = v
+                changed = True
+        fixed += changed
+
+    tmp = slim_path.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(slim, f, separators=(",", ":"), default=str)
+    tmp.replace(slim_path)
+    return fixed
+
+
 def main() -> int:
     from core.store import load_prescanned_from_disk, get_prescanned
 
@@ -197,6 +244,11 @@ def main() -> int:
     t = time.time()
     _write_hcpcs_index(providers)
     print(f"  done in {time.time() - t:.0f}s")
+
+    print("Backfilling slim-cache fields (specialty etc.)…")
+    t = time.time()
+    n_fixed = backfill_slim_fields(providers)
+    print(f"  done in {time.time() - t:.0f}s ({n_fixed:,} providers updated)")
 
     tmp = _OUT.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
