@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from 'react'
+import { useState, lazy, Suspense, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
@@ -25,6 +25,28 @@ export default function NetworkGraph() {
     e.preventDefault()
     setActiveNpi(npiInput.trim())
   }
+
+  // Cap the rendered graph — huge networks (thousands of nodes) freeze both the
+  // 2D canvas and the 3D scene. Keep the center + the top-N other nodes by
+  // total paid, and only the edges between kept nodes.
+  const NODE_CAP = 140
+  const graph = useMemo(() => {
+    if (!data) return null
+    if (data.nodes.length <= NODE_CAP) return data
+    const keep = new Set<string>()
+    for (const n of data.nodes) if (n.is_center) keep.add(n.id)
+    const others = data.nodes
+      .filter(n => !n.is_center)
+      .sort((a, b) => (b.total_paid || 0) - (a.total_paid || 0))
+      .slice(0, NODE_CAP - keep.size)
+    for (const n of others) keep.add(n.id)
+    return {
+      ...data,
+      nodes: data.nodes.filter(n => keep.has(n.id)),
+      edges: data.edges.filter(e => keep.has(String(e.source)) && keep.has(String(e.target))),
+    }
+  }, [data])
+  const capped = !!(data && graph && graph.nodes.length < data.nodes.length)
 
   return (
     <div className="space-y-4 h-full">
@@ -56,6 +78,7 @@ export default function NetworkGraph() {
         {activeNpi && data && (
           <span className="text-ink-tertiary text-sm self-center font-mono tabular-nums">
             {data.nodes.length} nodes · {data.edges.length} edges
+            {capped && <span className="text-filament-core"> · showing top {NODE_CAP}</span>}
           </span>
         )}
         {webglOk && (
@@ -95,13 +118,24 @@ export default function NetworkGraph() {
             {String(error)}
           </div>
         )}
-        {data && !isLoading && (
-          <NetworkGraphCanvas
-            graph={data}
-            onNodeClick={npi => navigate(`/providers/${npi}`)}
-          />
+        {graph && !isLoading && (
+          view3d && webglOk ? (
+            <Suspense fallback={<div className="h-full flex items-center justify-center text-ink-tertiary text-sm">Building 3D graph…</div>}>
+              <NetworkGraph3D graph={graph} onNodeClick={npi => navigate(`/providers/${npi}`)} />
+            </Suspense>
+          ) : (
+            <NetworkGraphCanvas graph={graph} onNodeClick={npi => navigate(`/providers/${npi}`)} />
+          )
         )}
       </div>
+      {capped && (
+        <div className="card border-filament-dim/40 bg-filament-core/5 py-2">
+          <p className="text-xs text-ink-tertiary">
+            This network has <span className="text-ink-secondary font-mono">{data!.nodes.length.toLocaleString()}</span> connected
+            providers — showing the <span className="text-filament-core">top {NODE_CAP} by total paid</span> to keep the graph responsive.
+          </p>
+        </div>
+      )}
 
       {/* Node legend */}
       {data && (
