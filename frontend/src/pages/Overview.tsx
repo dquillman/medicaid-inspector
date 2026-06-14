@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import CountUp from '../components/CountUp'
+import ProviderFlags from '../components/ProviderFlags'
 import StateHeatmap from '../components/StateHeatmap'
 import DraggableWidget from '../components/DraggableWidget'
 import { SkeletonKPI, SkeletonChart } from '../components/Skeleton'
@@ -276,7 +277,7 @@ export default function Overview() {
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-gray-200 truncate">{String(m.provider_name || m.npi)}</p>
-                    <p className="text-xs text-gray-500 font-mono">{String(m.npi)}</p>
+                    <p className="text-xs text-gray-500 font-mono">{String(m.npi)}<ProviderFlags npi={String(m.npi)} className="ml-1.5" /></p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0 ml-3">
                     <span className="text-xs text-gray-500">{Number(m.previous_score).toFixed(0)}</span>
@@ -309,7 +310,7 @@ export default function Overview() {
                 >
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-gray-200 truncate">{String(m.provider_name || m.npi)}</p>
-                    <p className="text-xs text-gray-500 font-mono">{String(m.npi)}</p>
+                    <p className="text-xs text-gray-500 font-mono">{String(m.npi)}<ProviderFlags npi={String(m.npi)} className="ml-1.5" /></p>
                   </div>
                   <div className="flex items-center gap-3 shrink-0 ml-3">
                     <span className="text-xs text-gray-500">{Number(m.previous_score).toFixed(0)}</span>

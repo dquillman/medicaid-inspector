@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import { threatColor } from '../lib/threat'
 import Breadcrumbs from '../components/Breadcrumbs'
+import ProviderFlags from '../components/ProviderFlags'
 
 export default function Excluded() {
   const { data, isLoading, error } = useQuery({
@@ -79,7 +80,7 @@ export default function Excluded() {
                   <td className="py-2 pr-4 font-mono text-xs">
                     <Link to={`/providers/${p.npi}`} className="text-blue-400 hover:underline">{p.npi}</Link>
                   </td>
-                  <td className="py-2 pr-4 text-gray-300">{p.provider_name || '—'}</td>
+                  <td className="py-2 pr-4 text-gray-300">{p.provider_name || '—'}<ProviderFlags npi={p.npi} className="ml-1.5" /></td>
                   <td className="py-2 pr-4 text-gray-400">{p.state || '—'}</td>
                   <td className="py-2 pr-4 text-gray-500 text-xs">{p.specialty || '—'}</td>
                   <td className="py-2 pr-4">

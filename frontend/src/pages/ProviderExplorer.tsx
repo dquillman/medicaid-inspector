@@ -7,6 +7,7 @@ import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
 import { FunnelIcon, FunnelSolidIcon, ExclamationTriangleIcon } from '../components/icons'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 import { threatColor } from '../lib/threat'
+import ProviderFlags from '../components/ProviderFlags'
 import BulkActionBar from '../components/BulkActionBar'
 import Sparkline from '../components/Sparkline'
 import EmptyState from '../components/EmptyState'
@@ -818,8 +819,9 @@ export default function ProviderExplorer() {
                     />
                   </td>
                   <td className="px-3 py-2.5 font-mono-data text-blue-400 text-sm sticky left-0 z-10 bg-gray-900 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">{p.npi}</td>
-                  <td className="px-3 py-2.5 text-gray-300 max-w-[200px] truncate" title={name}>
+                  <td className="px-3 py-2.5 text-gray-300 max-w-[220px] truncate" title={name}>
                     {name || <span className="text-gray-600 italic">--</span>}
+                    <ProviderFlags npi={p.npi} className="ml-1.5" />
                   </td>
                   <td className="px-3 py-2.5 text-center">
                     {(p as any).oig_excluded

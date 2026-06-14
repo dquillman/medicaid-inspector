@@ -11,6 +11,7 @@ import {
   NoSymbolIcon, InformationCircleIcon,
 } from '../components/icons'
 import RiskScoreBadge from '../components/RiskScoreBadge'
+import ProviderFlags from '../components/ProviderFlags'
 import SpendingTimeline from '../components/SpendingTimeline'
 import HcpcsBreakdown from '../components/HcpcsBreakdown'
 import DiagnosisMixCard from '../components/DiagnosisMixCard'
@@ -422,6 +423,7 @@ export default function ProviderDetail() {
         <div>
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-white">{nppes.name || `NPI ${npi}`}</h1>
+            {npi && <ProviderFlags npi={npi} />}
             <span className="text-xs px-2 py-0.5 bg-gray-800 border border-gray-700 rounded-full text-gray-400">
               {nppes.entity_type === 'NPI-2' ? 'Organization' : 'Individual'}
             </span>

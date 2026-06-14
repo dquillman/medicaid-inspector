@@ -1758,3 +1758,9 @@ export interface OigTipResponse {
   fields: Record<string, unknown>
   signal_count: number
 }
+
+// Fraud Brain membership (for cross-page "in the brain list" badges)
+export interface FraudBrainMembership {
+  members: Record<string, number>  // npi -> rank
+  limit: number
+}

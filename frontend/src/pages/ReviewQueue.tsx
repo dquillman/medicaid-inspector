@@ -9,6 +9,7 @@ import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
 import { ArrowDownTrayIcon } from '../components/icons'
 import EmptyState from '../components/EmptyState'
 import QuickTriagePanel from '../components/QuickTriagePanel'
+import ProviderFlags from '../components/ProviderFlags'
 
 type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
 
@@ -236,8 +237,9 @@ function ReviewRow({
             {item.npi}
           </Link>
         </td>
-        <td className="px-4 py-3 text-sm text-gray-300 max-w-[160px] truncate" title={item.provider_name}>
+        <td className="px-4 py-3 text-sm text-gray-300 max-w-[180px] truncate" title={item.provider_name}>
           {item.provider_name || <span className="text-gray-600 italic">--</span>}
+          <ProviderFlags npi={item.npi} className="ml-1.5" />
         </td>
         <td className="px-4 py-3 text-xs text-gray-500">{item.state || '--'}</td>
         <td className="px-4 py-3">

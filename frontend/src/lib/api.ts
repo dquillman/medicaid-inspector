@@ -61,6 +61,7 @@ import type {
   ExcludedProvidersResponse,
   MethodsResponse,
   OigTipResponse,
+  FraudBrainMembership,
   PharmacyHighRiskResponse,
   PharmacyProviderDetail,
   DMEHighRiskResponse,
@@ -834,6 +835,9 @@ export const api = {
   // Fraud Brain — cross-source meta-analysis
   fraudBrainTop: (limit = 10, refresh = false) =>
     get<FraudBrainResponse>('/fraud-brain/top', { limit, refresh }),
+
+  fraudBrainMembership: (limit = 100) =>
+    get<FraudBrainMembership>('/fraud-brain/membership', { limit }),
 
   // Methodology (public) + OIG Hotline tip export
   methods: () => get<MethodsResponse>('/methods'),

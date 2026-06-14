@@ -27,6 +27,7 @@ import FraudRings from './pages/FraudRings'
 import FraudBrain from './pages/FraudBrain'
 import Excluded from './pages/Excluded'
 import Methods from './pages/Methods'
+import { ProviderFlagsProvider } from './hooks/useProviderFlags'
 import NewsAlerts from './pages/NewsAlerts'
 import MLModel from './pages/MLModel'
 import ClaimPatterns from './pages/ClaimPatterns'
@@ -331,6 +332,7 @@ export default function App() {
           onBack={() => setView('landing')}
         />
       ) : (
+      <ProviderFlagsProvider>
       <div className="min-h-screen flex flex-col" lang="en">
         {/* Ambient lamp haze behind the whole watchfloor (CSS-only; the global
             prefers-reduced-motion rule freezes the drift). */}
@@ -430,6 +432,7 @@ export default function App() {
         <CommandPalette />
         <KeyboardShortcuts />
       </div>
+      </ProviderFlagsProvider>
       )}
     </BrowserRouter>
   )
