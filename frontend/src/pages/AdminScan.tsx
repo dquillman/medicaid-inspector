@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { PrescanStatus } from '../lib/types'
 import { ExclamationTriangleIcon } from '../components/icons'
+import DataRefreshGuide from '../components/DataRefreshGuide'
 
 const US_STATES = [
   'AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN',
@@ -564,13 +565,16 @@ export default function AdminScan() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-white uppercase tracking-wide">
-          Scan Administration
-        </h1>
-        <p className="text-gray-500 text-xs mt-1 uppercase tracking-wider">
-          Manage data sources, provider scanning, and rescoring
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white uppercase tracking-wide">
+            Scan Administration
+          </h1>
+          <p className="text-gray-500 text-xs mt-1 uppercase tracking-wider">
+            Manage data sources, provider scanning, and rescoring
+          </p>
+        </div>
+        <DataRefreshGuide />
       </div>
 
       <DataSourceCard />
