@@ -61,6 +61,9 @@ import type {
   ExcludedProvidersResponse,
   MethodsResponse,
   OigTipResponse,
+  OigTip,
+  OigTipsResponse,
+  OigTipsFiledResponse,
   FraudBrainMembership,
   PharmacyHighRiskResponse,
   PharmacyProviderDetail,
@@ -842,6 +845,14 @@ export const api = {
   // Methodology (public) + OIG Hotline tip export
   methods: () => get<MethodsResponse>('/methods'),
   oigTip: (npi: string) => get<OigTipResponse>(`/providers/${npi}/oig-tip`),
+
+  // OIG Hotline tip log (filed-tip tracking + outcomes)
+  oigTipsList: () => get<OigTipsResponse>('/oig-tips'),
+  oigTipsFiled: () => get<OigTipsFiledResponse>('/oig-tips/filed'),
+  logOigTip: (body: { npi: string; provider_name?: string; state?: string; risk_score?: number; notes?: string }) =>
+    mutate<OigTip>('POST', '/oig-tips', body),
+  updateOigTip: (id: string, body: Partial<Pick<OigTip, 'status' | 'reference_number' | 'notes' | 'outcome_notes'>>) =>
+    mutate<OigTip>('PATCH', `/oig-tips/${id}`, body),
 
   // License & Credential Verification
   providerLicense: (npi: string) => get<LicenseVerification>(`/license/providers/${npi}`),

@@ -213,6 +213,7 @@ export default function ProviderDetail() {
   const [oigTipText, setOigTipText] = useState<string | null>(null)
   const [oigTipLoading, setOigTipLoading] = useState(false)
   const [oigCopied, setOigCopied] = useState(false)
+  const [oigLogged, setOigLogged] = useState(false)
 
   // TODO: Consider batch /api/providers/{npi}/full-profile endpoint
   // ── Primary query (loads first) ─────────────────────────────────────────
@@ -544,6 +545,24 @@ export default function ProviderDetail() {
                     className="px-3 py-1.5 text-xs font-medium bg-surface-2 border border-hairline text-ink-secondary rounded hover:border-filament-dim transition-colors"
                   >
                     Download .txt
+                  </button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        await api.logOigTip({
+                          npi: npi!,
+                          provider_name: detail?.nppes?.name ?? detail?.provider_name ?? '',
+                          state: detail?.nppes?.address?.state ?? detail?.state ?? '',
+                          risk_score: detail?.risk_score ?? 0,
+                        })
+                        setOigLogged(true)
+                        queryClient.invalidateQueries({ queryKey: ['oig-tips-filed'] })
+                      } catch { /* ignore */ }
+                    }}
+                    disabled={oigLogged}
+                    className="px-3 py-1.5 text-xs font-medium bg-surface-2 border border-hairline text-ink-secondary rounded hover:border-filament-dim transition-colors disabled:opacity-60"
+                  >
+                    {oigLogged ? 'Logged ✓' : 'Log as filed'}
                   </button>
                   <a href="https://oig.hhs.gov/fraud/report-fraud/" target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-filament-dim hover:text-filament-core transition-colors">
                     Open OIG Hotline form ↗

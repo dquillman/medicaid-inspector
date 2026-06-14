@@ -7,10 +7,11 @@ import { useProviderFlags } from '../hooks/useProviderFlags'
  * nothing when neither applies, so it's safe to drop next to any NPI/name.
  */
 export default function ProviderFlags({ npi, className = '' }: { npi: string; className?: string }) {
-  const { isWatched, brainRank } = useProviderFlags()
+  const { isWatched, brainRank, isTipped } = useProviderFlags()
   const watched = isWatched(npi)
   const rank = brainRank(npi)
-  if (!watched && rank === undefined) return null
+  const tipped = isTipped(npi)
+  if (!watched && rank === undefined && !tipped) return null
 
   return (
     <span className={`inline-flex items-center gap-1 align-middle ${className}`}>
@@ -25,6 +26,16 @@ export default function ProviderFlags({ npi, className = '' }: { npi: string; cl
           className="text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-threat-high/15 text-threat-high border border-threat-high/40 hover:bg-threat-high/25 transition-colors"
         >
           BRAIN #{rank}
+        </Link>
+      )}
+      {tipped && (
+        <Link
+          to="/oig-tips"
+          onClick={(e) => e.stopPropagation()}
+          title="An OIG Hotline tip has been filed on this provider"
+          className="text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-filament-core/15 text-filament-core border border-filament-dim/50 hover:bg-filament-core/25 transition-colors"
+        >
+          TIP FILED
         </Link>
       )}
     </span>

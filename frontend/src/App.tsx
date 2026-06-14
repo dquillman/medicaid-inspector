@@ -27,6 +27,7 @@ import FraudRings from './pages/FraudRings'
 import FraudBrain from './pages/FraudBrain'
 import Excluded from './pages/Excluded'
 import Methods from './pages/Methods'
+import OigTips from './pages/OigTips'
 import { ProviderFlagsProvider } from './hooks/useProviderFlags'
 import NewsAlerts from './pages/NewsAlerts'
 import MLModel from './pages/MLModel'
@@ -201,6 +202,7 @@ function AnimatedRoutes() {
           <Route path="/fraud-brain"      element={<FraudBrain />} />
           <Route path="/excluded"         element={<Excluded />} />
           <Route path="/methods"          element={<Methods />} />
+          <Route path="/oig-tips"         element={<OigTips />} />
           <Route path="/news"             element={<NewsAlerts />} />
           <Route path="/ml-model"         element={<MLModel />} />
           <Route path="/billing-codes"   element={<BillingCodeSearch />} />

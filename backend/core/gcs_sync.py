@@ -41,6 +41,7 @@ _SYNC_FILES = [
     "notifications.json",
     "saved_searches.json",
     "referrals.json",
+    "oig_tips.json",          # HHS-OIG Hotline tip log
     "evidence_metadata.json",
     "lineage.json",
 ]

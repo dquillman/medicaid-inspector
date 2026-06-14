@@ -10,9 +10,10 @@ import { api } from '../lib/api'
 interface Flags {
   isWatched: (npi: string) => boolean
   brainRank: (npi: string) => number | undefined
+  isTipped: (npi: string) => boolean
 }
 
-const Ctx = createContext<Flags>({ isWatched: () => false, brainRank: () => undefined })
+const Ctx = createContext<Flags>({ isWatched: () => false, brainRank: () => undefined, isTipped: () => false })
 
 export function ProviderFlagsProvider({ children }: { children: ReactNode }) {
   const { data: wl } = useQuery({
@@ -27,15 +28,23 @@ export function ProviderFlagsProvider({ children }: { children: ReactNode }) {
     staleTime: 5 * 60_000,
     retry: 1,
   })
+  const { data: tips } = useQuery({
+    queryKey: ['oig-tips-filed'],
+    queryFn: () => api.oigTipsFiled(),
+    staleTime: 5 * 60_000,
+    retry: 1,
+  })
 
   const value = useMemo<Flags>(() => {
     const watched = new Set((wl?.items ?? []).map((e) => e.npi))
     const ranks = brain?.members ?? {}
+    const tipped = new Set(tips?.npis ?? [])
     return {
       isWatched: (npi) => watched.has(npi),
       brainRank: (npi) => ranks[npi],
+      isTipped: (npi) => tipped.has(npi),
     }
-  }, [wl, brain])
+  }, [wl, brain, tips])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

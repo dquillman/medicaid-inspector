@@ -30,6 +30,7 @@ backend/enrollment_cache.json
 backend/users.json
 backend/sessions.json
 backend/review_queue.json
+backend/oig_tips.json
 backend/watchlist.json
 backend/alert_rules.json
 backend/app.db

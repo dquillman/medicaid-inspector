@@ -1764,3 +1764,28 @@ export interface FraudBrainMembership {
   members: Record<string, number>  // npi -> rank
   limit: number
 }
+
+// HHS-OIG Hotline tip log
+export interface OigTip {
+  id: string
+  npi: string
+  provider_name: string
+  state: string
+  risk_score: number
+  status: 'filed' | 'acknowledged' | 'under_review' | 'action_taken' | 'no_action' | 'closed'
+  reference_number: string
+  notes: string
+  outcome_notes: string
+  filed_at: number
+  updated_at: number
+  history?: { at: number; status: string; note: string }[]
+}
+
+export interface OigTipsResponse {
+  tips: OigTip[]
+  counts: { total: number; by_status: Record<string, number> }
+}
+
+export interface OigTipsFiledResponse {
+  npis: string[]
+}
