@@ -64,14 +64,14 @@ function DataSourceCard() {
             <div className="flex items-center gap-2 text-sm">
               <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
               <span className="text-blue-300 font-semibold">Updating dataset…</span>
-              <span className="text-gray-400 font-mono text-xs">{gb_done} / {gb_total} GB</span>
+              <span className="text-ink-secondary font-mono text-xs">{gb_done} / {gb_total} GB</span>
             </div>
             <span className="text-blue-400 font-mono text-sm">{dl.pct}%</span>
           </div>
-          <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+          <div className="w-full h-2 bg-surface-2 rounded-full overflow-hidden">
             <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${dl.pct}%` }} />
           </div>
-          <p className="text-xs text-gray-500">The current file stays active until the download completes, then it's atomically replaced.</p>
+          <p className="text-xs text-ink-tertiary">The current file stays active until the download completes, then it's atomically replaced.</p>
         </div>
       )
     }
@@ -82,13 +82,13 @@ function DataSourceCard() {
           <div className="flex items-center gap-2 text-sm">
             <span className="text-green-400 font-bold">●</span>
             <span className="text-green-300 font-semibold">Local dataset active</span>
-            <span className="text-gray-500">— {ds.file_size_gb} GB · {localDate ? `dated ${localDate}` : 'queries run in ms'}</span>
+            <span className="text-ink-tertiary">— {ds.file_size_gb} GB · {localDate ? `dated ${localDate}` : 'queries run in ms'}</span>
           </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
               onClick={handleCheckUpdate}
               disabled={checking}
-              className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-200 rounded transition-colors"
+              className="px-3 py-1 text-xs bg-surface-2 hover:bg-hairline disabled:opacity-50 text-ink-primary rounded transition-colors"
             >
               {checking ? 'Checking…' : 'Check for update'}
             </button>
@@ -109,7 +109,7 @@ function DataSourceCard() {
                 ⬆ Newer dataset available{remoteDate ? ` (remote dated ${remoteDate})` : ''} — click "Update now" to refresh
               </span>
             ) : (
-              <span className="text-gray-500">✓ Up to date{remoteDate ? ` — remote also dated ${remoteDate}` : ''}</span>
+              <span className="text-ink-tertiary">✓ Up to date{remoteDate ? ` — remote also dated ${remoteDate}` : ''}</span>
             )}
           </div>
         )}
@@ -129,14 +129,14 @@ function DataSourceCard() {
           <div className="flex items-center gap-2 text-sm">
             <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse" />
             <span className="text-blue-300 font-semibold">Downloading dataset…</span>
-            <span className="text-gray-400 font-mono text-xs">{gb_done} / {gb_total} GB</span>
+            <span className="text-ink-secondary font-mono text-xs">{gb_done} / {gb_total} GB</span>
           </div>
           <span className="text-blue-400 font-mono text-sm">{dl.pct}%</span>
         </div>
-        <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+        <div className="w-full h-2 bg-surface-2 rounded-full overflow-hidden">
           <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${dl.pct}%` }} />
         </div>
-        <p className="text-xs text-gray-500">Scans will be ~100× faster once complete.</p>
+        <p className="text-xs text-ink-tertiary">Scans will be ~100× faster once complete.</p>
       </div>
     )
   }
@@ -157,9 +157,9 @@ function DataSourceCard() {
           <div className="flex items-center gap-2 text-sm">
             <ExclamationTriangleIcon className="w-4 h-4 text-yellow-400" />
             <span className="text-yellow-300 font-semibold">Using remote dataset</span>
-            <span className="text-gray-500">— each scan batch takes 10–30s over the network</span>
+            <span className="text-ink-tertiary">— each scan batch takes 10–30s over the network</span>
           </div>
-          <p className="text-xs text-gray-500 ml-5">Download once (2.74 GB) to make scans ~100× faster</p>
+          <p className="text-xs text-ink-tertiary ml-5">Download once (2.74 GB) to make scans ~100× faster</p>
         </div>
         <button
           onClick={handleDownload}
@@ -170,13 +170,13 @@ function DataSourceCard() {
       </div>
       {ds.expected_path && (
         <div className="ml-5 space-y-1">
-          <p className="text-xs text-gray-500">App is looking for the file at:</p>
-          <p className="text-xs font-mono bg-gray-800 text-gray-300 px-2 py-1 rounded break-all">{ds.expected_path}</p>
-          <p className="text-xs text-gray-600">
+          <p className="text-xs text-ink-tertiary">App is looking for the file at:</p>
+          <p className="text-xs font-mono bg-surface-2 text-ink-secondary px-2 py-1 rounded break-all">{ds.expected_path}</p>
+          <p className="text-xs text-ink-tertiary">
             Already have the file elsewhere? Add this line to{' '}
-            <span className="font-mono text-gray-400">backend/.env</span>{' '}and restart the backend:
+            <span className="font-mono text-ink-secondary">backend/.env</span>{' '}and restart the backend:
           </p>
-          <p className="text-xs font-mono bg-gray-800 text-blue-300 px-2 py-1 rounded">
+          <p className="text-xs font-mono bg-surface-2 text-blue-300 px-2 py-1 rounded">
             LOCAL_PARQUET_PATH=C:/path/to/medicaid-provider-spending.parquet
           </p>
         </div>
@@ -219,7 +219,7 @@ function MupCacheCard() {
               {phase === 'converting' ? 'Converting JSONL → Parquet…' : 'Downloading MUP-by-Provider…'}
             </span>
             {phase !== 'converting' && (
-              <span className="text-gray-400 font-mono text-xs">
+              <span className="text-ink-secondary font-mono text-xs">
                 {rowsDone.toLocaleString()} / {rowsTotal.toLocaleString()} providers · {mb_done} MB
               </span>
             )}
@@ -227,11 +227,11 @@ function MupCacheCard() {
           {phase !== 'converting' && <span className="text-blue-400 font-mono text-sm">{pct}%</span>}
         </div>
         {phase !== 'converting' && (
-          <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+          <div className="w-full h-2 bg-surface-2 rounded-full overflow-hidden">
             <div className="h-full bg-blue-500 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
           </div>
         )}
-        <p className="text-xs text-gray-500">
+        <p className="text-xs text-ink-tertiary">
           {phase === 'converting'
             ? 'DuckDB is compressing ~3 GB JSON into a ~180 MB parquet — about 20 seconds.'
             : '8 parallel API workers — ~25 MB/s, full dataset in 2-3 min.'}
@@ -247,18 +247,18 @@ function MupCacheCard() {
           <div className="flex items-center gap-2 text-sm">
             <span className="text-green-400 font-bold">●</span>
             <span className="text-green-300 font-semibold">MUP diagnosis cache active</span>
-            <span className="text-gray-500">
+            <span className="text-ink-tertiary">
               — {mup.file_size_mb ?? '?'} MB · {mup.row_count?.toLocaleString() ?? '?'} providers
             </span>
           </div>
           <button
             onClick={handleRefresh}
-            className="px-3 py-1 text-xs bg-gray-700 hover:bg-gray-600 text-gray-200 rounded transition-colors"
+            className="px-3 py-1 text-xs bg-surface-2 hover:bg-hairline text-ink-primary rounded transition-colors"
           >
             Refresh
           </button>
         </div>
-        <p className="text-xs text-gray-500 ml-5">
+        <p className="text-xs text-ink-tertiary ml-5">
           Powers the diagnosis_procedure_mismatch signal during batch scans.
         </p>
       </div>
@@ -266,11 +266,11 @@ function MupCacheCard() {
   }
 
   return (
-    <div className="card border-gray-700 bg-gray-900/40 space-y-1 py-3">
+    <div className="card border-hairline bg-surface-1/40 space-y-1 py-3">
       <div className="flex items-center justify-between gap-3">
         <div className="text-sm">
-          <span className="text-gray-300 font-semibold">MUP diagnosis cache: not downloaded</span>
-          <p className="text-xs text-gray-500 mt-0.5">
+          <span className="text-ink-secondary font-semibold">MUP diagnosis cache: not downloaded</span>
+          <p className="text-xs text-ink-tertiary mt-0.5">
             Download CMS Medicare diagnosis data to enable the diagnosis-procedure mismatch signal during scans.
             Without it the signal only fires on the provider detail page (via the live CMS API).
           </p>
@@ -333,9 +333,9 @@ function ScanControl({
           {isScanning && (
             <span className={`w-2 h-2 rounded-full animate-pulse ${isSmartScan ? 'bg-purple-400' : 'bg-blue-400'}`} />
           )}
-          <span className="text-white text-sm font-semibold">Provider Scan</span>
+          <span className="text-ink-primary text-sm font-semibold">Provider Scan</span>
           {isScanning && (
-            <span className="text-gray-500 text-xs font-mono">
+            <span className="text-ink-tertiary text-xs font-mono">
               {mins > 0 ? `${mins}m ` : ''}{secs}s
             </span>
           )}
@@ -351,7 +351,7 @@ function ScanControl({
           )}
         </div>
         {progress && progress.batches_completed > 0 && (
-          <span className="text-gray-500 text-xs">
+          <span className="text-ink-tertiary text-xs">
             {progress.batches_completed} batch{progress.batches_completed !== 1 ? 'es' : ''} completed
           </span>
         )}
@@ -385,12 +385,12 @@ function ScanControl({
       )}
 
       <div className="flex items-center gap-3">
-        <label className="text-xs text-gray-400 shrink-0">State filter:</label>
+        <label className="text-xs text-ink-secondary shrink-0">State filter:</label>
         <select
           value={stateFilter}
           onChange={e => setStateFilter(e.target.value)}
           disabled={isScanning}
-          className="bg-gray-800 text-white text-xs rounded px-2 py-1 border border-gray-700 disabled:opacity-50"
+          className="bg-surface-2 text-ink-primary text-xs rounded px-2 py-1 border border-hairline disabled:opacity-50"
         >
           <option value="">All States</option>
           {US_STATES.map(s => <option key={s} value={s}>{s}</option>)}
@@ -404,18 +404,18 @@ function ScanControl({
 
       {!isSmartScan && total > 0 && (
         <div className="space-y-1">
-          <div className="flex justify-between text-xs text-gray-400">
+          <div className="flex justify-between text-xs text-ink-secondary">
             <span>{scanned.toLocaleString()} of {total.toLocaleString()} providers scanned</span>
             <span className="font-mono">{pct}%</span>
           </div>
-          <div className="w-full h-2 bg-gray-700 rounded-full overflow-hidden">
+          <div className="w-full h-2 bg-surface-2 rounded-full overflow-hidden">
             <div className="h-full bg-blue-500 rounded-full transition-all duration-700" style={{ width: `${pct}%` }} />
           </div>
         </div>
       )}
 
       {!isSmartScan && status?.message && (
-        <p className="text-xs text-gray-400">{status.message}</p>
+        <p className="text-xs text-ink-secondary">{status.message}</p>
       )}
 
       <div className="flex gap-3 items-center flex-wrap">
@@ -455,7 +455,7 @@ function ScanControl({
           <button
             onClick={onRescore}
             disabled={rescoring}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-wait text-yellow-400 hover:text-yellow-300 text-sm rounded transition-colors border border-gray-700"
+            className="px-4 py-2 bg-surface-2 hover:bg-hairline disabled:opacity-50 disabled:cursor-wait text-yellow-400 hover:text-yellow-300 text-sm rounded transition-colors border border-hairline"
             title="Re-run fraud signals on all cached providers using updated logic"
           >
             {rescoring
@@ -466,13 +466,13 @@ function ScanControl({
         {cachedCount > 0 && !isScanning && !isAutoMode && (
           <button
             onClick={onReset}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-red-400 hover:text-red-300 text-sm rounded transition-colors border border-gray-700"
+            className="px-4 py-2 bg-surface-2 hover:bg-hairline text-red-400 hover:text-red-300 text-sm rounded transition-colors border border-hairline"
           >
             Reset Scan
           </button>
         )}
         {total === 0 && !isScanning && scanned === 0 && (
-          <span className="text-xs text-gray-500">
+          <span className="text-xs text-ink-tertiary">
             First scan will count all providers in the dataset.
           </span>
         )}
@@ -568,10 +568,10 @@ export default function AdminScan() {
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-white uppercase tracking-wide">
+          <h1 className="text-2xl font-bold text-ink-primary uppercase tracking-wide">
             Scan Administration
           </h1>
-          <p className="text-gray-500 text-xs mt-1 uppercase tracking-wider">
+          <p className="text-ink-tertiary text-xs mt-1 uppercase tracking-wider">
             Manage data sources, provider scanning, and rescoring
           </p>
         </div>
@@ -602,7 +602,7 @@ export default function AdminScan() {
           <span>{rescoreResult}</span>
           <button
             onClick={() => setRescoreResult(null)}
-            className="text-xs text-gray-500 hover:text-gray-300"
+            className="text-xs text-ink-tertiary hover:text-ink-secondary"
           >
             dismiss
           </button>
@@ -611,8 +611,8 @@ export default function AdminScan() {
 
       {/* ML Model Training */}
       <div className="card space-y-3">
-        <h2 className="text-base font-semibold text-gray-300">ML Anomaly Detection (Isolation Forest)</h2>
-        <p className="text-xs text-gray-500">
+        <h2 className="text-base font-semibold text-ink-secondary">ML Anomaly Detection (Isolation Forest)</h2>
+        <p className="text-xs text-ink-tertiary">
           Train an unsupervised ML model on all cached providers to detect statistical outliers
           beyond rule-based signals.
         </p>
@@ -679,37 +679,37 @@ function DatasetInfoCard() {
 
   return (
     <div className="card space-y-3">
-      <h2 className="text-base font-semibold text-gray-300">Dataset Information</h2>
+      <h2 className="text-base font-semibold text-ink-secondary">Dataset Information</h2>
 
       {info ? (
         <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
           <div>
-            <span className="text-gray-500">Dataset Date:</span>{' '}
-            <span className="text-white font-mono">{info.detected_date || 'Unknown'}</span>
+            <span className="text-ink-tertiary">Dataset Date:</span>{' '}
+            <span className="text-ink-primary font-mono">{info.detected_date || 'Unknown'}</span>
           </div>
           <div>
-            <span className="text-gray-500">Row Count:</span>{' '}
-            <span className="text-white font-mono">{info.row_count?.toLocaleString() ?? 'Not yet counted'}</span>
+            <span className="text-ink-tertiary">Row Count:</span>{' '}
+            <span className="text-ink-primary font-mono">{info.row_count?.toLocaleString() ?? 'Not yet counted'}</span>
           </div>
           <div className="col-span-2">
-            <span className="text-gray-500">Active Path:</span>{' '}
-            <span className="text-gray-300 font-mono text-[11px] break-all">{info.active_path}</span>
+            <span className="text-ink-tertiary">Active Path:</span>{' '}
+            <span className="text-ink-secondary font-mono text-[11px] break-all">{info.active_path}</span>
           </div>
           <div className="col-span-2">
-            <span className="text-gray-500">Source:</span>{' '}
+            <span className="text-ink-tertiary">Source:</span>{' '}
             <span className={`font-medium ${info.is_local ? 'text-green-400' : 'text-yellow-400'}`}>
               {info.is_local ? 'Local file' : 'Remote URL'}
             </span>
           </div>
           {info.last_checked && (
             <div className="col-span-2">
-              <span className="text-gray-500">Last checked for updates:</span>{' '}
-              <span className="text-gray-400">{new Date(info.last_checked * 1000).toLocaleString()}</span>
+              <span className="text-ink-tertiary">Last checked for updates:</span>{' '}
+              <span className="text-ink-secondary">{new Date(info.last_checked * 1000).toLocaleString()}</span>
             </div>
           )}
         </div>
       ) : (
-        <p className="text-xs text-gray-500">Loading dataset info...</p>
+        <p className="text-xs text-ink-tertiary">Loading dataset info...</p>
       )}
 
       <div className="flex gap-3 items-center">
@@ -726,12 +726,12 @@ function DatasetInfoCard() {
         <div className={`rounded-lg px-4 py-3 text-xs ${
           refreshResult.update_available
             ? 'bg-green-950/30 border border-green-800 text-green-300'
-            : 'bg-gray-800/50 border border-gray-700 text-gray-400'
+            : 'bg-surface-2/60 border border-hairline text-ink-secondary'
         }`}>
           <p>{refreshResult.message}</p>
           {refreshResult.update_available && refreshResult.new_url && (
             <div className="mt-2 space-y-1">
-              <p className="text-gray-400">New version: <span className="font-mono text-green-300">{refreshResult.new_date}</span></p>
+              <p className="text-ink-secondary">New version: <span className="font-mono text-green-300">{refreshResult.new_date}</span></p>
               <button
                 onClick={() => handleSwitch(refreshResult.new_url!)}
                 className="px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-xs font-medium rounded transition-colors"
@@ -775,8 +775,8 @@ function DataQualityCard() {
 
   return (
     <div className="card space-y-3">
-      <h2 className="text-base font-semibold text-gray-300">Data Quality Validation</h2>
-      <p className="text-xs text-gray-500">
+      <h2 className="text-base font-semibold text-ink-secondary">Data Quality Validation</h2>
+      <p className="text-xs text-ink-tertiary">
         Validates NPI format (Luhn check), claim amounts, and date ranges against the active dataset.
         Runs automatically on first scan batch.
       </p>
@@ -785,8 +785,8 @@ function DataQualityCard() {
         <div className="space-y-3">
           {/* Quality score bar */}
           <div className="flex items-center gap-3">
-            <span className="text-xs text-gray-400 w-20 shrink-0">Quality Score</span>
-            <div className="flex-1 h-3 bg-gray-700 rounded-full overflow-hidden">
+            <span className="text-xs text-ink-secondary w-20 shrink-0">Quality Score</span>
+            <div className="flex-1 h-3 bg-surface-2 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
                   q.quality_score >= 95 ? 'bg-green-500' :
@@ -805,32 +805,32 @@ function DataQualityCard() {
 
           {/* Stats grid */}
           <div className="grid grid-cols-4 gap-3">
-            <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
-              <div className="text-lg font-bold text-white">{q.total_dataset_rows?.toLocaleString()}</div>
-              <div className="text-xs text-gray-500 uppercase">Total Rows</div>
+            <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
+              <div className="text-lg font-bold text-ink-primary">{q.total_dataset_rows?.toLocaleString()}</div>
+              <div className="text-xs text-ink-tertiary uppercase">Total Rows</div>
             </div>
-            <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
+            <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-green-400">{q.valid_records?.toLocaleString()}</div>
-              <div className="text-xs text-gray-500 uppercase">Valid</div>
+              <div className="text-xs text-ink-tertiary uppercase">Valid</div>
             </div>
-            <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
+            <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-red-400">{q.invalid_records}</div>
-              <div className="text-xs text-gray-500 uppercase">Invalid</div>
+              <div className="text-xs text-ink-tertiary uppercase">Invalid</div>
             </div>
-            <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
+            <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-yellow-400">{q.sample_size?.toLocaleString()}</div>
-              <div className="text-xs text-gray-500 uppercase">Sampled</div>
+              <div className="text-xs text-ink-tertiary uppercase">Sampled</div>
             </div>
           </div>
 
           {/* Failure breakdown */}
           {q.failures && Object.keys(q.failures).length > 0 && (
             <div className="space-y-1">
-              <p className="text-xs text-gray-400 font-medium">Validation Failures</p>
+              <p className="text-xs text-ink-secondary font-medium">Validation Failures</p>
               <div className="grid grid-cols-2 gap-1 text-xs">
                 {Object.entries(q.failures).map(([key, count]) => (
-                  <div key={key} className="flex justify-between bg-gray-800/30 rounded px-2 py-1">
-                    <span className="text-gray-400">{key.replace(/_/g, ' ')}</span>
+                  <div key={key} className="flex justify-between bg-surface-2/30 rounded px-2 py-1">
+                    <span className="text-ink-secondary">{key.replace(/_/g, ' ')}</span>
                     <span className="text-red-400 font-mono">{count}</span>
                   </div>
                 ))}
@@ -839,7 +839,7 @@ function DataQualityCard() {
           )}
 
           {q.last_run && (
-            <p className="text-xs text-gray-600">
+            <p className="text-xs text-ink-tertiary">
               Last run: {new Date(q.last_run * 1000).toLocaleString()}
               {(q as any).elapsed_sec !== undefined && ` (${(q as any).elapsed_sec}s)`}
             </p>
@@ -874,26 +874,26 @@ function DataLineageCard() {
 
   return (
     <div className="card space-y-3">
-      <h2 className="text-base font-semibold text-gray-300">Data Lineage</h2>
-      <p className="text-xs text-gray-500">
+      <h2 className="text-base font-semibold text-ink-secondary">Data Lineage</h2>
+      <p className="text-xs text-ink-tertiary">
         Tracks which dataset version was used for each scan, when it ran, and how many providers/claims were processed.
       </p>
 
       {summary && (
         <div className="grid grid-cols-3 gap-3">
-          <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
-            <div className="text-lg font-bold text-white">{summary.total_scans}</div>
-            <div className="text-xs text-gray-500 uppercase">Total Scans</div>
+          <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
+            <div className="text-lg font-bold text-ink-primary">{summary.total_scans}</div>
+            <div className="text-xs text-ink-tertiary uppercase">Total Scans</div>
           </div>
-          <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
+          <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
             <div className="text-lg font-bold text-blue-400">{summary.dataset_versions_seen}</div>
-            <div className="text-xs text-gray-500 uppercase">Dataset Versions</div>
+            <div className="text-xs text-ink-tertiary uppercase">Dataset Versions</div>
           </div>
-          <div className="bg-gray-800/50 rounded-lg px-3 py-2 text-center">
-            <div className="text-lg font-bold text-gray-300">
+          <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
+            <div className="text-lg font-bold text-ink-secondary">
               {summary.latest_scan ? new Date(summary.latest_scan * 1000).toLocaleDateString() : '--'}
             </div>
-            <div className="text-xs text-gray-500 uppercase">Latest Scan</div>
+            <div className="text-xs text-ink-tertiary uppercase">Latest Scan</div>
           </div>
         </div>
       )}
@@ -902,7 +902,7 @@ function DataLineageCard() {
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead>
-              <tr className="text-gray-500 border-b border-gray-800">
+              <tr className="text-ink-tertiary border-b border-hairline">
                 <th className="text-left py-1 pr-3">When</th>
                 <th className="text-left py-1 pr-3">Type</th>
                 <th className="text-left py-1 pr-3">Dataset Date</th>
@@ -913,8 +913,8 @@ function DataLineageCard() {
             </thead>
             <tbody>
               {entries.map((e) => (
-                <tr key={e.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                  <td className="py-1.5 pr-3 text-gray-400">{new Date(e.timestamp * 1000).toLocaleString()}</td>
+                <tr key={e.id} className="border-b border-hairline hover:bg-surface-2/30">
+                  <td className="py-1.5 pr-3 text-ink-secondary">{new Date(e.timestamp * 1000).toLocaleString()}</td>
                   <td className="py-1.5 pr-3">
                     <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
                       e.scan_type === 'smart' ? 'bg-purple-900 text-purple-300' :
@@ -924,10 +924,10 @@ function DataLineageCard() {
                       {e.scan_type}
                     </span>
                   </td>
-                  <td className="py-1.5 pr-3 text-gray-300 font-mono">{e.dataset_date || '--'}</td>
-                  <td className="py-1.5 pr-3 text-right text-white font-mono">{e.provider_count.toLocaleString()}</td>
-                  <td className="py-1.5 pr-3 text-right text-gray-300 font-mono">{e.total_claims.toLocaleString()}</td>
-                  <td className="py-1.5 text-right text-gray-400 font-mono">
+                  <td className="py-1.5 pr-3 text-ink-secondary font-mono">{e.dataset_date || '--'}</td>
+                  <td className="py-1.5 pr-3 text-right text-ink-primary font-mono">{e.provider_count.toLocaleString()}</td>
+                  <td className="py-1.5 pr-3 text-right text-ink-secondary font-mono">{e.total_claims.toLocaleString()}</td>
+                  <td className="py-1.5 text-right text-ink-secondary font-mono">
                     {e.duration_sec != null ? `${e.duration_sec.toFixed(1)}s` : '--'}
                   </td>
                 </tr>
@@ -936,7 +936,7 @@ function DataLineageCard() {
           </table>
         </div>
       ) : (
-        <p className="text-xs text-gray-600">No scan history yet. Run a scan to start tracking lineage.</p>
+        <p className="text-xs text-ink-tertiary">No scan history yet. Run a scan to start tracking lineage.</p>
       )}
     </div>
   )

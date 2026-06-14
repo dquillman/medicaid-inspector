@@ -50,8 +50,11 @@ export default function DataFreshnessStrip() {
   if (isError || !data) return null
 
   const now = data.now
-  const coreTs = data.core_dataset.mtime
+  // True "last core refresh" = the GCS parquet upload time (survives cold
+  // starts); fall back to the data's detected vintage, then local file mtime.
+  const coreTs = data.core_dataset.gcs_updated
     ?? (data.core_dataset.detected_date ? Date.parse(data.core_dataset.detected_date) / 1000 : null)
+    ?? data.core_dataset.mtime
   const coreDays = ageDays(coreTs, now)
   const derivedTs = data.derived_generated_at ? Date.parse(data.derived_generated_at) / 1000 : null
   const derivedDays = ageDays(derivedTs, now)

@@ -41,6 +41,22 @@ async def data_freshness():
     pq = _pl.Path(__file__).parent.parent / "data" / "medicaid-provider-spending.parquet"
     ds_mtime = pq.stat().st_mtime if pq.exists() else None
 
+    # On Cloud Run the local parquet mtime resets every cold start, so the true
+    # "when did we last refresh the core data" signal is the GCS object's upload
+    # time. Prefer it when reachable (best-effort; falls back to local mtime).
+    gcs_updated = None
+    try:
+        from core.gcs_sync import _get_bucket, _PARQUET_BLOB
+        bucket = _get_bucket()
+        if bucket:
+            blob = bucket.blob(_PARQUET_BLOB)
+            if blob.exists():
+                blob.reload()
+                if blob.updated:
+                    gcs_updated = blob.updated.timestamp()
+    except Exception:
+        pass
+
     deact = 0
     try:
         from core.deactivation_store import count as _dc
@@ -75,6 +91,7 @@ async def data_freshness():
             "detected_date": info.get("detected_date"),
             "is_local": bool(info.get("is_local")),
             "mtime": ds_mtime,
+            "gcs_updated": gcs_updated,
         },
         "derived_generated_at": generated_at,   # ISO str: precompute/NPPES/deactivation refresh
         "deactivation_count": deact,
