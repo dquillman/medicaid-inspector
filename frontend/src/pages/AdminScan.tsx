@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import type { PrescanStatus } from '../lib/types'
 import { ExclamationTriangleIcon } from '../components/icons'
 import DataRefreshGuide from '../components/DataRefreshGuide'
+import DataFreshnessStrip from '../components/DataFreshnessStrip'
 
 const US_STATES = [
   'AK','AL','AR','AZ','CA','CO','CT','DC','DE','FL','GA','HI','IA','ID','IL','IN',
@@ -576,6 +577,8 @@ export default function AdminScan() {
         </div>
         <DataRefreshGuide />
       </div>
+
+      <DataFreshnessStrip />
 
       <DataSourceCard />
       <MupCacheCard />

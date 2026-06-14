@@ -23,6 +23,66 @@ async def dataset_info():
     return info
 
 
+@router.get("/data-freshness")
+async def data_freshness():
+    """Age of each refreshable artifact — powers the Scan & Data freshness strip.
+    Returns raw timestamps; the frontend computes ages + cadence colors."""
+    import time as _t
+    import pathlib as _pl
+    now = _t.time()
+
+    info = {}
+    try:
+        from services.data_discovery import get_dataset_info
+        info = get_dataset_info() or {}
+    except Exception:
+        pass
+
+    pq = _pl.Path(__file__).parent.parent / "data" / "medicaid-provider-spending.parquet"
+    ds_mtime = pq.stat().st_mtime if pq.exists() else None
+
+    deact = 0
+    try:
+        from core.deactivation_store import count as _dc
+        deact = _dc()
+    except Exception:
+        pass
+
+    oig_count = 0
+    try:
+        from core.oig_store import get_oig_stats
+        oig_count = int((get_oig_stats() or {}).get("record_count") or 0)
+    except Exception:
+        pass
+
+    last_scan = None
+    try:
+        from core.lineage_store import get_lineage
+        last_scan = (get_lineage(1, 1) or {}).get("summary", {}).get("latest_scan")
+    except Exception:
+        pass
+
+    generated_at = None
+    try:
+        from services.precomputed_store import get_generated_at
+        generated_at = get_generated_at()
+    except Exception:
+        pass
+
+    return {
+        "now": now,
+        "core_dataset": {
+            "detected_date": info.get("detected_date"),
+            "is_local": bool(info.get("is_local")),
+            "mtime": ds_mtime,
+        },
+        "derived_generated_at": generated_at,   # ISO str: precompute/NPPES/deactivation refresh
+        "deactivation_count": deact,
+        "oig_record_count": oig_count,
+        "last_scan_at": last_scan,
+    }
+
+
 @router.post("/dataset-refresh")
 async def dataset_refresh():
     """Check CMS/HHS for a newer dataset and optionally switch to it."""

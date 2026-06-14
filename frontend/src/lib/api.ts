@@ -64,6 +64,7 @@ import type {
   OigTip,
   OigTipsResponse,
   OigTipsFiledResponse,
+  DataFreshness,
   FraudBrainMembership,
   PharmacyHighRiskResponse,
   PharmacyProviderDetail,
@@ -845,6 +846,9 @@ export const api = {
   // Methodology (public) + OIG Hotline tip export
   methods: () => get<MethodsResponse>('/methods'),
   oigTip: (npi: string) => get<OigTipResponse>(`/providers/${npi}/oig-tip`),
+
+  // Scan & Data freshness strip
+  dataFreshness: () => get<DataFreshness>('/admin/data-freshness'),
 
   // OIG Hotline tip log (filed-tip tracking + outcomes)
   oigTipsList: () => get<OigTipsResponse>('/oig-tips'),

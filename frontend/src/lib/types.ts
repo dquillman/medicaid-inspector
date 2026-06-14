@@ -1790,3 +1790,13 @@ export interface OigTipsResponse {
 export interface OigTipsFiledResponse {
   npis: string[]
 }
+
+// Scan & Data freshness strip
+export interface DataFreshness {
+  now: number
+  core_dataset: { detected_date: string | null; is_local: boolean; mtime: number | null }
+  derived_generated_at: string | null
+  deactivation_count: number
+  oig_record_count: number
+  last_scan_at: number | null
+}
