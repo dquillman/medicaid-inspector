@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
+import ProviderFlags from '../components/ProviderFlags'
 
 function num(v: number | null | undefined) {
   if (v == null) return '--'
@@ -80,6 +81,7 @@ function DoctorShoppingTable({ data }: { data: any }) {
             <tr key={r.npi} className="border-b border-gray-800 hover:bg-gray-800/50">
               <td className="px-3 py-2">
                 <Link to={`/providers/${r.npi}`} className="text-blue-400 hover:text-blue-300 font-mono text-xs">{r.npi}</Link>
+                <ProviderFlags npi={r.npi} className="ml-1.5" />
               </td>
               <td className="px-3 py-2 text-orange-400 font-semibold">{(r.shopping_score ?? 0).toFixed(1)}</td>
               <td className="px-3 py-2 text-gray-300">{num(r.shared_code_count)}</td>
@@ -122,6 +124,7 @@ function HighUtilizationTable({ data }: { data: any }) {
             <tr key={r.npi} className="border-b border-gray-800 hover:bg-gray-800/50">
               <td className="px-3 py-2">
                 <Link to={`/providers/${r.npi}`} className="text-blue-400 hover:text-blue-300 font-mono text-xs">{r.npi}</Link>
+                <ProviderFlags npi={r.npi} className="ml-1.5" />
               </td>
               <td className="px-3 py-2 text-gray-300">{(r.claims_per_bene ?? 0).toFixed(1)}</td>
               <td className="px-3 py-2">
@@ -177,6 +180,7 @@ function GeographicTable({ data }: { data: any }) {
             <tr key={r.npi} className="border-b border-gray-800 hover:bg-gray-800/50">
               <td className="px-3 py-2">
                 <Link to={`/providers/${r.npi}`} className="text-blue-400 hover:text-blue-300 font-mono text-xs">{r.npi}</Link>
+                <ProviderFlags npi={r.npi} className="ml-1.5" />
               </td>
               <td className="px-3 py-2 text-red-400 font-semibold">{num(r.geo_risk_score)}</td>
               <td className="px-3 py-2 text-gray-300">{r.state_count}</td>
@@ -225,6 +229,7 @@ function ExcessiveServicesTable({ data }: { data: any }) {
             <tr key={r.npi} className="border-b border-gray-800 hover:bg-gray-800/50">
               <td className="px-3 py-2">
                 <Link to={`/providers/${r.npi}`} className="text-blue-400 hover:text-blue-300 font-mono text-xs">{r.npi}</Link>
+                <ProviderFlags npi={r.npi} className="ml-1.5" />
               </td>
               <td className="px-3 py-2 text-orange-400 font-semibold">{(r.svc_per_bene ?? 0).toFixed(1)}</td>
               <td className="px-3 py-2">

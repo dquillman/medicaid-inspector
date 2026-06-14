@@ -1778,6 +1778,7 @@ export interface OigTip {
   outcome_notes: string
   filed_at: number
   updated_at: number
+  foia_eligible_at?: number
   history?: { at: number; status: string; note: string }[]
 }
 

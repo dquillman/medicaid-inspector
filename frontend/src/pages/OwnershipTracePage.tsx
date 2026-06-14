@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import type { OwnershipChain, AddressCluster } from '../lib/types'
+import ProviderFlags from '../components/ProviderFlags'
 
 function riskBadgeClasses(score: number): string {
   if (score >= 75) return 'bg-red-900 text-red-300'
@@ -169,7 +170,10 @@ export default function OwnershipTracePage() {
                             {p.npi}
                           </Link>
                         </td>
-                        <td className="px-3 py-2 text-gray-200">{p.name}</td>
+                        <td className="px-3 py-2 text-gray-200">
+                          {p.name}
+                          <ProviderFlags npi={p.npi} className="ml-1.5" />
+                        </td>
                         <td className="px-3 py-2 text-gray-400">{p.specialty}</td>
                         <td className="px-3 py-2 text-center">
                           <span
@@ -253,7 +257,10 @@ export default function OwnershipTracePage() {
                             {cp.npi}
                           </Link>
                         </td>
-                        <td className="px-3 py-2 text-gray-200">{cp.provider_name}</td>
+                        <td className="px-3 py-2 text-gray-200">
+                          {cp.provider_name}
+                          <ProviderFlags npi={cp.npi} className="ml-1.5" />
+                        </td>
                         <td className="px-3 py-2 text-gray-400">{cp.specialty}</td>
                         <td className="px-3 py-2 text-center">
                           <span

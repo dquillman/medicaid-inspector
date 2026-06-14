@@ -91,6 +91,9 @@ def add_tip(npi: str, provider_name: str = "", state: str = "",
             "outcome_notes": "",
             "filed_at": now,
             "updated_at": now,
+            # OIG never confirms receipt/status; a FOIA "records pertinent to my
+            # complaint" request is only appropriate >=6 months after filing.
+            "foia_eligible_at": now + 183 * 86400,
             "history": [{"at": now, "status": "filed", "note": "Tip logged as filed with HHS-OIG Hotline"}],
         }
         _tips.append(tip)

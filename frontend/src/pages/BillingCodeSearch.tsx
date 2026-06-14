@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { get } from '../lib/api'
 import { fmt } from '../lib/format'
+import ProviderFlags from '../components/ProviderFlags'
 
 /* ── Types ──────────────────────────────────────────────────────────────────── */
 
@@ -173,6 +174,7 @@ function DiagnosisFlagsTab() {
                 >
                   {p.provider_name || p.npi}
                 </Link>
+                <ProviderFlags npi={p.npi} className="ml-1.5" />
                 <span className="text-gray-600 text-xs font-mono">{p.npi}</span>
                 {p.state && <span className="text-gray-600 text-xs">{p.state}</span>}
                 <RiskBadge score={p.risk_score} />
@@ -473,6 +475,7 @@ export default function BillingCodeSearch() {
                             >
                               {p.provider_name || p.npi}
                             </Link>
+                            <ProviderFlags npi={p.npi} className="ml-1.5" />
                             <div className="text-xs text-gray-600 font-mono">{p.npi}</div>
                           </td>
                           <td className="px-3 py-2 text-gray-400 text-xs">{p.provider_type}</td>

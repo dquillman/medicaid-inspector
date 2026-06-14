@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import type { WatchlistEntry } from '../lib/types'
 import { fmt } from '../lib/format'
 import EmptyState from '../components/EmptyState'
+import ProviderFlags from '../components/ProviderFlags'
 
 function riskColor(score: number | null) {
   if (score == null) return 'text-gray-500'
@@ -284,6 +285,7 @@ export default function Watchlist() {
                     <Link to={`/providers/${entry.npi}`} className="text-blue-400 hover:text-blue-300 font-medium">
                       {entry.name || 'Unknown'}
                     </Link>
+                    <ProviderFlags npi={entry.npi} className="ml-1.5" />
                     {entry.state && (
                       <span className="text-gray-600 text-xs ml-2">{entry.city ? `${entry.city}, ` : ''}{entry.state}</span>
                     )}

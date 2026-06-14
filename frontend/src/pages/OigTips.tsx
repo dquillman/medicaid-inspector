@@ -35,9 +35,18 @@ export default function OigTips() {
       <div>
         <h1 className="text-xl font-display font-bold text-ink-primary tracking-tight">OIG Hotline Tips</h1>
         <p className="text-sm text-ink-tertiary mt-1 max-w-3xl leading-relaxed">
-          Every tip you've filed with the HHS-OIG Hotline, its lifecycle, and outcome. Track an
-          acknowledgment or action here — an OIG response indicating action is the evidence that
-          the detection pipeline is producing real, fileable leads.
+          Every tip you've filed with the HHS-OIG Hotline, its lifecycle, and outcome.
+        </p>
+      </div>
+
+      <div className="card border-filament-dim/40 bg-filament-core/5">
+        <p className="text-xs text-ink-secondary leading-relaxed">
+          <span className="text-filament-core font-semibold">Reality of OIG Hotline tracking:</span> OIG
+          does <strong>not</strong> confirm receipt or report status on complaints. The statuses below are
+          <em> self-tracked</em> — only reachable if an OIG official proactively contacts you. The one way to
+          learn an outcome is a FOIA request to the OIG FOIA officer (phrased as “records pertinent to my
+          complaint,” not “status”), filed no sooner than <strong>6 months</strong> after submission — see each
+          tip's FOIA-eligible date.
         </p>
       </div>
 
@@ -84,7 +93,17 @@ export default function OigTips() {
                     <span className="block font-mono text-[11px] text-ink-tertiary">{t.npi}{t.state ? ` · ${t.state}` : ''}</span>
                   </td>
                   <td className="py-2 pr-4"><Magnitude score={t.risk_score} size="sm" /></td>
-                  <td className="py-2 pr-4 font-mono text-xs text-ink-tertiary">{new Date(t.filed_at * 1000).toLocaleDateString()}</td>
+                  <td className="py-2 pr-4 font-mono text-xs text-ink-tertiary">
+                    {new Date(t.filed_at * 1000).toLocaleDateString()}
+                    {t.foia_eligible_at && (
+                      <span
+                        className="block text-[10px] text-ink-ghost"
+                        title="Earliest date to file a FOIA records request about this complaint"
+                      >
+                        FOIA: {new Date(t.foia_eligible_at * 1000).toLocaleDateString()}
+                      </span>
+                    )}
+                  </td>
                   <td className="py-2 pr-4">
                     <select
                       value={t.status}

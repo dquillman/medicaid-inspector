@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts'
 import { api, type HotspotArea, type HotspotAreaDetail } from '../lib/api'
+import ProviderFlags from '../components/ProviderFlags'
 
 const SEVERITY_COLORS: Record<string, string> = {
   CRITICAL: '#ef4444',
@@ -326,7 +327,7 @@ function HotspotRow({
                         onClick={(e) => { e.stopPropagation(); onProviderClick(p.npi) }}
                       >
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm text-white truncate">{p.provider_name}</p>
+                          <p className="text-sm text-white truncate">{p.provider_name}<ProviderFlags npi={p.npi} className="ml-1.5" /></p>
                           <p className="text-xs text-gray-500">{p.npi} &middot; {p.state} {p.city}</p>
                         </div>
                         <div className="text-right shrink-0">

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
+import ProviderFlags from '../components/ProviderFlags'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -186,7 +187,7 @@ function UnbundlingTab({ patterns }: { patterns: UnbundlingPattern[] }) {
         <tbody>
           {patterns.map((p, i) => (
             <tr key={`${p.npi}-${p.bundle_name}-${i}`} className="border-b border-gray-800 hover:bg-gray-800/50">
-              <td className="py-2 px-3"><NpiLink npi={p.npi} /></td>
+              <td className="py-2 px-3"><NpiLink npi={p.npi} /><ProviderFlags npi={p.npi} className="ml-1.5" /></td>
               <td className="py-2 px-3">
                 <div className="text-white font-medium">{p.bundle_name}</div>
                 <div className="text-xs text-gray-500">Bundled: {p.bundled_code}</div>
@@ -229,7 +230,7 @@ function DuplicatesTab({ patterns }: { patterns: DuplicatePattern[] }) {
         <tbody>
           {patterns.map((p, i) => (
             <tr key={`${p.npi}-${i}`} className="border-b border-gray-800 hover:bg-gray-800/50">
-              <td className="py-2 px-3"><NpiLink npi={p.npi} /></td>
+              <td className="py-2 px-3"><NpiLink npi={p.npi} /><ProviderFlags npi={p.npi} className="ml-1.5" /></td>
               <td className="py-2 px-3 text-right text-white">{p.duplicate_clusters}</td>
               <td className="py-2 px-3 text-right text-white">{p.total_duplicate_lines}</td>
               <td className="py-2 px-3 text-right text-white font-semibold">{p.max_occurrences}x</td>
@@ -269,7 +270,7 @@ function PosTab({ patterns }: { patterns: PosViolation[] }) {
         <tbody>
           {patterns.map((p, i) => (
             <tr key={`${p.npi}-${i}`} className="border-b border-gray-800 hover:bg-gray-800/50">
-              <td className="py-2 px-3"><NpiLink npi={p.npi} /></td>
+              <td className="py-2 px-3"><NpiLink npi={p.npi} /><ProviderFlags npi={p.npi} className="ml-1.5" /></td>
               <td className="py-2 px-3 text-right text-white">{p.surgical_code_count}</td>
               <td className="py-2 px-3 text-right text-white">{p.surgical_claims.toLocaleString()}</td>
               <td className="py-2 px-3 text-right text-white font-semibold">{pct(p.surgical_ratio)}</td>
@@ -309,7 +310,7 @@ function ModifiersTab({ patterns }: { patterns: ModifierAbuse[] }) {
         <tbody>
           {patterns.map((p, i) => (
             <tr key={`${p.npi}-${i}`} className="border-b border-gray-800 hover:bg-gray-800/50">
-              <td className="py-2 px-3"><NpiLink npi={p.npi} /></td>
+              <td className="py-2 px-3"><NpiLink npi={p.npi} /><ProviderFlags npi={p.npi} className="ml-1.5" /></td>
               <td className="py-2 px-3 text-right text-white">{p.em_claims.toLocaleString()}</td>
               <td className="py-2 px-3 text-right text-white">{p.proc_claims.toLocaleString()}</td>
               <td className="py-2 px-3 text-right text-white font-semibold">{pct(p.proc_to_em_ratio)}</td>
@@ -353,7 +354,7 @@ function ImpossibleTab({ patterns }: { patterns: ImpossibleDay[] }) {
         <tbody>
           {patterns.map((p, i) => (
             <tr key={`${p.npi}-${i}`} className="border-b border-gray-800 hover:bg-gray-800/50">
-              <td className="py-2 px-3"><NpiLink npi={p.npi} /></td>
+              <td className="py-2 px-3"><NpiLink npi={p.npi} /><ProviderFlags npi={p.npi} className="ml-1.5" /></td>
               <td className="py-2 px-3 text-right text-white">{p.impossible_months}</td>
               <td className="py-2 px-3 text-right text-red-400 font-bold">{p.max_benes_per_day}</td>
               <td className="py-2 px-3 text-right text-white">{p.max_claims_per_day}</td>

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
 import RiskScoreBadge from '../components/RiskScoreBadge'
+import ProviderFlags from '../components/ProviderFlags'
 import EmptyState from '../components/EmptyState'
 import { fmt } from '../lib/format'
 import { SkeletonTable } from '../components/Skeleton'
@@ -139,7 +140,7 @@ export default function AnomalyDashboard() {
                 className="hover:bg-gray-800/50 cursor-pointer transition-colors"
                 onClick={() => navigate(`/providers/${p.npi}`)}
               >
-                <td className="px-4 py-3 font-mono text-blue-400 text-xs">{p.npi}</td>
+                <td className="px-4 py-3 font-mono text-blue-400 text-xs">{p.npi}<ProviderFlags npi={p.npi} className="ml-1.5" /></td>
                 <td className="px-4 py-3">
                   <RiskScoreBadge score={p.risk_score} size="sm" />
                 </td>

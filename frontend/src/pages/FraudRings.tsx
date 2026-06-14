@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { FraudRingSummary, FraudRingDetail, FraudRingMember, FraudRingEdge } from '../lib/types'
 import { fmt } from '../lib/format'
+import ProviderFlags from '../components/ProviderFlags'
 
 function RiskBadge({ score }: { score: number }) {
   const cls = score >= 50
@@ -265,6 +266,7 @@ function RingDetailPanel({ ringId, onClose }: { ringId: string; onClose: () => v
                 </td>
                 <td className="px-3 py-2 text-gray-300 text-xs max-w-[200px] truncate" title={m.provider_name}>
                   {m.provider_name || '--'}
+                  <ProviderFlags npi={m.npi} className="ml-1.5" />
                 </td>
                 <td className="px-3 py-2 text-gray-500 text-xs">
                   {m.city && m.state ? `${m.city}, ${m.state}` : m.state || '--'}

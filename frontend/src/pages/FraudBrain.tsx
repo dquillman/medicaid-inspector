@@ -6,6 +6,7 @@ import { fmt } from '../lib/format'
 import Breadcrumbs from '../components/Breadcrumbs'
 import Reticle from '../components/Reticle'
 import RedactionField from '../components/RedactionField'
+import ProviderFlags from '../components/ProviderFlags'
 import { threatColor, threatBand, magnitudeGlyph } from '../lib/threat'
 import { gsap, useGSAP, EASE, DUR, prefersReducedMotion } from '../lib/motion'
 import type { FraudBrainProvider } from '../lib/types'
@@ -72,6 +73,7 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
                 {p.provider_name || p.npi}
               </Link>
             </RedactionField>
+            <ProviderFlags npi={p.npi} className="ml-1.5" />
             <span className="font-mono text-xs text-ink-tertiary tracking-wide">{p.npi}</span>
             {p.state && (
               <span className="text-[10px] px-2 py-0.5 bg-surface-2 border border-hairline rounded text-ink-secondary font-mono">{p.state}</span>

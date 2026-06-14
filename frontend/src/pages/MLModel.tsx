@@ -6,6 +6,7 @@ import {
 } from 'recharts'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
+import ProviderFlags from '../components/ProviderFlags'
 import type {
   SupervisedModelStatus,
   SupervisedFeatureImportance,
@@ -379,6 +380,7 @@ export default function MLModel() {
                         </td>
                         <td className="px-4 py-2 text-white text-xs truncate max-w-[200px]">
                           {p.provider_name || '-'}
+                          <ProviderFlags npi={p.npi} className="ml-1.5" />
                         </td>
                         <td className="px-4 py-2 text-gray-400 text-xs">{p.state || '-'}</td>
                         <td className="px-4 py-2 text-right text-gray-300 font-mono text-xs">

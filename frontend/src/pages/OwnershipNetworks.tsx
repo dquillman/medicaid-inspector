@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import type { OwnershipNetworkEntry, OwnershipNpi } from '../lib/types'
 import { fmt } from '../lib/format'
+import ProviderFlags from '../components/ProviderFlags'
 
 function RiskBadge({ score }: { score: number }) {
   const cls = score >= 50
@@ -46,6 +47,7 @@ function ExpandedRow({ npis }: { npis: OwnershipNpi[] }) {
                   </td>
                   <td className="px-4 py-2 text-gray-300 text-xs max-w-[180px] truncate" title={n.name}>
                     {n.name || '--'}
+                    <ProviderFlags npi={n.npi} className="ml-1.5" />
                   </td>
                   <td className="px-4 py-2 text-gray-500 text-xs">
                     {n.entity_type === 'NPI-2' ? 'Org' : 'Ind'}

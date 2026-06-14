@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
+import ProviderFlags from '../components/ProviderFlags'
 import type { PharmacyProviderFlag, DMEProviderFlag } from '../lib/types'
 
 type SortKey = string
@@ -104,7 +105,7 @@ function PharmacyTab() {
                 <tr key={p.npi} className="hover:bg-gray-800/40 cursor-pointer transition-colors"
                     onClick={() => navigate(`/providers/${p.npi}`)}>
                   <td className="px-3 py-2">
-                    <div className="font-medium text-white">{p.provider_name || p.npi}</div>
+                    <div className="font-medium text-white">{p.provider_name || p.npi}<ProviderFlags npi={p.npi} className="ml-1.5" /></div>
                     <div className="text-xs text-gray-500">{p.npi}</div>
                   </td>
                   <td className="px-3 py-2 text-gray-300">{p.state}</td>
@@ -218,7 +219,7 @@ function DMETab() {
                 <tr key={p.npi} className="hover:bg-gray-800/40 cursor-pointer transition-colors"
                     onClick={() => navigate(`/providers/${p.npi}`)}>
                   <td className="px-3 py-2">
-                    <div className="font-medium text-white">{p.provider_name || p.npi}</div>
+                    <div className="font-medium text-white">{p.provider_name || p.npi}<ProviderFlags npi={p.npi} className="ml-1.5" /></div>
                     <div className="text-xs text-gray-500">{p.npi}</div>
                   </td>
                   <td className="px-3 py-2 text-gray-300">{p.state}</td>

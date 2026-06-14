@@ -2463,6 +2463,15 @@ async def provider_oig_tip(npi: str):
     last_m = cached.get("last_month") or "?"
 
     flags = [f for f in (cached.get("signal_results") or cached.get("flags") or []) if f.get("flagged")]
+    # Map fired signals to the OIG Hotline's accepted complaint categories so the
+    # tip lands in the right bucket (the Hotline only handles certain categories).
+    _flag_names = {f.get("signal", "") for f in flags}
+    if "dead_npi_billing" in _flag_names:
+        category = "Medical identity theft involving Medicaid beneficiaries"
+    elif _flag_names & {"corporate_shell_risk", "address_cluster_risk"}:
+        category = "Kickbacks or inducements for referrals by Medicaid providers"
+    else:
+        category = "False or fraudulent claims submitted to Medicaid"
     indicators = []
     for f in flags:
         sig = f.get("signal", "")
@@ -2490,6 +2499,7 @@ async def provider_oig_tip(npi: str):
         f"  Provider type / taxonomy: {specialty}\n"
         f"  Address of record (NPPES): {address_str}\n"
         f"  Program: Medicaid (Title XIX)\n"
+        f"  Complaint category: {category}\n"
         "\n"
         "NATURE OF THE ALLEGATION\n"
         f"  Automated analysis of public CMS/HHS Medicaid payment data flagged this provider\n"
@@ -2504,13 +2514,20 @@ async def provider_oig_tip(npi: str):
         f"SUPPORTING INDICATORS ({len(flags)})\n"
         f"{ind_lines}\n"
         "\n"
-        "HOW THIS WAS IDENTIFIED\n"
-        "  Open-source analysis of the public HHS \"Medicaid Provider Spending by HCPCS\"\n"
-        "  dataset (T-MSIS-derived, 2018–2024), cross-referenced with NPPES, the OIG LEIE,\n"
-        "  and SAM.gov. Methodology: medicaid-inspector.web.app/methods\n"
+        "HOW I CAME TO LEARN OF THIS ACTIVITY\n"
+        "  Independent open-source analysis of the public HHS \"Medicaid Provider Spending by\n"
+        "  HCPCS\" dataset (T-MSIS-derived, 2018–2024), cross-referenced with NPPES, the OIG\n"
+        "  LEIE exclusion list, and SAM.gov. Methodology: medicaid-inspector.web.app/methods\n"
+        "  Corroborating witness: none — findings derive entirely from public data (no\n"
+        "  third-party informant).\n"
         "\n"
         "  No protected health information (PHI) is included; all figures derive from public\n"
-        "  aggregate provider-level data.\n"
+        "  aggregate provider-level data. (HIPAA/privacy concerns are out of OIG Hotline scope\n"
+        "  and would route to HHS OCR — not applicable here.)\n"
+        "\n"
+        "  Note: This complaint, once submitted, is a Privacy-Act record. OIG does not confirm\n"
+        "  receipt or report status; outcome may be sought only via a FOIA records request to\n"
+        "  the OIG FOIA officer no sooner than 6 months after submission.\n"
     )
 
     return {
@@ -2522,6 +2539,7 @@ async def provider_oig_tip(npi: str):
             "provider_type": specialty,
             "address": address_str,
             "program": "Medicaid",
+            "complaint_category": category,
             "risk_score": round(risk, 1),
             "time_period": f"{first_m} to {last_m}",
             "total_medicaid_paid": round(total_paid, 2),
