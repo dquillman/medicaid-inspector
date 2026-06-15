@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useReducedMotion } from 'framer-motion'
 import { mutate } from '../lib/api'
 import { isWebGLAvailable } from '../lib/webgl'
+import { Tilt } from '../components/Tilt'
 
 const HeroConstellation = lazy(() => import('../components/HeroConstellation'))
 
@@ -309,11 +310,11 @@ export default function Landing({ onLogin }: Props) {
           </div>
           <div className="grid md:grid-cols-3 gap-6">
             {FEATURES.map(f => (
-              <div key={f.title} className="card card-glow">
-                <div className="mb-4">{f.icon}</div>
-                <h3 className="text-white font-semibold mb-2">{f.title}</h3>
+              <Tilt key={f.title} className="card card-glow h-full" max={7} lift={10}>
+                <div className="mb-4 tilt-layer-deep">{f.icon}</div>
+                <h3 className="text-white font-semibold mb-2 tilt-layer">{f.title}</h3>
                 <p className="text-sm text-gray-400 leading-relaxed">{f.desc}</p>
-              </div>
+              </Tilt>
             ))}
           </div>
         </div>
@@ -330,9 +331,12 @@ export default function Landing({ onLogin }: Props) {
           </div>
           <div className="grid md:grid-cols-3 gap-6 max-w-5xl mx-auto">
             {PLANS.map(plan => (
-              <div
+              <Tilt
                 key={plan.name}
-                className={`rounded-xl p-6 border flex flex-col ${
+                sceneClassName="h-full"
+                max={plan.highlight ? 6 : 5}
+                lift={plan.highlight ? 12 : 8}
+                className={`h-full rounded-xl p-6 border flex flex-col ${
                   plan.highlight
                     ? 'bg-blue-950/30 border-blue-700 ring-1 ring-blue-600/30 shadow-lg shadow-blue-950/30'
                     : 'bg-gray-900 border-gray-800'
@@ -367,7 +371,7 @@ export default function Landing({ onLogin }: Props) {
                 >
                   {plan.cta}
                 </button>
-              </div>
+              </Tilt>
             ))}
           </div>
         </div>

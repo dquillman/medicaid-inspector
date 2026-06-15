@@ -2,6 +2,33 @@ import { useState, useEffect, useCallback } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
 import { NAV, ANALYTICS_NAV, ADMIN_NAV } from '../lib/navigation'
 import type { NavItem } from '../lib/navigation'
+import { useMotionPref } from '../lib/motionPref'
+
+const MOTION_LABEL = { auto: 'Auto', on: 'On', off: 'Off' } as const
+
+/** Cycle the 3D-depth motion preference: Auto → On → Off → Auto. */
+function MotionToggle({ collapsed }: { collapsed: boolean }) {
+  const [pref, setPref] = useMotionPref()
+  const next = { auto: 'on', on: 'off', off: 'auto' } as const
+  const label = MOTION_LABEL[pref]
+  const lit = pref === 'on'
+  return (
+    <button
+      onClick={() => setPref(next[pref])}
+      className={`w-full flex items-center rounded-md py-2 text-sm transition-colors hover:bg-gray-800 ${
+        collapsed ? 'justify-center px-2' : 'gap-2.5 px-3'
+      } ${lit ? 'text-filament-core' : 'text-gray-500 hover:text-white'}`}
+      title={`Motion effects: ${label} — Auto follows your OS, On forces the 3D tilt, Off disables it. Click to change.`}
+      aria-label={`Motion effects: ${label}. Click to change.`}
+    >
+      {/* cube — implies depth */}
+      <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5} aria-hidden="true">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M21 7.5l-9-5.25L3 7.5m18 0l-9 5.25m9-5.25v9l-9 5.25M3 7.5l9 5.25M3 7.5v9l9 5.25m0-9v9" />
+      </svg>
+      {!collapsed && <span className="truncate">Motion: {label}</span>}
+    </button>
+  )
+}
 
 const STORAGE_KEY = 'mfi_sidebar_collapsed'
 const SECTIONS_KEY = 'mfi_sidebar_sections'
@@ -164,11 +191,13 @@ export default function Sidebar({ mobileOpen, onMobileClose, collapsed, onToggle
         />
       </div>
 
-      {/* Collapse toggle (desktop only) */}
-      <div className="hidden lg:block border-t border-gray-800 p-2">
+      {/* Footer controls */}
+      <div className="border-t border-gray-800 p-2 space-y-0.5">
+        <MotionToggle collapsed={collapsed} />
+        {/* Collapse toggle (desktop only) */}
         <button
           onClick={onToggleCollapse}
-          className="w-full flex items-center justify-center py-2 text-gray-500 hover:text-white transition-colors rounded-md hover:bg-gray-800"
+          className="hidden lg:flex w-full items-center justify-center py-2 text-gray-500 hover:text-white transition-colors rounded-md hover:bg-gray-800"
           aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
         >

@@ -12,13 +12,17 @@
  * R3F components can both use it.
  */
 import { useEffect, useState } from 'react'
+import { resolveReducedMotion, MOTION_CHANGE_EVENT } from './motionPref'
 
 export type PerfTier = 'high' | 'mid' | 'low'
 
-/** Synchronous read — safe in SSR-less SPA, guards for older browsers. */
+/**
+ * Synchronous read — safe in SSR-less SPA, guards for older browsers.
+ * Honors the in-app Motion override (auto/on/off) on top of the OS setting,
+ * so a forced-on user gets motion even if their OS asks to reduce it.
+ */
 export function prefersReducedMotion(): boolean {
-  if (typeof window === 'undefined' || !window.matchMedia) return false
-  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  return resolveReducedMotion()
 }
 
 /** Is a WebGL context actually obtainable? (false on locked-down gov machines). */
@@ -35,15 +39,22 @@ export function isWebGLAvailable(): boolean {
   }
 }
 
-/** Reactive prefers-reduced-motion (updates if the user flips the OS setting). */
+/**
+ * Reactive prefers-reduced-motion. Re-evaluates when the user flips the OS
+ * setting OR toggles the in-app Motion override (auto/on/off).
+ */
 export function useReducedMotion(): boolean {
   const [reduced, setReduced] = useState(prefersReducedMotion)
   useEffect(() => {
-    if (typeof window === 'undefined' || !window.matchMedia) return
-    const mq = window.matchMedia('(prefers-reduced-motion: reduce)')
-    const onChange = () => setReduced(mq.matches)
-    mq.addEventListener?.('change', onChange)
-    return () => mq.removeEventListener?.('change', onChange)
+    if (typeof window === 'undefined') return
+    const recompute = () => setReduced(prefersReducedMotion())
+    const mq = window.matchMedia?.('(prefers-reduced-motion: reduce)')
+    mq?.addEventListener?.('change', recompute)
+    window.addEventListener(MOTION_CHANGE_EVENT, recompute)
+    return () => {
+      mq?.removeEventListener?.('change', recompute)
+      window.removeEventListener(MOTION_CHANGE_EVENT, recompute)
+    }
   }, [])
   return reduced
 }

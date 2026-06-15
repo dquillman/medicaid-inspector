@@ -1,4 +1,5 @@
 import asyncio
+import pathlib
 import re
 from fastapi import APIRouter, HTTPException, Depends
 from data.duckdb_client import query_async, get_parquet_path
@@ -7,6 +8,17 @@ from routes.auth import require_user
 router = APIRouter(prefix="/api/network", tags=["network"], dependencies=[Depends(require_user)])
 
 _NPI_RE = re.compile(r"^\d{10}$")
+
+# Workstation-precomputed ego-network index, sorted by center_npi so a per-NPI
+# lookup is a row-group-pruned `WHERE center_npi = '...'` (milliseconds) instead
+# of a full ~16s scan of the unsorted 2.74 GB dataset. Built by
+# scripts/build_network_index.py and synced from GCS at startup. When absent
+# (e.g. fresh local dev), we fall back to the live materialized full-scan below.
+_NETWORK_INDEX = pathlib.Path(__file__).parent.parent / "network_index.parquet"
+
+
+def _index_available() -> bool:
+    return _NETWORK_INDEX.exists() and _NETWORK_INDEX.stat().st_size > 1_000
 
 # Keep the top-N strongest relationships per direction. The frontend caps the
 # rendered graph at 140 nodes; 50 each way (+ center) stays comfortably under it.
@@ -37,56 +49,68 @@ async def get_network(npi: str):
     if not _NPI_RE.match(npi):
         raise HTTPException(400, "Invalid NPI — must be exactly 10 digits")
 
-    src = f"read_parquet('{get_parquet_path()}')"
-
-    # One scan: `base` is MATERIALIZED so DuckDB evaluates it exactly once, with
-    # the NPI filter pushed down to the parquet row groups. `edges` ranks each
-    # direction and keeps the top-N; `center` is the self aggregate.
-    sql = f"""
-    WITH base AS MATERIALIZED (
-        SELECT
-            BILLING_PROVIDER_NPI_NUM   AS b,
-            SERVICING_PROVIDER_NPI_NUM AS s,
-            TOTAL_PAID                 AS paid,
-            TOTAL_CLAIMS               AS claims
-        FROM {src}
-        WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
-           OR SERVICING_PROVIDER_NPI_NUM = '{npi}'
-    ),
-    edges_agg AS (
-        SELECT
-            CASE WHEN b = '{npi}' THEN s ELSE b END                          AS neighbor_npi,
-            CASE WHEN b = '{npi}' THEN 'billing_to_servicing'
-                 ELSE 'servicing_from_billing' END                          AS edge_type,
-            SUM(paid)  AS edge_weight,
-            COUNT(*)   AS claim_count
-        FROM base
-        WHERE (b = '{npi}' AND s IS NOT NULL AND s != '{npi}')
-           OR (s = '{npi}' AND b IS NOT NULL AND b != '{npi}')
-        GROUP BY 1, 2
-    ),
-    edges AS (
+    if _index_available():
+        # Fast path: read the pre-aggregated, NPI-sorted index. DuckDB prunes to
+        # the row group(s) for this center_npi, so this returns in milliseconds.
+        idx = str(_NETWORK_INDEX).replace("\\", "/")
+        sql = f"""
         SELECT neighbor_npi, edge_type, edge_weight, claim_count
-        FROM (
-            SELECT *,
-                row_number() OVER (PARTITION BY edge_type ORDER BY edge_weight DESC) AS rn
-            FROM edges_agg
+        FROM read_parquet('{idx}')
+        WHERE center_npi = '{npi}'
+        """
+    else:
+        # Fallback: live single-scan materialization (slow but correct) for envs
+        # where the precomputed index hasn't been synced yet.
+        src = f"read_parquet('{get_parquet_path()}')"
+
+        # One scan: `base` is MATERIALIZED so DuckDB evaluates it exactly once, with
+        # the NPI filter pushed down to the parquet row groups. `edges` ranks each
+        # direction and keeps the top-N; `center` is the self aggregate.
+        sql = f"""
+        WITH base AS MATERIALIZED (
+            SELECT
+                BILLING_PROVIDER_NPI_NUM   AS b,
+                SERVICING_PROVIDER_NPI_NUM AS s,
+                TOTAL_PAID                 AS paid,
+                TOTAL_CLAIMS               AS claims
+            FROM {src}
+            WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
+               OR SERVICING_PROVIDER_NPI_NUM = '{npi}'
+        ),
+        edges_agg AS (
+            SELECT
+                CASE WHEN b = '{npi}' THEN s ELSE b END                          AS neighbor_npi,
+                CASE WHEN b = '{npi}' THEN 'billing_to_servicing'
+                     ELSE 'servicing_from_billing' END                          AS edge_type,
+                SUM(paid)  AS edge_weight,
+                COUNT(*)   AS claim_count
+            FROM base
+            WHERE (b = '{npi}' AND s IS NOT NULL AND s != '{npi}')
+               OR (s = '{npi}' AND b IS NOT NULL AND b != '{npi}')
+            GROUP BY 1, 2
+        ),
+        edges AS (
+            SELECT neighbor_npi, edge_type, edge_weight, claim_count
+            FROM (
+                SELECT *,
+                    row_number() OVER (PARTITION BY edge_type ORDER BY edge_weight DESC) AS rn
+                FROM edges_agg
+            )
+            WHERE rn <= {TOP_N}
+        ),
+        center AS (
+            SELECT
+                '{npi}'        AS neighbor_npi,
+                '__center__'   AS edge_type,
+                SUM(paid)      AS edge_weight,
+                SUM(claims)    AS claim_count
+            FROM base
+            WHERE b = '{npi}'
         )
-        WHERE rn <= {TOP_N}
-    ),
-    center AS (
-        SELECT
-            '{npi}'        AS neighbor_npi,
-            '__center__'   AS edge_type,
-            SUM(paid)      AS edge_weight,
-            SUM(claims)    AS claim_count
-        FROM base
-        WHERE b = '{npi}'
-    )
-    SELECT neighbor_npi, edge_type, edge_weight, claim_count FROM edges
-    UNION ALL
-    SELECT neighbor_npi, edge_type, edge_weight, claim_count FROM center
-    """
+        SELECT neighbor_npi, edge_type, edge_weight, claim_count FROM edges
+        UNION ALL
+        SELECT neighbor_npi, edge_type, edge_weight, claim_count FROM center
+        """
 
     try:
         rows = await asyncio.wait_for(query_async(sql), timeout=QUERY_TIMEOUT_SECONDS)

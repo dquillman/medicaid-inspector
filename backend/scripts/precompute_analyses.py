@@ -245,6 +245,16 @@ def main() -> int:
     _write_hcpcs_index(providers)
     print(f"  done in {time.time() - t:.0f}s")
 
+    print("Writing network index parquet (powers instant /api/network/{npi})…")
+    t = time.time()
+    try:
+        from scripts.build_network_index import build_network_index
+        n_net = build_network_index()
+        print(f"  {n_net:,} rows -> network_index.parquet in {time.time() - t:.0f}s")
+    except SystemExit as e:
+        # Built from the LOCAL dataset parquet; skip cleanly if it isn't present.
+        print(f"  skipped: {e}")
+
     print("Backfilling slim-cache fields (specialty etc.)…")
     t = time.time()
     n_fixed = backfill_slim_fields(providers)
@@ -259,6 +269,7 @@ def main() -> int:
     print("Next: upload to GCS ->")
     print('  gcloud storage cp backend/precomputed_analyses.json gs://medicaid-inspector-data/')
     print('  gcloud storage cp backend/hcpcs_index.parquet gs://medicaid-inspector-data/')
+    print('  gcloud storage cp backend/network_index.parquet gs://medicaid-inspector-data/')
     return 0
 
 

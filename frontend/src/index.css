@@ -82,6 +82,61 @@
   .card {
     @apply bg-white border border-gray-200 rounded-xl p-5 dark:bg-surface-1 dark:border-hairline;
   }
+
+  /* ── NOCTURNE depth — "proximity to the lamp" ──────────────────────────────
+     Every card now reads as a physical slab lifted off the surface: a faint
+     warm top edge (lit by the desk lamp above) + a layered drop shadow below.
+     Resting elevation only — pure paint, no transform/stacking change, so it's
+     safe on all ~180 cards app-wide. Interactive tilt is opt-in via .tilt. */
+  .card {
+    box-shadow:
+      0 1px 0 0 rgba(255, 255, 255, 0.5) inset,
+      0 12px 24px -16px rgba(15, 23, 42, 0.25),
+      0 2px 6px -3px rgba(15, 23, 42, 0.12);
+  }
+  .dark .card {
+    box-shadow:
+      0 1px 0 0 rgba(232, 180, 90, 0.05) inset,   /* warm lamp-lit top edge */
+      0 1px 1px 0 rgba(0, 0, 0, 0.30),
+      0 14px 30px -14px rgba(0, 0, 0, 0.62),       /* soft cast shadow */
+      0 4px 10px -6px rgba(0, 0, 0, 0.45);
+  }
+
+  /* Perspective container — wrap a tilt surface in this so children rotate in 3D. */
+  .depth-scene {
+    perspective: 1100px;
+    perspective-origin: center;
+  }
+
+  /* The element useTilt drives. Pointer-follow is instant; release eases back.
+     Compositor-only transforms (rotate/translateZ/scale) — never animates paint. */
+  .tilt {
+    transform-style: preserve-3d;
+    transform: perspective(1100px) rotateX(var(--tilt-x, 0deg)) rotateY(var(--tilt-y, 0deg)) translateZ(0);
+    transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.3s ease;
+    will-change: transform;
+  }
+  .tilt.is-tilting {
+    transition: box-shadow 0.3s ease;   /* drop the lag while actively tracking */
+  }
+  /* Lifted state — deepen the shadow + ignite the filament glow as it rises. */
+  .dark .tilt.is-tilting {
+    box-shadow:
+      0 1px 0 0 rgba(232, 180, 90, 0.10) inset,
+      0 30px 60px -22px rgba(0, 0, 0, 0.78),
+      0 0 22px -2px var(--filament-glow);
+  }
+  /* Children can float at a different depth for genuine parallax inside a card. */
+  .tilt-layer { transform: translateZ(var(--z, 28px)); transform-style: preserve-3d; }
+  .tilt-layer-deep { transform: translateZ(var(--z, 52px)); transform-style: preserve-3d; }
+
+  /* Standalone elevation utilities for non-card panels (modals, popovers, bars). */
+  .elev-1 { box-shadow: 0 8px 18px -12px rgba(0,0,0,0.55), 0 2px 5px -3px rgba(0,0,0,0.4); }
+  .elev-2 { box-shadow: 0 18px 38px -18px rgba(0,0,0,0.66), 0 6px 14px -8px rgba(0,0,0,0.5); }
+  .elev-3 { box-shadow: 0 34px 70px -24px rgba(0,0,0,0.74), 0 12px 26px -12px rgba(0,0,0,0.55); }
+
+  /* Modal/dialog entrance — rises toward the viewer out of the page plane. */
+  .modal-pop { animation: modal-pop 0.34s cubic-bezier(0.16, 1, 0.3, 1) both; }
   /* Classified-label motif — a leading filament tick on label-tier strings. */
   .label-stamp::before {
     content: '▍';
@@ -217,6 +272,11 @@ button, a, input, select, textarea, .card, tr {
   100% { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes modal-pop {
+  0%   { opacity: 0; transform: perspective(1100px) translateY(10px) translateZ(-60px) scale(0.985); }
+  100% { opacity: 1; transform: perspective(1100px) translateY(0)    translateZ(0)     scale(1); }
+}
+
 @keyframes shimmer {
   0% { background-position: -200% 0; }
   100% { background-position: 200% 0; }
@@ -228,10 +288,29 @@ button, a, input, select, textarea, .card, tr {
 }
 
 /* Vestibular accessibility (Section 508) — disable motion for users who ask for it */
+/* Vestibular accessibility backstop. Gated on <html data-motion> so the in-app
+   Motion toggle can override it:
+     - OS reduce + NOT forced-on  → reduce (the [data-motion="on"] exclusion)
+     - forced-off (any OS)        → reduce (the data-motion="off" block below) */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  html:not([data-motion="on"]) *,
+  html:not([data-motion="on"]) *::before,
+  html:not([data-motion="on"]) *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+  /* Flatten any 3D tilt (the JS hook also bails — this is the CSS backstop).
+     Resting elevation shadows are static, so they're kept. */
+  html:not([data-motion="on"]) .tilt { transform: none !important; }
 }
+
+/* Forced OFF — user chose to reduce motion even though the OS allows it. */
+html[data-motion="off"] *,
+html[data-motion="off"] *::before,
+html[data-motion="off"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+html[data-motion="off"] .tilt { transform: none !important; }

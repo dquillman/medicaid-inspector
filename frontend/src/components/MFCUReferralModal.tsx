@@ -196,7 +196,7 @@ export default function MFCUReferralModal({
       className="fixed inset-0 bg-black/60 z-50 flex justify-center overflow-y-auto"
       onClick={handleBackdropClick}
     >
-      <div className="max-w-2xl w-full mx-auto mt-16 mb-8 max-h-[80vh] overflow-y-auto bg-gray-900 border border-gray-700 rounded-xl shadow-2xl self-start">
+      <div className="max-w-2xl w-full mx-auto mt-16 mb-8 max-h-[80vh] overflow-y-auto bg-gray-900 border border-gray-700 rounded-xl shadow-2xl self-start modal-pop elev-3">
         {/* ── Header ─────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800">
           <div>

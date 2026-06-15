@@ -90,7 +90,7 @@ export default function InvestigateModal({ npi, providerName, onClose }: Investi
       onClick={handleBackdropClick}
     >
       <div className="max-w-4xl mx-auto mt-16 mb-8">
-        <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl max-h-[80vh] overflow-y-auto">
+        <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl max-h-[80vh] overflow-y-auto modal-pop elev-3">
           {/* Header */}
           <div className="sticky top-0 bg-gray-900 border-b border-gray-700 px-6 py-4 flex items-center justify-between z-10">
             <div className="min-w-0">

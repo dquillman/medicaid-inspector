@@ -85,7 +85,7 @@ export default function RiskScoreModal() {
           className="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4"
           onClick={e => { if (e.target === e.currentTarget) setOpen(false) }}
         >
-          <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto modal-pop elev-3">
             {/* Header */}
             <div className="flex items-center justify-between p-5 border-b border-gray-800">
               <div>

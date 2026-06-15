@@ -5,6 +5,7 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import CountUp from '../components/CountUp'
+import { Tilt } from '../components/Tilt'
 import ProviderFlags from '../components/ProviderFlags'
 import StateHeatmap from '../components/StateHeatmap'
 import DraggableWidget from '../components/DraggableWidget'
@@ -135,36 +136,36 @@ export default function Overview() {
           </>
         ) : (
           <>
-            <div
+            <Tilt
               className="bg-red-950 border-2 border-red-700 rounded-xl p-5 text-center cursor-pointer hover:border-red-500 transition-colors"
               onClick={() => navigate('/review?status=confirmed_fraud')}
             >
-              <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2 label-stamp">Confirmed Fraud Cases</p>
-              <p className="text-5xl font-black text-red-400">
+              <p className="text-red-400 text-xs font-bold uppercase tracking-widest mb-2 label-stamp tilt-layer">Confirmed Fraud Cases</p>
+              <p className="text-5xl font-black text-red-400 tilt-layer-deep">
                 <CountUp value={confirmedFraud} />
               </p>
-              <p className="text-red-600 text-xs mt-2 uppercase tracking-wider">Open cases requiring action</p>
-            </div>
-            <div
+              <p className="text-red-600 text-xs mt-2 uppercase tracking-wider tilt-layer">Open cases requiring action</p>
+            </Tilt>
+            <Tilt
               className="card py-5 text-center cursor-pointer hover:border-red-800 transition-colors"
               onClick={() => navigate('/providers?risk_min=50')}
             >
-              <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-2 label-stamp">High Risk Providers</p>
-              <p className="text-4xl font-bold text-red-400">
+              <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-2 label-stamp tilt-layer">High Risk Providers</p>
+              <p className="text-4xl font-bold text-red-400 tilt-layer-deep">
                 <CountUp value={summary?.high_risk_providers ?? 0} />
               </p>
-              <p className="text-gray-600 text-xs mt-2 uppercase tracking-wider">Score &ge; 50</p>
-            </div>
-            <div
+              <p className="text-gray-600 text-xs mt-2 uppercase tracking-wider tilt-layer">Score &ge; 50</p>
+            </Tilt>
+            <Tilt
               className="card py-5 text-center cursor-pointer hover:border-yellow-800 transition-colors"
               onClick={() => navigate('/providers?risk_min=10.1')}
             >
-              <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-2 label-stamp">Flagged for Review</p>
-              <p className="text-4xl font-bold text-yellow-400">
+              <p className="text-gray-500 text-xs font-bold uppercase tracking-widest mb-2 label-stamp tilt-layer">Flagged for Review</p>
+              <p className="text-4xl font-bold text-yellow-400 tilt-layer-deep">
                 <CountUp value={summary?.flagged_providers ?? 0} />
               </p>
-              <p className="text-gray-600 text-xs mt-2 uppercase tracking-wider">Score &gt; 10</p>
-            </div>
+              <p className="text-gray-600 text-xs mt-2 uppercase tracking-wider tilt-layer">Score &gt; 10</p>
+            </Tilt>
           </>
         )}
       </div>
@@ -181,30 +182,30 @@ export default function Overview() {
           </>
         ) : (
           <>
-            <div className="card py-3">
-              <p className="text-gray-600 text-xs uppercase tracking-wider label-stamp">Total Spend</p>
-              <p className="text-2xl font-bold mt-1 text-blue-400">
+            <Tilt className="card py-3" max={5} lift={4}>
+              <p className="text-gray-600 text-xs uppercase tracking-wider label-stamp tilt-layer">Total Spend</p>
+              <p className="text-2xl font-bold mt-1 text-blue-400 tilt-layer-deep">
                 {summary ? <CountUp value={summary.total_paid} format={fmt} /> : '---'}
               </p>
-            </div>
-            <div className="card py-3">
-              <p className="text-gray-600 text-xs uppercase tracking-wider label-stamp">Providers Scanned</p>
-              <p className="text-2xl font-bold mt-1 text-purple-400">
+            </Tilt>
+            <Tilt className="card py-3" max={5} lift={4}>
+              <p className="text-gray-600 text-xs uppercase tracking-wider label-stamp tilt-layer">Providers Scanned</p>
+              <p className="text-2xl font-bold mt-1 text-purple-400 tilt-layer-deep">
                 {summary ? <CountUp value={summary.total_providers} /> : '---'}
               </p>
-            </div>
-            <div className="card py-3">
-              <p className="text-gray-600 text-xs uppercase tracking-wider label-stamp">Total Claims</p>
-              <p className="text-2xl font-bold mt-1 text-gray-400">
+            </Tilt>
+            <Tilt className="card py-3" max={5} lift={4}>
+              <p className="text-gray-600 text-xs uppercase tracking-wider label-stamp tilt-layer">Total Claims</p>
+              <p className="text-2xl font-bold mt-1 text-gray-400 tilt-layer-deep">
                 {summary ? <CountUp value={summary.total_claims} /> : '---'}
               </p>
-            </div>
-            <div className="card py-3">
-              <p className="text-gray-600 text-xs uppercase tracking-wider label-stamp">Avg Risk Score</p>
-              <p className="text-2xl font-bold mt-1 text-gray-400">
+            </Tilt>
+            <Tilt className="card py-3" max={5} lift={4}>
+              <p className="text-gray-600 text-xs uppercase tracking-wider label-stamp tilt-layer">Avg Risk Score</p>
+              <p className="text-2xl font-bold mt-1 text-gray-400 tilt-layer-deep">
                 {summary ? <CountUp value={summary.avg_risk_score} decimals={1} /> : '---'}
               </p>
-            </div>
+            </Tilt>
           </>
         )}
       </div>

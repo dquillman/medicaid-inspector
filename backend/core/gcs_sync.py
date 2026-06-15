@@ -34,6 +34,7 @@ _SYNC_FILES = [
     "prescan_slim.json",  # 54MB slim index — safe to load at startup
     "precomputed_analyses.json",  # workstation-precomputed heavy analyses (few MB)
     "hcpcs_index.parquet",        # code-sorted (npi, code, paid, claims) index for per-code search
+    "network_index.parquet",      # NPI-sorted ego-network index for instant /api/network/{npi}
     "roi_data.json",
     "supervised_model.json",  # trained supervised-ML metrics + per-NPI predictions
     "ml_scores.json",         # Isolation Forest anomaly scores

@@ -4,7 +4,12 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ToastProvider } from './lib/toast'
 import { AuthProvider } from './lib/auth'
 import App from './App'
+import { applyMotionPref } from './lib/motionPref'
 import './index.css'
+
+// Mirror the saved Motion preference onto <html data-motion> before first paint
+// so the CSS reduced-motion backstop respects a forced-on/off choice immediately.
+applyMotionPref()
 
 const queryClient = new QueryClient({
   defaultOptions: {

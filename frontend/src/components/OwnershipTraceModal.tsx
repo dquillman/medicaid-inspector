@@ -73,7 +73,7 @@ export default function OwnershipTraceModal({ npi, providerName, onClose }: Owne
         if (e.target === e.currentTarget) onClose()
       }}
     >
-      <div className="max-w-5xl w-full mx-auto mt-12 mb-12 max-h-[85vh] overflow-y-auto bg-gray-900 border border-gray-700 rounded-xl shadow-2xl">
+      <div className="max-w-5xl w-full mx-auto mt-12 mb-12 max-h-[85vh] overflow-y-auto bg-gray-900 border border-gray-700 rounded-xl shadow-2xl modal-pop elev-3">
         {/* Header */}
         <div className="sticky top-0 bg-gray-900 border-b border-gray-800 px-6 py-4 flex items-start justify-between z-10">
           <div>
