@@ -120,6 +120,66 @@ def _write_hcpcs_index(providers: list[dict]) -> None:
     print(f"  {n:,} rows -> {_INDEX_OUT.name} ({size_mb:.1f} MB)")
 
 
+def rebuild_slim_scores(providers: list[dict]) -> int:
+    """Refresh prescan_slim.json scoring fields from a freshly-scored full cache.
+
+    The slim cache is what PROD serves, but a scan rebuild only rewrites the full
+    cache (prescan_cache.json) — without this step prod keeps the OLD risk scores
+    after a data refresh. We MERGE per NPI: overwrite the scoring + aggregate
+    fields, but PRESERVE each provider's NPPES-derived name/specialty/geo, which a
+    scan does not produce (those come from separate NPPES enrichment and must
+    survive a refresh). New NPIs get blank geo, to be enriched later. Returns the
+    number of providers written.
+    """
+    slim_path = _BACKEND / "prescan_slim.json"
+
+    existing: dict[str, dict] = {}
+    top: dict = {}
+    if slim_path.exists():
+        with open(slim_path, encoding="utf-8") as f:
+            cur = json.load(f)
+        top = {k: cur.get(k) for k in ("scan_progress", "prescan_status") if cur.get(k) is not None}
+        for sp in cur.get("providers", []):
+            if sp.get("npi"):
+                existing[sp["npi"]] = sp
+
+    score_fields = (
+        "total_paid", "total_claims", "total_beneficiaries", "distinct_hcpcs",
+        "active_months", "first_month", "last_month", "risk_score",
+    )
+
+    out: list[dict] = []
+    for p in providers:
+        npi = p.get("npi")
+        if not npi:
+            continue
+        prev = existing.get(npi, {})
+        flags = p.get("flags") or []
+        nppes = p.get("nppes") if isinstance(p.get("nppes"), dict) else {}
+        addr = (nppes.get("address") or {}) if nppes else {}
+        tax = (nppes.get("taxonomy") or {}) if nppes else {}
+        rec: dict = {"npi": npi}
+        for k in score_fields:
+            rec[k] = p.get(k, prev.get(k))
+        rec["flags"] = flags
+        rec["flag_count"] = len(flags)
+        # Prefer the full record's enrichment if present, else keep the old slim's.
+        rec["provider_name"] = p.get("provider_name") or nppes.get("name") or prev.get("provider_name", "")
+        rec["specialty"] = p.get("specialty") or tax.get("description") or prev.get("specialty", "")
+        rec["state"] = p.get("state") or addr.get("state") or prev.get("state", "")
+        rec["city"] = p.get("city") or addr.get("city") or prev.get("city", "")
+        rec["zip"] = p.get("zip") or addr.get("zip") or prev.get("zip", "")
+        out.append(rec)
+
+    out.sort(key=lambda r: r.get("total_paid") or 0, reverse=True)
+    slim = {"providers": out, **top}
+    tmp = slim_path.with_suffix(".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(slim, f, separators=(",", ":"), default=str)
+    tmp.replace(slim_path)
+    return len(out)
+
+
 def backfill_slim_fields(providers: list[dict]) -> int:
     """Fill empty top-level fields in prescan_slim.json from the full cache.
 
@@ -254,6 +314,11 @@ def main() -> int:
     except SystemExit as e:
         # Built from the LOCAL dataset parquet; skip cleanly if it isn't present.
         print(f"  skipped: {e}")
+
+    print("Rebuilding slim-cache risk scores from fresh full cache…")
+    t = time.time()
+    n_slim = rebuild_slim_scores(providers)
+    print(f"  done in {time.time() - t:.0f}s ({n_slim:,} providers written to prescan_slim.json)")
 
     print("Backfilling slim-cache fields (specialty etc.)…")
     t = time.time()
