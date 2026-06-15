@@ -22,6 +22,13 @@ if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
   exit 1
 fi
 
+# Single source of truth for the app version is frontend/package.json. Inject
+# it so the backend (/health and the FastAPI docs) reports the same version as
+# the UI instead of a hand-maintained constant that drifts.
+APP_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' frontend/package.json | head -1)
+APP_VERSION="${APP_VERSION:-dev}"
+echo "==> App version: ${APP_VERSION}"
+
 echo "==> Deploying backend to Cloud Run..."
 gcloud run deploy "$SERVICE_NAME" \
   --source . \
@@ -34,7 +41,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --timeout 300 \
   --allow-unauthenticated \
   --port 8080 \
-  --set-env-vars "PYTHONUNBUFFERED=1,ADMIN_PASSWORD=${ADMIN_PASSWORD}"
+  --set-env-vars "PYTHONUNBUFFERED=1,ADMIN_PASSWORD=${ADMIN_PASSWORD},APP_VERSION=${APP_VERSION}"
 
 echo "==> Backend deployed!"
 echo "Service URL:"

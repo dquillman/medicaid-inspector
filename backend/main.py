@@ -270,10 +270,15 @@ async def lifespan(app: FastAPI):
     yield
 
 
+# Canonical app version. Injected at deploy time from frontend/package.json
+# (the single source of truth) via the APP_VERSION env var — see
+# deploy-backend.sh. Falls back to "dev" for local runs.
+APP_VERSION = os.environ.get("APP_VERSION", "dev")
+
 app = FastAPI(
     title="Medicaid Fraud Detection API",
     description="Streams provider-level Medicaid claims from remote Parquet via DuckDB httpfs.",
-    version="2.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -542,7 +547,7 @@ async def ml_status():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat(), "version": "2.1.5"}
+    return {"status": "healthy", "timestamp": datetime.utcnow().isoformat(), "version": APP_VERSION}
 
 
 @app.get("/ready")
