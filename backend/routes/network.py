@@ -1,87 +1,119 @@
+import asyncio
 import re
 from fastapi import APIRouter, HTTPException, Depends
-from data.duckdb_client import query_async, PARQUET
+from data.duckdb_client import query_async, get_parquet_path
 from routes.auth import require_user
 
 router = APIRouter(prefix="/api/network", tags=["network"], dependencies=[Depends(require_user)])
 
 _NPI_RE = re.compile(r"^\d{10}$")
 
+# Keep the top-N strongest relationships per direction. The frontend caps the
+# rendered graph at 140 nodes; 50 each way (+ center) stays comfortably under it.
+TOP_N = 50
+
+# Wall-clock guard. A handful of mega-providers (e.g. $260M billers) touch so
+# many rows that the aggregation scan runs long. Rather than hang the UI, bail
+# out with a clean error. Because run_query() caches by SQL string, a query
+# that eventually finishes in the background populates the cache, so a retry
+# typically returns instantly.
+QUERY_TIMEOUT_SECONDS = 45
+
 
 @router.get("/{npi}")
 async def get_network(npi: str):
     """
     Ego network for a given NPI.
-    Finds all NPIs that appear as SERVICING_PROVIDER_NPI_NUM when this NPI is the BILLING provider,
-    and all BILLING_PROVIDER_NPI_NUM when this NPI is the SERVICING provider.
-    Returns Cytoscape-ready nodes + edges.
+    Finds all NPIs that appear as SERVICING_PROVIDER_NPI_NUM when this NPI is the
+    BILLING provider, and all BILLING_PROVIDER_NPI_NUM when this NPI is the
+    SERVICING provider. Returns Cytoscape-ready nodes + edges.
+
+    Single materialized scan: the parquet is read once, filtered to only the
+    rows that touch this NPI, then both edge directions and the center
+    aggregate are derived from that in-memory slice — instead of three separate
+    full scans of the remote file.
     """
     # Validate NPI format before interpolating into SQL (prevent SQL injection)
     if not _NPI_RE.match(npi):
         raise HTTPException(400, "Invalid NPI — must be exactly 10 digits")
 
-    # Providers this NPI billed for (as billing provider, they serviced others)
-    billed_for_sql = f"""
-    SELECT DISTINCT
-        SERVICING_PROVIDER_NPI_NUM              AS neighbor_npi,
-        SUM(TOTAL_PAID)                         AS edge_weight,
-        COUNT(*)                                AS claim_count,
-        'billing_to_servicing'                  AS edge_type
-    FROM read_parquet('{PARQUET}')
-    WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
-      AND SERVICING_PROVIDER_NPI_NUM IS NOT NULL
-      AND SERVICING_PROVIDER_NPI_NUM != '{npi}'
-    GROUP BY SERVICING_PROVIDER_NPI_NUM
-    ORDER BY edge_weight DESC
-    LIMIT 50
-    """
+    src = f"read_parquet('{get_parquet_path()}')"
 
-    # Providers that billed this NPI as servicing provider
-    billed_by_sql = f"""
-    SELECT DISTINCT
-        BILLING_PROVIDER_NPI_NUM               AS neighbor_npi,
-        SUM(TOTAL_PAID)                        AS edge_weight,
-        COUNT(*)                               AS claim_count,
-        'servicing_from_billing'               AS edge_type
-    FROM read_parquet('{PARQUET}')
-    WHERE SERVICING_PROVIDER_NPI_NUM = '{npi}'
-      AND BILLING_PROVIDER_NPI_NUM IS NOT NULL
-      AND BILLING_PROVIDER_NPI_NUM != '{npi}'
-    GROUP BY BILLING_PROVIDER_NPI_NUM
-    ORDER BY edge_weight DESC
-    LIMIT 50
-    """
-
-    # Self aggregate for center node
-    self_sql = f"""
-    SELECT
-        SUM(TOTAL_PAID)     AS total_paid,
-        SUM(TOTAL_CLAIMS)   AS total_claims
-    FROM read_parquet('{PARQUET}')
-    WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
-    """
-
-    import asyncio
-    billed_for, billed_by, self_rows = await asyncio.gather(
-        query_async(billed_for_sql),
-        query_async(billed_by_sql),
-        query_async(self_sql),
+    # One scan: `base` is MATERIALIZED so DuckDB evaluates it exactly once, with
+    # the NPI filter pushed down to the parquet row groups. `edges` ranks each
+    # direction and keeps the top-N; `center` is the self aggregate.
+    sql = f"""
+    WITH base AS MATERIALIZED (
+        SELECT
+            BILLING_PROVIDER_NPI_NUM   AS b,
+            SERVICING_PROVIDER_NPI_NUM AS s,
+            TOTAL_PAID                 AS paid,
+            TOTAL_CLAIMS               AS claims
+        FROM {src}
+        WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
+           OR SERVICING_PROVIDER_NPI_NUM = '{npi}'
+    ),
+    edges_agg AS (
+        SELECT
+            CASE WHEN b = '{npi}' THEN s ELSE b END                          AS neighbor_npi,
+            CASE WHEN b = '{npi}' THEN 'billing_to_servicing'
+                 ELSE 'servicing_from_billing' END                          AS edge_type,
+            SUM(paid)  AS edge_weight,
+            COUNT(*)   AS claim_count
+        FROM base
+        WHERE (b = '{npi}' AND s IS NOT NULL AND s != '{npi}')
+           OR (s = '{npi}' AND b IS NOT NULL AND b != '{npi}')
+        GROUP BY 1, 2
+    ),
+    edges AS (
+        SELECT neighbor_npi, edge_type, edge_weight, claim_count
+        FROM (
+            SELECT *,
+                row_number() OVER (PARTITION BY edge_type ORDER BY edge_weight DESC) AS rn
+            FROM edges_agg
+        )
+        WHERE rn <= {TOP_N}
+    ),
+    center AS (
+        SELECT
+            '{npi}'        AS neighbor_npi,
+            '__center__'   AS edge_type,
+            SUM(paid)      AS edge_weight,
+            SUM(claims)    AS claim_count
+        FROM base
+        WHERE b = '{npi}'
     )
+    SELECT neighbor_npi, edge_type, edge_weight, claim_count FROM edges
+    UNION ALL
+    SELECT neighbor_npi, edge_type, edge_weight, claim_count FROM center
+    """
 
-    self_data = self_rows[0] if self_rows else {"total_paid": 0, "total_claims": 0}
-    all_edges = billed_for + billed_by
+    try:
+        rows = await asyncio.wait_for(query_async(sql), timeout=QUERY_TIMEOUT_SECONDS)
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            504,
+            f"NPI {npi} has too large a network to compute within "
+            f"{QUERY_TIMEOUT_SECONDS}s. The result is still being cached in the "
+            f"background — try again in a moment.",
+        )
 
-    if not all_edges and not self_data["total_paid"]:
+    center_row = next((r for r in rows if r["edge_type"] == "__center__"), None)
+    edge_rows = [r for r in rows if r["edge_type"] != "__center__"]
+
+    self_paid = (center_row["edge_weight"] if center_row else 0) or 0
+    self_claims = (center_row["claim_count"] if center_row else 0) or 0
+
+    if not edge_rows and not self_paid:
         raise HTTPException(404, f"NPI {npi} not found in dataset")
 
-    # Build node set
-    neighbor_npis = list({e["neighbor_npi"] for e in all_edges})
-
-    # Aggregate neighbor stats
-    nodes = [{"id": npi, "total_paid": self_data["total_paid"], "is_center": True}]
-    for e in all_edges:
+    # Build node set — center first, then unique neighbors
+    nodes = [{"id": npi, "total_paid": self_paid, "total_claims": self_claims, "is_center": True}]
+    seen = {npi}
+    for e in edge_rows:
         n = e["neighbor_npi"]
-        if not any(node["id"] == n for node in nodes):
+        if n not in seen:
+            seen.add(n)
             nodes.append({"id": n, "total_paid": 0, "is_center": False})
 
     edges = [
@@ -92,7 +124,7 @@ async def get_network(npi: str):
             "claim_count": e["claim_count"],
             "type": e["edge_type"],
         }
-        for e in all_edges
+        for e in edge_rows
     ]
 
     return {"center_npi": npi, "nodes": nodes, "edges": edges}
