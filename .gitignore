@@ -86,6 +86,7 @@ backend/data/*.duckdb
 backend/precomputed_analyses.json
 backend/hcpcs_index.parquet
 backend/network_index.parquet
+hf_token.txt
 backend/supervised_model.json
 backend/ml_scores.json
 backend/npi_deactivations.json
