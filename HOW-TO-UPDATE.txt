@@ -1,0 +1,70 @@
+============================================================
+  HOW TO UPDATE THE APP'S DATA
+============================================================
+
+You have two buttons in this folder. Double-click them like any app.
+
+  * "Update App Data"     -> gets the newest government data, rebuilds
+                             everything, and puts it live. (the main one)
+
+  * "Check For New Data"  -> just tells you if newer data exists.
+                             Downloads nothing, changes nothing.
+
+
+------------------------------------------------------------
+  THE NORMAL ROUTINE (about once a month)
+------------------------------------------------------------
+
+  1. Double-click "Check For New Data".
+       - If it says UP TO DATE  -> you're done, nothing to do.
+       - If it says NEW AVAILABLE -> go to step 2.
+
+  2. Double-click "Update App Data".
+       - A black window opens and does everything by itself.
+       - It can take 30-60 minutes. Leave the window open.
+       - When it finishes it says DONE.
+       - If it says STOPPED, read the message and send it to Claude.
+         Nothing gets broken.
+
+
+------------------------------------------------------------
+  FIRST-TIME SETUP (only once, ever)
+------------------------------------------------------------
+
+The first time you click "Update App Data", it needs a free "key"
+to log in to the government data site. It will open two web pages:
+
+  1. Token page: sign in (or make a free account), create a token
+     (choose "Read"), and copy it.
+  2. Dataset page: if it asks you to agree to terms, click Agree.
+
+Then paste the copied key into a file named:
+
+     hf_token.txt
+
+...in THIS folder, and save it. (Just the key, nothing else.)
+
+Double-click "Update App Data" again. From now on it just works -
+no setup, no typing.
+
+
+------------------------------------------------------------
+  WANT IT ON YOUR DESKTOP?
+------------------------------------------------------------
+
+Right-click "Update App Data.cmd" -> Send to -> Desktop (create
+shortcut). Rename the icon to whatever you like. Now it's a button
+on your desktop.
+
+
+------------------------------------------------------------
+  GOOD TO KNOW
+------------------------------------------------------------
+
+  * "Update App Data" is safe to run anytime. If there's no new
+    government data, it just rebuilds and republishes what you have.
+  * Your key in hf_token.txt stays on your computer and is never
+    shared or uploaded.
+  * 2024 data from the government is still marked "preliminary," so
+    a new release may revise recent months. That's normal.
+============================================================
