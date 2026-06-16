@@ -188,6 +188,26 @@ def cmd_status() -> int:
         except Exception:
             pass
 
+    # Source release check — is HHS publishing a newer dataset than we ingested?
+    # Needs HF_TOKEN; must never crash the status board.
+    try:
+        import ingest_source_parquet as ing
+        tok = ing._token()
+        if not tok:
+            print("\n  source release: set HF_TOKEN to check HHS for a newer dataset release"
+                  " (refresh-data.ps1 -CheckSource)")
+        else:
+            cfg = ing._load_config()
+            meta = ing._get_meta(tok)
+            sha, have = meta.get("sha"), cfg.get("source_sha")
+            if have == sha:
+                print(f"\n  source release: UP TO DATE (HF {ing.REPO} @ {sha})")
+            else:
+                print(f"\n  source release: NEW AVAILABLE — HF latest {sha}, last ingested {have or 'never'}"
+                      "\n    run: refresh-data.ps1 -Ingest -Update -Deploy")
+    except (Exception, SystemExit) as e:  # noqa: BLE001
+        print(f"\n  source release: check skipped ({type(e).__name__})")
+
     print("\nLegend: [OK] current  [STALE] older than source  [NEEDS-UPLOAD] local ahead of GCS"
           "  [GCS-AHEAD]/[GCS-ONLY] prod ahead  [MISSING] absent")
     print("To rebuild + upload:  refresh-data.ps1 -Update      (add -Deploy to ship a fresh revision)")
