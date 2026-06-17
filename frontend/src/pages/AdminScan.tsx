@@ -631,9 +631,6 @@ export default function AdminScan() {
         </button>
       </div>
 
-      {/* Dataset Discovery & Refresh */}
-      <DatasetInfoCard />
-
       {/* Data Quality Validation */}
       <DataQualityCard />
 
@@ -720,111 +717,6 @@ function UpdateDataCard() {
             </li>
           ))}
         </ul>
-      )}
-    </div>
-  )
-}
-
-
-/* ────────────────────────────────────────────────────────────────────────────
-   Dataset Info & Auto-Refresh Card (#8)
-   ──────────────────────────────────────────────────────────────────────────── */
-function DatasetInfoCard() {
-  const queryClient = useQueryClient()
-  const [checking, setChecking] = useState(false)
-  const [refreshResult, setRefreshResult] = useState<{
-    update_available: boolean; message: string; new_url?: string | null; new_date?: string | null
-  } | null>(null)
-
-  const { data: info } = useQuery({
-    queryKey: ['dataset-info'],
-    queryFn: api.datasetInfo,
-    refetchInterval: 60000,
-  })
-
-  const handleCheck = async () => {
-    setChecking(true)
-    try {
-      const result = await api.datasetRefresh()
-      setRefreshResult(result)
-      queryClient.invalidateQueries({ queryKey: ['dataset-info'] })
-    } finally {
-      setChecking(false)
-    }
-  }
-
-  const handleSwitch = async (url: string) => {
-    if (!confirm(`Switch to the newer dataset?\n\nURL: ${url}\n\nYou will need to re-scan providers after switching.`)) return
-    await api.datasetSwitch(url)
-    setRefreshResult(null)
-    queryClient.invalidateQueries({ queryKey: ['dataset-info'] })
-    queryClient.invalidateQueries({ queryKey: ['data-status'] })
-  }
-
-  return (
-    <div className="card space-y-3">
-      <h2 className="text-base font-semibold text-ink-secondary">Dataset Information</h2>
-
-      {info ? (
-        <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-xs">
-          <div>
-            <span className="text-ink-tertiary">Dataset Date:</span>{' '}
-            <span className="text-ink-primary font-mono">{info.detected_date || 'Unknown'}</span>
-          </div>
-          <div>
-            <span className="text-ink-tertiary">Row Count:</span>{' '}
-            <span className="text-ink-primary font-mono">{info.row_count?.toLocaleString() ?? 'Not yet counted'}</span>
-          </div>
-          <div className="col-span-2">
-            <span className="text-ink-tertiary">Active Path:</span>{' '}
-            <span className="text-ink-secondary font-mono text-[11px] break-all">{info.active_path}</span>
-          </div>
-          <div className="col-span-2">
-            <span className="text-ink-tertiary">Source:</span>{' '}
-            <span className={`font-medium ${info.is_local ? 'text-green-400' : 'text-yellow-400'}`}>
-              {info.is_local ? 'Local file' : 'Remote URL'}
-            </span>
-          </div>
-          {info.last_checked && (
-            <div className="col-span-2">
-              <span className="text-ink-tertiary">Last checked for updates:</span>{' '}
-              <span className="text-ink-secondary">{new Date(info.last_checked * 1000).toLocaleString()}</span>
-            </div>
-          )}
-        </div>
-      ) : (
-        <p className="text-xs text-ink-tertiary">Loading dataset info...</p>
-      )}
-
-      <div className="flex gap-3 items-center">
-        <button
-          onClick={handleCheck}
-          disabled={checking}
-          className="px-4 py-2 bg-cyan-700 hover:bg-cyan-600 disabled:bg-cyan-900 disabled:opacity-50 text-white text-sm font-medium rounded transition-colors"
-        >
-          {checking ? 'Checking...' : 'Check for Updates'}
-        </button>
-      </div>
-
-      {refreshResult && (
-        <div className={`rounded-lg px-4 py-3 text-xs ${
-          refreshResult.update_available
-            ? 'bg-green-950/30 border border-green-800 text-green-300'
-            : 'bg-surface-2/60 border border-hairline text-ink-secondary'
-        }`}>
-          <p>{refreshResult.message}</p>
-          {refreshResult.update_available && refreshResult.new_url && (
-            <div className="mt-2 space-y-1">
-              <p className="text-ink-secondary">New version: <span className="font-mono text-green-300">{refreshResult.new_date}</span></p>
-              <button
-                onClick={() => handleSwitch(refreshResult.new_url!)}
-                className="px-3 py-1 bg-green-700 hover:bg-green-600 text-white text-xs font-medium rounded transition-colors"
-              >
-                Switch to New Dataset
-              </button>
-            </div>
-          )}
-        </div>
       )}
     </div>
   )
