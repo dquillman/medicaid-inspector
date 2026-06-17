@@ -560,14 +560,14 @@ export default function ProviderExplorer() {
   const handleBulkAddToReview = useCallback(async () => {
     await Promise.all(
       Array.from(selectedNpis).map(npi =>
-        mutate<{ ok: boolean }>('POST', '/review-queue', { npi, status: 'pending' }).catch(() => {})
+        mutate<{ ok: boolean }>('POST', '/review/add', { npi, status: 'pending' }).catch(() => {})
       )
     )
     setSelectedNpis(new Set())
   }, [selectedNpis])
 
   const handleAddSingleToReview = useCallback(async (npi: string) => {
-    await mutate<{ ok: boolean }>('POST', '/review-queue', { npi, status: 'pending' }).catch(() => {})
+    await mutate<{ ok: boolean }>('POST', '/review/add', { npi, status: 'pending' }).catch(() => {})
   }, [])
 
   // ── CSV export ────────────────────────────────────────────────────────────
