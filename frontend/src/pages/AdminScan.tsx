@@ -210,7 +210,7 @@ function MupCacheCard() {
   })
 
   const handleRefresh = async () => {
-    if (!confirm('Download CMS MUP-by-Provider via parallel API pagination (~3 GB JSON → ~180 MB parquet, ~2-3 min)? Enables the diagnosis-procedure mismatch signal during batch scans.')) return
+    if (!confirm('Re-download CMS MUP-by-Provider (~3 GB JSON → ~180 MB parquet, ~2-3 min)?')) return
     await api.mupRefresh()
     queryClient.invalidateQueries({ queryKey: ['mup-status'] })
   }
@@ -280,26 +280,11 @@ function MupCacheCard() {
     )
   }
 
-  return (
-    <div className="card border-hairline bg-surface-1/40 space-y-1 py-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="text-sm">
-          <span className="text-ink-secondary font-semibold">MUP diagnosis cache: not downloaded</span>
-          <p className="text-xs text-ink-tertiary mt-0.5">
-            Download CMS Medicare diagnosis data to enable the diagnosis-procedure mismatch signal during scans.
-            Without it the signal only fires on the provider detail page (via the live CMS API).
-          </p>
-        </div>
-        <button
-          onClick={handleRefresh}
-          className="px-4 py-2 bg-blue-700 hover:bg-blue-600 text-white text-sm font-medium rounded transition-colors shrink-0"
-        >
-          Download
-        </button>
-      </div>
-      {dl.error && <p className="ml-1 text-xs text-red-400">Last error: {dl.error}</p>}
-    </div>
-  )
+  // "Not downloaded" is an optional what-if, not a required action: the
+  // diagnosis-procedure signal still works via the live CMS API without it, and
+  // the download can't even persist on the hosted site. So we don't nag — the
+  // card only appears once the cache is actually present (handled above).
+  return null
 }
 
 
