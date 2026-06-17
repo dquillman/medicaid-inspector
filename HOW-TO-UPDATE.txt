@@ -2,29 +2,38 @@
   HOW TO UPDATE THE APP'S DATA
 ============================================================
 
-You have two buttons in this folder. Double-click them like any app.
+There is really just ONE button:
 
-  * "Update App Data"     -> gets the newest government data, rebuilds
-                             everything, and puts it live. (the main one)
+  * "Update App Data"  ->  Double-click it. It's SMART:
+       - It checks first.
+       - If nothing is new, it says "ALREADY UP TO DATE" in a few
+         seconds and stops. (Safe to click anytime - it won't waste
+         an hour rebuilding when there's nothing to do.)
+       - If new government data exists, it downloads it, rebuilds
+         everything, and publishes it live - all by itself.
 
-  * "Check For New Data"  -> just tells you if newer data exists.
-                             Downloads nothing, changes nothing.
+  (There's also a "Check For New Data" button that only peeks and
+   changes nothing, but you don't need it - "Update App Data"
+   already checks first.)
 
 
 ------------------------------------------------------------
-  THE NORMAL ROUTINE (about once a month)
+  THE NORMAL ROUTINE
 ------------------------------------------------------------
 
-  1. Double-click "Check For New Data".
-       - If it says UP TO DATE  -> you're done, nothing to do.
-       - If it says NEW AVAILABLE -> go to step 2.
+  Whenever you feel like it (about once a month is plenty):
+  double-click "Update App Data". That's the whole routine.
 
-  2. Double-click "Update App Data".
-       - A black window opens and does everything by itself.
-       - It can take 30-60 minutes. Leave the window open.
-       - When it finishes it says DONE.
-       - If it says STOPPED, read the message and send it to Claude.
+       - "ALREADY UP TO DATE" -> great, nothing to do.
+       - "DONE - ... published live" -> it found new data and
+         updated everything for you.
+       - "SETUP NEEDED" -> your key is missing/expired; it opens
+         the setup pages (see FIRST-TIME SETUP below).
+       - "STOPPED" -> read the message, send it to Claude.
          Nothing gets broken.
+
+  A black window opens while it works. If it found new data it can
+  take 30-60 minutes - just leave the window open until it finishes.
 
 
 ------------------------------------------------------------

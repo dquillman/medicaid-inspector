@@ -3,6 +3,9 @@
   Medicaid Inspector — one-button data refresh + freshness check.
 
 .DESCRIPTION
+  -Smart                 : THE one button. Checks what's needed and does ONLY that —
+                           says "already up to date" (fast, no work) or downloads +
+                           rebuilds + publishes the update. Used by "Update App Data.cmd".
   No args                : show the data-freshness table (local vs GCS, what's stale).
   -CheckSource           : ask HHS (Hugging Face) whether a newer dataset release exists.
   -Ingest                : download the latest HHS source parquet + normalize it locally.
@@ -25,6 +28,7 @@
 #>
 [CmdletBinding()]
 param(
+  [switch]$Smart,
   [switch]$CheckSource,
   [switch]$Ingest,
   [switch]$Update,
@@ -45,6 +49,35 @@ if (-not (Test-Path $py)) { throw "Python interpreter not found at $py" }
 
 $script = Join-Path $root 'backend\scripts\refresh_data.py'
 $ingestScript = Join-Path $root 'backend\scripts\ingest_source_parquet.py'
+
+function Invoke-Deploy {
+  Write-Host "==> Publishing a fresh backend revision..." -ForegroundColor Cyan
+  # gcloud on this box must use the SDK's bundled python (the store python 3.13
+  # is missing cryptography), and ADMIN_PASSWORD comes from Secret Manager.
+  $env:CLOUDSDK_PYTHON = 'G:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\platform\bundledpython\python.exe'
+  $env:TMP = 'G:\temp'; $env:TMPDIR = 'G:\temp'; $env:TEMP = 'G:\temp'
+  $env:ADMIN_PASSWORD = (& gcloud secrets versions access latest --secret=admin-password --project=medicaid-inspector)
+  if ([string]::IsNullOrWhiteSpace($env:ADMIN_PASSWORD)) { throw "ADMIN_PASSWORD came back empty - check gcloud/CLOUDSDK_PYTHON" }
+  & bash deploy-backend.sh
+  if ($LASTEXITCODE -ne 0) { throw "Backend deploy failed (exit $LASTEXITCODE)" }
+  Write-Host "==> Deploy complete." -ForegroundColor Green
+}
+
+# -Smart: THE one-button path (used by the "Update App Data" desktop button).
+# Checks what's needed, does only that, and deploys iff it actually rebuilt
+# something. Exit codes are interpreted by the caller:
+#   10 = already up to date (no work, no deploy)    2 = token setup needed
+#    0 = work done + deployed                      else = error
+if ($Smart) {
+  & $py -X utf8 $script smart
+  $rc = $LASTEXITCODE
+  if ($rc -eq 10) { exit 10 }
+  if ($rc -eq 2)  { exit 2 }
+  if ($rc -ne 0)  { throw "Update failed (exit $rc)" }
+  Invoke-Deploy
+  Write-Host "==> Done - your data is updated and live." -ForegroundColor Green
+  exit 0
+}
 
 # -CheckSource: just ask HHS whether a newer release exists, then stop.
 if ($CheckSource -and -not ($Ingest -or $Update)) {
@@ -82,16 +115,7 @@ if ($Update) {
 }
 
 if ($Deploy) {
-  Write-Host "==> Deploying a fresh backend revision so prod re-downloads the artifacts..." -ForegroundColor Cyan
-  # gcloud on this box must use the SDK's bundled python (the store python 3.13
-  # is missing cryptography), and ADMIN_PASSWORD comes from Secret Manager.
-  $env:CLOUDSDK_PYTHON = 'G:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\platform\bundledpython\python.exe'
-  $env:TMP = 'G:\temp'; $env:TMPDIR = 'G:\temp'; $env:TEMP = 'G:\temp'
-  $env:ADMIN_PASSWORD = (& gcloud secrets versions access latest --secret=admin-password --project=medicaid-inspector)
-  if ([string]::IsNullOrWhiteSpace($env:ADMIN_PASSWORD)) { throw "ADMIN_PASSWORD came back empty - check gcloud/CLOUDSDK_PYTHON" }
-  & bash deploy-backend.sh
-  if ($LASTEXITCODE -ne 0) { throw "Backend deploy failed (exit $LASTEXITCODE)" }
-  Write-Host "==> Deploy complete." -ForegroundColor Green
+  Invoke-Deploy
 }
 
 Write-Host "==> Refresh complete. Run '.\refresh-data.ps1' to see the new freshness table." -ForegroundColor Green

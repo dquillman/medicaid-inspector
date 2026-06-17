@@ -282,10 +282,79 @@ def cmd_update(args) -> int:
     return 0
 
 
+# Exit codes the PowerShell wrapper keys off of (keep in sync with refresh-data.ps1):
+SMART_DID_WORK = 0     # rebuilt something -> wrapper should deploy
+SMART_NEEDS_TOKEN = 2  # no/invalid Hugging Face token -> wrapper shows setup steps
+SMART_UP_TO_DATE = 10  # nothing to do -> wrapper skips the deploy
+
+
+def cmd_smart() -> int:
+    """Do ONLY what's needed: check the source + derived freshness, then either
+    say 'already up to date' (fast, no work) or download/rebuild/upload exactly
+    what changed. The PowerShell wrapper deploys afterward iff we did work.
+
+    Decision:
+      * new government release          -> ingest + full rebuild + upload
+      * source same, derived data stale -> full rebuild + upload (refresh scores)
+      * everything current              -> nothing to do
+    """
+    print("Checking what needs updating…\n")
+
+    # 1) Token must be present and valid before we promise anything.
+    import ingest_source_parquet as ing
+    if not ing._token():
+        print("Setup needed: no Hugging Face token saved (see HOW-TO-UPDATE.txt).")
+        return SMART_NEEDS_TOKEN
+    try:
+        meta = ing._get_meta(ing._token())
+    except (SystemExit, Exception) as e:  # noqa: BLE001
+        print(f"Setup needed: {e}")
+        return SMART_NEEDS_TOKEN
+
+    sha = meta.get("sha")
+    cfg = ing._load_config()
+    source_new = bool(sha) and sha != cfg.get("source_sha")
+
+    # 2) Is our derived (prod-served) data stale by the monthly cadence?
+    derived_stale = True
+    try:
+        from services.precomputed_store import get_generated_at
+        from datetime import datetime, timezone
+        ga = get_generated_at()
+        if ga:
+            age_days = (datetime.now(timezone.utc)
+                        - datetime.fromisoformat(ga.replace("Z", "+00:00"))).days
+            derived_stale = age_days > 35
+            print(f"  derived data: rebuilt {age_days} days ago")
+    except Exception:
+        pass
+    print(f"  government source: {'NEW release available' if source_new else 'unchanged'}")
+
+    if not source_new and not derived_stale:
+        print("\nEverything is already up to date — nothing to do.")
+        return SMART_UP_TO_DATE
+
+    # 3) Do exactly what's needed.
+    t0 = time.time()
+    if source_new:
+        _run_step("Download the new government data", [str(_SCRIPTS / "ingest_source_parquet.py"), "ingest"])
+    _run_step("Rebuild scan cache", [str(_SCRIPTS / "rebuild_prescan_bulk.py")])
+    _run_step("Rebuild analyses + indexes + scores", [str(_SCRIPTS / "precompute_analyses.py")])
+
+    upload_keys = [a["key"] for a in ARTIFACTS if a["syncable"] and a["key"] != "deactivations"]
+    if source_new:
+        upload_keys = ["parquet", *upload_keys]
+    _upload(upload_keys)
+
+    print(f"\nRebuilt and uploaded in {(time.time() - t0)/60:.1f} min.")
+    return SMART_DID_WORK
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Medicaid Inspector data-refresh control center")
     sub = ap.add_subparsers(dest="cmd")
     sub.add_parser("status", help="show data freshness (local vs GCS)")
+    sub.add_parser("smart", help="check + do only what's needed (powers the one-button update)")
     up = sub.add_parser("update", help="rebuild derived artifacts and upload to GCS")
     up.add_argument("--download", action="store_true", help="first mirror the latest parquet from GCS")
     up.add_argument("--upload-parquet", action="store_true", help="also upload the local parquet (new source data)")
@@ -295,6 +364,8 @@ def main() -> int:
 
     if args.cmd == "update":
         return cmd_update(args)
+    if args.cmd == "smart":
+        return cmd_smart()
     return cmd_status()  # default
 
 
