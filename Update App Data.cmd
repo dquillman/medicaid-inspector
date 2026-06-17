@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions
+setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
 title Update App Data - Medicaid Inspector
 
@@ -8,30 +8,30 @@ REM  ONE-BUTTON DATA UPDATE (smart)
 REM  Double-click anytime. It checks first: if nothing is new it
 REM  says "already up to date" and stops; if there's new government
 REM  data it downloads it, rebuilds everything, and publishes live.
+REM  First run walks you through the free one-time key setup.
 REM ============================================================
 
-REM Load the saved Hugging Face token (paste it once into hf_token.txt).
+REM Load the saved key, if there is one.
 if not defined HF_TOKEN if exist "hf_token.txt" set /p HF_TOKEN=<hf_token.txt
+if not defined HF_TOKEN goto :setup
 
-if not defined HF_TOKEN goto :needtoken
-
+:run
 echo.
 echo  Checking what needs updating...
 echo  (If new data is found this can take 30-60 minutes. Leave the window open.)
 echo.
 powershell -ExecutionPolicy Bypass -NoProfile -File "refresh-data.ps1" -Smart
-set "RC=%ERRORLEVEL%"
+set "RC=!ERRORLEVEL!"
 echo.
 echo  ============================================================
-if "%RC%"=="0" (
+if "!RC!"=="0" (
   echo   DONE - new data was downloaded, rebuilt, and published live.
-) else if "%RC%"=="10" (
+) else if "!RC!"=="10" (
   echo   ALREADY UP TO DATE - nothing needed doing. You're all set.
-) else if "%RC%"=="2" (
-  echo   SETUP NEEDED - your Hugging Face key is missing or expired.
-  echo   Opening the setup pages...
+) else if "!RC!"=="2" (
+  echo   Your key is missing or expired - let's set it up again.
   echo  ============================================================
-  goto :needtoken
+  goto :setup
 ) else (
   echo   STOPPED - something needs attention. Read the messages
   echo   above and send them to Claude. Nothing was broken.
@@ -40,29 +40,37 @@ echo  ============================================================
 echo.
 echo  Press any key to close this window...
 pause >nul
-exit /b %RC%
+exit /b !RC!
 
-:needtoken
+:setup
 echo.
 echo  ============================================================
-echo   FIRST-TIME SETUP (only needed once)
+echo   ONE-TIME SETUP - get your free key (about a minute)
 echo  ============================================================
 echo.
-echo   The government data lives on a site called Hugging Face.
-echo   You need a free "key" so this button can download it.
-echo.
-echo   Two web pages will open now:
-echo     1. Token page - sign in (or make a free account),
-echo        create a token (choose "Read"), and copy it.
-echo     2. Dataset page - if it asks you to agree to terms, click agree.
-echo.
-echo   Then: paste your copied token into the file named
-echo         hf_token.txt   in this same folder, and save.
-echo.
-echo   After that, just double-click this button again.
+echo   Two web pages will open:
+echo     1. KEY page: make a free account if asked, then click
+echo        "New token" / "Create new token", choose "Read",
+echo        create it, and COPY the key (starts with hf_).
+echo     2. DATA page: if it shows an "Agree" button, click it.
 echo.
 start "" "https://huggingface.co/settings/tokens"
 start "" "https://huggingface.co/datasets/HHS-Official/medicaid-provider-spending"
-echo  Press any key to close this window...
-pause >nul
-exit /b 1
+echo   Then come back here, paste the key below (right-click pastes),
+echo   and press Enter. Or just close this window to finish later.
+echo.
+set /p "TOK=Paste your key here: "
+if "!TOK!"=="" (
+  echo.
+  echo  No key entered - no problem. Double-click this button again
+  echo  whenever you're ready.
+  echo.
+  echo  Press any key to close...
+  pause >nul
+  exit /b 1
+)
+> hf_token.txt echo !TOK!
+set "HF_TOKEN=!TOK!"
+echo.
+echo  Saved. Starting the update now...
+goto :run
