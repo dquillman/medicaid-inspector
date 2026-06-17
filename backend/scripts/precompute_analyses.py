@@ -325,6 +325,17 @@ def main() -> int:
     n_fixed = backfill_slim_fields(providers)
     print(f"  done in {time.time() - t:.0f}s ({n_fixed:,} providers updated)")
 
+    print("Retraining ML anomaly model (Isolation Forest) on the fresh cache…")
+    t = time.time()
+    try:
+        from services.ml_scorer import train_and_score
+        ml = train_and_score()
+        n_scored = ml.get("scored") or ml.get("provider_count") or len(ml.get("ml_scores") or {})
+        print(f"  done in {time.time() - t:.0f}s "
+              f"({n_scored} scored, {ml.get('anomaly_count', '?')} anomalies -> ml_scores.json)")
+    except Exception as e:  # noqa: BLE001 — never let an optional layer block the refresh
+        print(f"  ML retrain skipped: {e}")
+
     tmp = _OUT.with_suffix(".json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(out, f, separators=(",", ":"), default=str)

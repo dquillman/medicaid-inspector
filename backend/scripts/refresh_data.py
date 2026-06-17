@@ -57,6 +57,7 @@ ARTIFACTS = [
     {"key": "analyses",     "path": "precomputed_analyses.json", "blob": "precomputed_analyses.json", "kind": "derived",  "syncable": True,  "desc": "Precomputed heavy analyses"},
     {"key": "hcpcs_index",  "path": "hcpcs_index.parquet",       "blob": "hcpcs_index.parquet",       "kind": "derived",  "syncable": True,  "desc": "Per-code search index"},
     {"key": "network_index","path": "network_index.parquet",     "blob": "network_index.parquet",     "kind": "derived",  "syncable": True,  "desc": "Ego-network index (fast /api/network)"},
+    {"key": "ml_scores",    "path": "ml_scores.json",            "blob": "ml_scores.json",            "kind": "derived",  "syncable": True,  "desc": "ML anomaly scores (Isolation Forest)"},
     {"key": "deactivations","path": "npi_deactivations.json",    "blob": "npi_deactivations.json",    "kind": "external", "syncable": True,  "desc": "Deactivated-NPI lookup (NPPES)"},
 ]
 
