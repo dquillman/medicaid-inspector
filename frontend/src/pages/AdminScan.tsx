@@ -564,6 +564,8 @@ export default function AdminScan() {
     queryClient.invalidateQueries({ queryKey: ['summary'] })
   }, [queryClient])
 
+  const [showAdvanced, setShowAdvanced] = useState(false)
+
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4">
@@ -575,67 +577,78 @@ export default function AdminScan() {
             Manage data sources, provider scanning, and rescoring
           </p>
         </div>
-        <DataRefreshGuide />
+        <button
+          onClick={() => setShowAdvanced((v) => !v)}
+          className="px-3 py-1.5 text-xs rounded-md border border-hairline text-ink-tertiary hover:text-ink-secondary hover:bg-surface-2 transition-colors shrink-0"
+        >
+          {showAdvanced ? 'Hide advanced' : 'Advanced'}
+        </button>
       </div>
 
       <UpdateDataCard />
 
-      <DataFreshnessStrip />
+      {showAdvanced && (
+        <div className="space-y-6">
+          <DataRefreshGuide />
 
-      <DataSourceCard />
-      <MupCacheCard />
+          <DataFreshnessStrip />
 
-      <ScanControl
-        status={prescanStatus}
-        cachedCount={summary?.total_providers ?? 0}
-        isLocal={ds?.is_local ?? false}
-        onScanBatch={handleScanBatch}
-        onReset={handleReset}
-        onAutoStart={handleAutoStart}
-        onAutoStop={handleAutoStop}
-        onRescore={handleRescore}
-        onSmartScan={handleSmartScan}
-        rescoring={rescoring}
-        rescoreResult={rescoreResult}
-      />
+          <DataSourceCard />
+          <MupCacheCard />
 
-      {rescoreResult && (
-        <div className="card border-green-800 bg-green-950/20 py-2 px-3 text-sm text-green-300 flex items-center justify-between">
-          <span>{rescoreResult}</span>
-          <button
-            onClick={() => setRescoreResult(null)}
-            className="text-xs text-ink-tertiary hover:text-ink-secondary"
-          >
-            dismiss
-          </button>
+          <ScanControl
+            status={prescanStatus}
+            cachedCount={summary?.total_providers ?? 0}
+            isLocal={ds?.is_local ?? false}
+            onScanBatch={handleScanBatch}
+            onReset={handleReset}
+            onAutoStart={handleAutoStart}
+            onAutoStop={handleAutoStop}
+            onRescore={handleRescore}
+            onSmartScan={handleSmartScan}
+            rescoring={rescoring}
+            rescoreResult={rescoreResult}
+          />
+
+          {rescoreResult && (
+            <div className="card border-green-800 bg-green-950/20 py-2 px-3 text-sm text-green-300 flex items-center justify-between">
+              <span>{rescoreResult}</span>
+              <button
+                onClick={() => setRescoreResult(null)}
+                className="text-xs text-ink-tertiary hover:text-ink-secondary"
+              >
+                dismiss
+              </button>
+            </div>
+          )}
+
+          {/* ML Model Training */}
+          <div className="card space-y-3">
+            <h2 className="text-base font-semibold text-ink-secondary">ML Anomaly Detection (Isolation Forest)</h2>
+            <p className="text-xs text-ink-tertiary">
+              Train an unsupervised ML model on all cached providers to detect statistical outliers
+              beyond rule-based signals.
+            </p>
+            <button
+              onClick={async () => {
+                const result = await api.trainMl()
+                alert(`ML model trained: ${result.provider_count} providers, ${result.anomaly_count} anomalies detected`)
+                queryClient.invalidateQueries({ queryKey: ['ml-status'] })
+              }}
+              disabled={!summary?.total_providers}
+              className="px-4 py-2 bg-indigo-700 hover:bg-indigo-600 disabled:bg-indigo-900 disabled:opacity-50 text-white text-sm font-medium rounded transition-colors"
+            >
+              Train ML Model
+            </button>
+          </div>
+
+          {/* Data Quality Validation */}
+          <DataQualityCard />
+
+          {/* Data Lineage */}
+          <DataLineageCard />
         </div>
       )}
-
-      {/* ML Model Training */}
-      <div className="card space-y-3">
-        <h2 className="text-base font-semibold text-ink-secondary">ML Anomaly Detection (Isolation Forest)</h2>
-        <p className="text-xs text-ink-tertiary">
-          Train an unsupervised ML model on all cached providers to detect statistical outliers
-          beyond rule-based signals.
-        </p>
-        <button
-          onClick={async () => {
-            const result = await api.trainMl()
-            alert(`ML model trained: ${result.provider_count} providers, ${result.anomaly_count} anomalies detected`)
-            queryClient.invalidateQueries({ queryKey: ['ml-status'] })
-          }}
-          disabled={!summary?.total_providers}
-          className="px-4 py-2 bg-indigo-700 hover:bg-indigo-600 disabled:bg-indigo-900 disabled:opacity-50 text-white text-sm font-medium rounded transition-colors"
-        >
-          Train ML Model
-        </button>
-      </div>
-
-      {/* Data Quality Validation */}
-      <DataQualityCard />
-
-      {/* Data Lineage */}
-      <DataLineageCard />
     </div>
   )
 }
