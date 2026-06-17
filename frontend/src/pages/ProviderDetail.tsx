@@ -862,7 +862,7 @@ export default function ProviderDetail() {
                 <p className="text-xs text-gray-400">{samData.error}</p>
                 {samData.error.includes('SAM_API_KEY') && (
                   <a
-                    href="https://sam.gov/profile/details"
+                    href="https://sam.gov/content/api"
                     target="_blank"
                     rel="noopener noreferrer"
                     className="inline-block text-xs px-3 py-1.5 bg-blue-900/40 border border-blue-700 rounded text-blue-400 hover:bg-blue-900/60 transition-colors"

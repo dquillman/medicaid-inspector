@@ -85,6 +85,16 @@ async def data_freshness():
     except Exception:
         pass
 
+    # If no scan-lineage record exists, fall back to the derived-data build time
+    # (a refresh rebuilds derived data from a fresh scan) so the UI shows a real
+    # date instead of "unknown".
+    if not last_scan and generated_at:
+        try:
+            from datetime import datetime
+            last_scan = datetime.fromisoformat(generated_at.replace("Z", "+00:00")).timestamp()
+        except Exception:
+            pass
+
     return {
         "now": now,
         "core_dataset": {
