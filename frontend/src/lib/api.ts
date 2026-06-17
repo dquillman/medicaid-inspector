@@ -263,6 +263,7 @@ export const api = {
 
   dataStatus: () => get<{
     is_local: boolean
+    is_cloud?: boolean
     local_path: string | null
     expected_path: string
     remote_url: string

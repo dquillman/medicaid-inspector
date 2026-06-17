@@ -150,6 +150,21 @@ function DataSourceCard() {
     )
   }
 
+  // On the hosted site there's no persistent local disk to download to, so
+  // reading from the cloud is the normal, correct mode — present it calmly
+  // rather than as a "download me" warning that can't help here.
+  if (ds.is_cloud) {
+    return (
+      <div className="card border-hairline bg-surface-2/40 flex items-center gap-2 py-3">
+        <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+        <span className="text-sm text-ink-secondary">
+          Reading data from cloud storage — normal for the live site. To change the data, use the{' '}
+          <span className="text-ink-primary font-medium">Update Data</span> button above.
+        </span>
+      </div>
+    )
+  }
+
   return (
     <div className="card border-yellow-800 bg-yellow-950/20 space-y-2 py-3">
       <div className="flex items-center justify-between gap-4">

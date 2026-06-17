@@ -629,8 +629,13 @@ async def data_status():
             local_mtime = resolved.stat().st_mtime
         except OSError:
             pass
+    # On Cloud Run there is no persistent local disk, so reading from the remote
+    # URL is the normal, correct mode — the UI should present it calmly rather
+    # than as a "download me" warning (which can't help on the server).
+    is_cloud = os.environ.get("K_SERVICE") is not None
     return {
         "is_local":        is_local(),
+        "is_cloud":        is_cloud,
         "local_path":      str(resolved) if is_local() else None,
         "expected_path":   str(resolved),   # always shown so user knows where to put the file
         "remote_url":      settings.PARQUET_URL,

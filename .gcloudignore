@@ -8,6 +8,12 @@ backend/tests
 backend/backups
 backend/evidence
 
+# Local dev config must NOT ship to Cloud Run — its Windows LOCAL_PARQUET_PATH
+# is a dead path on the Linux container and made the app show a bogus
+# "Using remote dataset" path. Cloud Run gets its config via --set-env-vars.
+.env
+backend/.env
+
 # Large data files — never upload to Cloud Build
 # NOTE: backend/data/ contains Python modules (duckdb_client.py, etc.)
 # so we exclude only the large data artifacts within it, not the dir.
