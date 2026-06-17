@@ -578,6 +578,8 @@ export default function AdminScan() {
         <DataRefreshGuide />
       </div>
 
+      <UpdateDataCard />
+
       <DataFreshnessStrip />
 
       <DataSourceCard />
@@ -637,6 +639,88 @@ export default function AdminScan() {
 
       {/* Data Lineage */}
       <DataLineageCard />
+    </div>
+  )
+}
+
+
+/* ────────────────────────────────────────────────────────────────────────────
+   Update Data — one button: check every source, say "up to date" or hand off
+   to the desktop "Update App Data" button (the live server can't rebuild the
+   gigabyte-scale data itself).
+   ──────────────────────────────────────────────────────────────────────────── */
+function UpdateDataCard() {
+  const [checking, setChecking] = useState(false)
+  const [result, setResult] = useState<Awaited<ReturnType<typeof api.updateCheck>> | null>(null)
+
+  const run = async () => {
+    setChecking(true)
+    try {
+      setResult(await api.updateCheck())
+    } finally {
+      setChecking(false)
+    }
+  }
+
+  const icon = (s: string) => (s === 'update' ? '⬆' : s === 'current' ? '✓' : '•')
+  const iconColor = (s: string) =>
+    s === 'update' ? 'text-amber-400' : s === 'current' ? 'text-green-400' : 'text-ink-tertiary'
+
+  return (
+    <div className="card space-y-4">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-lg font-bold text-ink-primary uppercase tracking-wide">Update Data</h2>
+          <p className="text-ink-tertiary text-xs mt-0.5">
+            Checks every data source for newer government data. Nothing is changed unless you act on it.
+          </p>
+        </div>
+        <button
+          onClick={run}
+          disabled={checking}
+          className="px-6 py-3 bg-filament-core hover:brightness-110 disabled:opacity-50 text-black text-sm font-bold rounded-lg uppercase tracking-wide transition-all"
+        >
+          {checking ? 'Checking…' : 'Update Data'}
+        </button>
+      </div>
+
+      {result && (
+        result.up_to_date ? (
+          <div className="rounded-lg border border-green-800 bg-green-950/30 px-4 py-3">
+            <p className="text-green-300 font-semibold text-sm">✓ {result.message}</p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-amber-700 bg-amber-950/25 px-4 py-3 space-y-3">
+            <p className="text-amber-300 font-semibold text-sm">⬆ {result.message}</p>
+            <div className="rounded-md bg-surface-2/60 border border-hairline px-3 py-2 text-xs text-ink-secondary space-y-1">
+              <p className="text-ink-primary font-semibold">To apply it:</p>
+              <p>
+                On your computer, double-click{' '}
+                <span className="font-mono text-filament-core">Update App Data</span> in the project
+                folder. It downloads the new data, rebuilds everything, and publishes it
+                {' '}(see <span className="font-mono">HOW-TO-UPDATE.txt</span>).
+              </p>
+              <p className="text-ink-tertiary">
+                The live site can’t rebuild the data itself — the files are too large for the server.
+              </p>
+            </div>
+          </div>
+        )
+      )}
+
+      {result && (
+        <ul className="space-y-1.5">
+          {result.items.map((it) => (
+            <li key={it.name} className="flex items-start gap-2 text-xs">
+              <span className={iconColor(it.status)}>{icon(it.status)}</span>
+              <span>
+                <span className="text-ink-primary font-medium">{it.name}</span>
+                <span className="text-ink-tertiary"> — {it.detail}</span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   )
 }

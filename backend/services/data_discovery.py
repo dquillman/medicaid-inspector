@@ -113,13 +113,32 @@ async def check_for_updates() -> dict:
                 except Exception:
                     pass
 
-        if result["remote_mtime"] and result["local_mtime"]:
+        # Reference time = when we last *processed* the data. Locally that's the
+        # parquet's mtime. When serving straight from the remote URL there's no
+        # local file, so use the derived-data build time (precompute) as the
+        # proxy — only then does "remote is newer" honestly mean a rebuild would
+        # pick up new data. (Previously this branch blindly returned True whenever
+        # we weren't local, which made prod ALWAYS claim a newer dataset existed.)
+        ref_mtime = result["local_mtime"]
+        if ref_mtime is None:
+            try:
+                from services.precomputed_store import get_generated_at
+                from datetime import datetime
+                ga = get_generated_at()
+                if ga:
+                    ref_mtime = datetime.fromisoformat(ga.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                ref_mtime = None
+        result["reference_mtime"] = ref_mtime
+
+        if result["remote_mtime"] and ref_mtime:
             # 60s slack to ignore clock-skew false positives
-            result["update_available"] = result["remote_mtime"] > result["local_mtime"] + 60
+            result["update_available"] = result["remote_mtime"] > ref_mtime + 60
         elif result["remote_size_bytes"] and result["local_size_bytes"]:
             result["update_available"] = result["remote_size_bytes"] != result["local_size_bytes"]
-        elif not is_local():
-            result["update_available"] = True
+        else:
+            # Not enough signal to tell — don't cry wolf.
+            result["update_available"] = False
 
         if result["update_available"]:
             result["message"] = "Newer dataset available at the configured remote URL"

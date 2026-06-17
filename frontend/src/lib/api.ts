@@ -1002,6 +1002,14 @@ export const api = {
   datasetSwitch: (url: string) =>
     mutate<{ ok: boolean }>('POST', '/admin/dataset-switch', { url }),
 
+  updateCheck: () =>
+    mutate<{
+      checked_at: number
+      up_to_date: boolean
+      message: string
+      items: { name: string; status: 'current' | 'update' | 'info'; detail: string }[]
+    }>('POST', '/admin/update-check'),
+
   dataQuality: () => get<{
     last_run: number | null
     status: string

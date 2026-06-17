@@ -107,6 +107,66 @@ async def dataset_refresh():
     return await check_for_updates()
 
 
+@router.post("/update-check")
+async def update_check():
+    """One honest verdict across all data sources, for the 'Update Data' button.
+
+    Read-only — never downloads or rebuilds (the heavy rebuild runs on the
+    operator's workstation via the desktop 'Update App Data' button). Returns
+    an overall up_to_date flag plus a per-source breakdown so the UI can show
+    exactly what (if anything) needs refreshing.
+    """
+    import time as _t
+    from datetime import datetime, timezone
+
+    items: list[dict] = []
+
+    # 1) Core dataset — is the source file newer than what we last built from?
+    try:
+        from services.data_discovery import check_for_updates
+        core = await check_for_updates()
+        if core.get("update_available"):
+            items.append({"name": "Core Medicaid dataset", "status": "update",
+                          "detail": "A newer source file is available — a rebuild would pick it up."})
+        else:
+            items.append({"name": "Core Medicaid dataset", "status": "current",
+                          "detail": core.get("message") or "Up to date."})
+    except Exception as e:  # noqa: BLE001
+        items.append({"name": "Core Medicaid dataset", "status": "info",
+                      "detail": f"Could not check ({e})."})
+
+    # 2) Derived data (scores + indexes) — age vs the monthly refresh cadence.
+    try:
+        from services.precomputed_store import get_generated_at
+        ga = get_generated_at()
+        if ga:
+            age_days = (datetime.now(timezone.utc)
+                        - datetime.fromisoformat(ga.replace("Z", "+00:00"))).days
+            if age_days > 35:
+                items.append({"name": "Scores & indexes", "status": "update",
+                              "detail": f"Last rebuilt {age_days} days ago — a monthly refresh is recommended."})
+            else:
+                items.append({"name": "Scores & indexes", "status": "current",
+                              "detail": f"Rebuilt {age_days} days ago."})
+        else:
+            items.append({"name": "Scores & indexes", "status": "info", "detail": "Build date unknown."})
+    except Exception as e:  # noqa: BLE001
+        items.append({"name": "Scores & indexes", "status": "info", "detail": f"Could not check ({e})."})
+
+    # 3) Exclusions / payments refresh themselves.
+    items.append({"name": "Exclusions & payments (OIG / SAM / Open Payments)", "status": "current",
+                  "detail": "Updated automatically — nothing to do."})
+
+    up_to_date = not any(i["status"] == "update" for i in items)
+    return {
+        "checked_at": _t.time(),
+        "up_to_date": up_to_date,
+        "message": "Everything is up to date — no update needed." if up_to_date
+                   else "New data is available.",
+        "items": items,
+    }
+
+
 class DatasetSwitchBody(BaseModel):
     url: HttpUrl  # Pydantic validates that this is a well-formed http/https URL
 
