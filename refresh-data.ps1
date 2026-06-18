@@ -39,7 +39,11 @@ param(
   [switch]$WithDeactivations
 )
 
-$ErrorActionPreference = 'Stop'
+# NOT 'Stop': under Stop, a native command (python/gcloud) writing ANY line to
+# stderr — e.g. a non-fatal "[gcs_sync] Failed to upload" warning — is turned
+# into a terminating NativeCommandError and aborts the whole run even though the
+# command exited 0. We gate on explicit $LASTEXITCODE checks + throws instead.
+$ErrorActionPreference = 'Continue'
 $root = $PSScriptRoot
 
 # G:\Python311 is the only interpreter with the full backend deps (duckdb,

@@ -226,9 +226,18 @@ def _run_step(title: str, argv: list[str]) -> None:
     print(f"  -> {title} done in {time.time() - t:.0f}s")
 
 
+# The Python GCS client's application-default identity has READ but not WRITE on
+# the bucket (uploads 403). gcloud's active account does have write, so uploads
+# go through `gcloud storage cp` (which needs the SDK's bundled python on this
+# box — the store python 3.13 breaks gcloud).
+_GCLOUD_PY = r"G:\Program Files (x86)\Google\Cloud SDK\google-cloud-sdk\platform\bundledpython\python.exe"
+
+
 def _upload(keys: list[str]) -> None:
     print(f"\n{'='*70}\n  Uploading to gs://{_BUCKET}\n{'='*70}")
-    bucket = _bucket()
+    env = {**os.environ}
+    if pathlib.Path(_GCLOUD_PY).exists():
+        env["CLOUDSDK_PYTHON"] = _GCLOUD_PY
     for art in ARTIFACTS:
         if art["key"] not in keys:
             continue
@@ -238,8 +247,13 @@ def _upload(keys: list[str]) -> None:
             continue
         t = time.time()
         size_mb = p.stat().st_size / (1024 * 1024)
-        print(f"  uploading {art['blob']} ({size_mb:.1f} MB)…")
-        bucket.blob(art["blob"]).upload_from_filename(str(p))
+        print(f"  uploading {art['blob']} ({size_mb:.1f} MB via gcloud)…")
+        r = subprocess.run(
+            ["gcloud", "storage", "cp", str(p), f"gs://{_BUCKET}/{art['blob']}"],
+            env=env,
+        )
+        if r.returncode != 0:
+            raise SystemExit(f"upload failed for {art['blob']} (gcloud exit {r.returncode})")
         print(f"    done in {time.time() - t:.0f}s")
 
 
