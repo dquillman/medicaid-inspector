@@ -8,6 +8,7 @@ import { FunnelIcon, FunnelSolidIcon, ExclamationTriangleIcon } from '../compone
 import RiskScoreBadge from '../components/RiskScoreBadge'
 import { threatColor } from '../lib/threat'
 import ProviderFlags from '../components/ProviderFlags'
+import { topFraudOdds } from '../lib/signals'
 import BulkActionBar from '../components/BulkActionBar'
 import Sparkline from '../components/Sparkline'
 import EmptyState from '../components/EmptyState'
@@ -268,7 +269,7 @@ const COLUMNS: ColDef[] = [
   { key: 'provider_name',       label: 'Name' },
   { key: 'oig_excluded',        label: 'OIG' },
   { key: 'risk_score',          label: 'Risk Score',   filterable: true },
-  { key: 'flag_count',          label: 'Flags',        filterable: true },
+  { key: 'flag_count',          label: 'Top Fraud Signal', filterable: true },
   { key: 'state',               label: 'State',        filterable: true },
   { key: 'city',                label: 'City',         filterable: true },
   { key: 'total_paid',          label: 'Total Paid',   filterable: true },
@@ -789,6 +790,7 @@ export default function ProviderExplorer() {
               const isFocused = focusedRow === idx
               const reviewStatus = (p as any).review_status as string | undefined
               const isHighRisk = p.risk_score >= 50
+              const topOdd = topFraudOdds((p as any).flags, 1)[0]
               const isSelected = selectedNpis.has(p.npi)
               return (
                 <tr
@@ -832,9 +834,12 @@ export default function ProviderExplorer() {
                     }
                   </td>
                   <td className="px-3 py-2.5"><RiskScoreBadge score={p.risk_score} size="sm" /></td>
-                  <td className="px-3 py-2.5">
-                    {p.flags.length > 0
-                      ? <span className="text-red-400 text-xs font-medium inline-flex items-center gap-1"><ExclamationTriangleIcon className="w-3.5 h-3.5" /> {p.flags.length} flag{p.flags.length !== 1 ? 's' : ''}</span>
+                  <td className="px-3 py-2.5 max-w-[180px]">
+                    {topOdd
+                      ? <div className="flex flex-col leading-tight" title={topOdd.reason}>
+                          <span className="text-red-300 text-xs font-medium truncate">{topOdd.label}</span>
+                          <span className="text-gray-500 text-[10px]">{p.flags.length} signal{p.flags.length !== 1 ? 's' : ''} · {topOdd.strength}%</span>
+                        </div>
                       : <span className="text-gray-600 text-xs">--</span>
                     }
                   </td>

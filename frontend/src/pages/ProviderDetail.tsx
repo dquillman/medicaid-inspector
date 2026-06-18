@@ -16,6 +16,7 @@ import SpendingTimeline from '../components/SpendingTimeline'
 import HcpcsBreakdown from '../components/HcpcsBreakdown'
 import DiagnosisMixCard from '../components/DiagnosisMixCard'
 import FraudFlagsTable from '../components/FraudFlagsTable'
+import TopFraudOdds from '../components/TopFraudOdds'
 import RiskScoreModal from '../components/RiskScoreModal'
 import ProviderTimelineAnalysis from '../components/ProviderTimelineAnalysis'
 import SpecialtyBenchmark from '../components/SpecialtyBenchmark'
@@ -612,6 +613,9 @@ export default function ProviderDetail() {
           </div>
         ))}
       </div>
+
+      {/* Top Fraud Odds — the most likely fraud type(s) for this provider, ranked */}
+      <TopFraudOdds flags={detail.signal_results ?? []} riskScore={detail.risk_score} />
 
       <div className="grid grid-cols-2 gap-5">
         {/* Fraud flags */}
