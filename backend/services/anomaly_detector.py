@@ -18,14 +18,16 @@ composite is capped at 100 by min(composite, 100) in the scorer):
   bene_concentration              8  — extremely high claims-per-bene ratio / phantom billing
   upcoding_pattern               10  — concentration on highest-value codes vs. peers
   address_cluster_risk            5  — 3+ providers sharing same physical address
-  oig_excluded                   10  — provider on OIG LEIE exclusion list (automatic full score)
+  oig_excluded                  100  — provider on OIG LEIE exclusion list (per-se fraud → maxes the score)
   specialty_mismatch              8  — billing outside NPPES taxonomy specialty (cross-specialty fraud)
   corporate_shell_risk            7  — one authorized official controlling 3+ billing NPIs
   geographic_impossibility        6  — NPPES state vs. billing state mismatch (cross-state fraud)
-  dead_npi_billing               10  — deactivated NPI with billing activity (identity theft)
+  dead_npi_billing               90  — deactivated NPI with billing activity (per-se unauthorized → near-maxes the score)
   new_provider_explosion          7  — newly enumerated NPI with disproportionately high billing
 
-Total possible weight: 171. The min(composite, 100) cap in the scorer handles overflow.
+Total possible weight: 351. The min(composite, 100) cap in the scorer handles overflow.
+The two "per-se fraud" signals (oig_excluded=100, dead_npi_billing=90) are weighted
+to dominate so PROVABLE fraud ranks above merely-unusual statistical outliers.
 
 References:
   OIG Medicaid Fraud Control Units Annual Report FY2024
@@ -768,13 +770,13 @@ def oig_excluded(npi: str) -> SignalResult:
         name = record.get("name", "Unknown") if record else "Unknown"
         excl_date = record.get("excl_date", "unknown date") if record else "unknown date"
         return _result(
-            "oig_excluded", 1.0, 10,
+            "oig_excluded", 1.0, 100,
             f"Provider {npi} is on OIG LEIE exclusion list "
             f"(excluded {excl_date}, name: {name})",
             True,
         )
 
-    return _result("oig_excluded", 0.0, 10, "Not on OIG exclusion list", False)
+    return _result("oig_excluded", 0.0, 100, "Not on OIG exclusion list", False)
 
 
 # ── 15. Dead NPI billing ─────────────────────────────────────────────────
@@ -805,7 +807,7 @@ def dead_npi_billing(row: dict) -> SignalResult:
             dd = None
         if dd:
             return _result(
-                "dead_npi_billing", 1.0, 10,
+                "dead_npi_billing", 1.0, 90,
                 f"NPI deactivated by CMS on {dd} (NPPES) but has Medicaid billing "
                 f"activity — per-se unauthorized billing / possible identity theft",
                 True,
@@ -814,7 +816,7 @@ def dead_npi_billing(row: dict) -> SignalResult:
     nppes = row.get("nppes") or {}
     if not nppes:
         return _result(
-            "dead_npi_billing", 0.0, 10,
+            "dead_npi_billing", 0.0, 90,
             "No NPPES data available — cannot verify NPI status",
             False,
         )
@@ -838,7 +840,7 @@ def dead_npi_billing(row: dict) -> SignalResult:
     if is_deactivated:
         date_info = f", deactivated {deactivation_date}" if deactivation_date else ""
         return _result(
-            "dead_npi_billing", 1.0, 10,
+            "dead_npi_billing", 1.0, 90,
             f"NPI deactivated (status: {status or 'D'}{date_info}) but has "
             f"Medicaid billing activity — possible identity theft or "
             f"unauthorized billing",
@@ -847,7 +849,7 @@ def dead_npi_billing(row: dict) -> SignalResult:
 
     # Active / normal status
     return _result(
-        "dead_npi_billing", 0.0, 10,
+        "dead_npi_billing", 0.0, 90,
         f"NPI status: {status or 'active'} — active and valid",
         False,
     )
