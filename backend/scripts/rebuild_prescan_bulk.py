@@ -50,11 +50,16 @@ def _ensure_reference_data() -> None:
             print(f"  WARN: npi_deactivations.json missing and GCS fetch failed ({e}) — dead_npi_billing will be DARK")
     try:
         from core.deactivation_store import count as _deact_count
-        from core.oig_store import get_oig_stats
+        from core.oig_store import load_oig_from_disk, get_oig_stats
+        # The OIG store has NO lazy-load (unlike deactivation_store) — it must be
+        # loaded explicitly, which the server does at startup but the bulk
+        # rebuild never did, so oig_excluded silently scored 0 for everyone.
+        load_oig_from_disk()
         oig = int((get_oig_stats() or {}).get("record_count") or 0)
         dc = _deact_count()
+        dark = [n for n, c in (("dead_npi_billing", dc), ("oig_excluded", oig)) if c == 0]
         print(f"Per-se-fraud reference loaded: {dc} deactivated NPIs, {oig} OIG exclusions"
-              + ("  WARN: dead_npi_billing will be DARK" if dc == 0 else ""))
+              + (f"  WARN: {' + '.join(dark)} will be DARK" if dark else "  (both armed)"))
     except Exception as e:  # noqa: BLE001
         print(f"  WARN: could not verify per-se-fraud reference data ({e})")
 
