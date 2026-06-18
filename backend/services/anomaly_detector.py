@@ -806,10 +806,31 @@ def dead_npi_billing(row: dict) -> SignalResult:
         except Exception:  # noqa: BLE001
             dd = None
         if dd:
+            # PRECISION GUARD: only TRUE per-se fraud if billing reaches/passes
+            # the deactivation date. This dataset spans 2018-2024, so an NPI
+            # deactivated mid-range has LEGITIMATE billing before deactivation —
+            # flagging that is a false positive (~70% of raw hits). Suppress only
+            # when we can confirm ALL billing predates deactivation; if either
+            # date is unparseable, fire (flag for review rather than miss).
+            def _ym(s: str):
+                s = str(s or "").strip()
+                if "/" in s:  # deactivation dates are MM/DD/YYYY
+                    pp = s.split("/")
+                    return (int(pp[2]), int(pp[0])) if len(pp) == 3 and pp[2].isdigit() and pp[0].isdigit() else None
+                d = s.replace("-", "")  # last_month is YYYY-MM
+                return (int(d[:4]), int(d[4:6])) if len(d) >= 6 and d[:6].isdigit() else None
+            dd_ym, last_ym = _ym(dd), _ym(row.get("last_month"))
+            if dd_ym and last_ym and last_ym < dd_ym:
+                return _result(
+                    "dead_npi_billing", 0.0, 90,
+                    f"NPI deactivated {dd} but all billing predates it — likely "
+                    f"legitimate prior activity, not unauthorized billing",
+                    False,
+                )
             return _result(
                 "dead_npi_billing", 1.0, 90,
                 f"NPI deactivated by CMS on {dd} (NPPES) but has Medicaid billing "
-                f"activity — per-se unauthorized billing / possible identity theft",
+                f"on/after that date — per-se unauthorized billing / possible identity theft",
                 True,
             )
 
