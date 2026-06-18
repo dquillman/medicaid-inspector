@@ -22,12 +22,17 @@ composite is capped at 100 by min(composite, 100) in the scorer):
   specialty_mismatch              8  — billing outside NPPES taxonomy specialty (cross-specialty fraud)
   corporate_shell_risk            7  — one authorized official controlling 3+ billing NPIs
   geographic_impossibility        6  — NPPES state vs. billing state mismatch (cross-state fraud)
-  dead_npi_billing               90  — deactivated NPI with billing activity (per-se unauthorized → near-maxes the score)
+  dead_npi_billing               15  — deactivated NPI billing AFTER deactivation (NOISY: NPPES deactivation is
+                                       unreliable — reactivated/replaced NPIs surface big legit institutions like
+                                       NYC Health+Hospitals, so it's a review flag, not a per-se-fraud driver)
   new_provider_explosion          7  — newly enumerated NPI with disproportionately high billing
 
-Total possible weight: 351. The min(composite, 100) cap in the scorer handles overflow.
-The two "per-se fraud" signals (oig_excluded=100, dead_npi_billing=90) are weighted
-to dominate so PROVABLE fraud ranks above merely-unusual statistical outliers.
+Total possible weight: ~266. The min(composite, 100) cap in the scorer handles overflow.
+oig_excluded=100 is the one authoritative per-se-fraud signal (LEIE is a curated
+exclusion list) so a verified excluded provider maxes the score. dead_npi_billing
+was tried at high weight but the NPPES deactivation join proved too noisy (big legit
+institutions) — kept modest. Only flag PROVABLE fraud to the top when the source is
+reliable.
 
 References:
   OIG Medicaid Fraud Control Units Annual Report FY2024
@@ -822,13 +827,13 @@ def dead_npi_billing(row: dict) -> SignalResult:
             dd_ym, last_ym = _ym(dd), _ym(row.get("last_month"))
             if dd_ym and last_ym and last_ym < dd_ym:
                 return _result(
-                    "dead_npi_billing", 0.0, 90,
+                    "dead_npi_billing", 0.0, 15,
                     f"NPI deactivated {dd} but all billing predates it — likely "
                     f"legitimate prior activity, not unauthorized billing",
                     False,
                 )
             return _result(
-                "dead_npi_billing", 1.0, 90,
+                "dead_npi_billing", 1.0, 15,
                 f"NPI deactivated by CMS on {dd} (NPPES) but has Medicaid billing "
                 f"on/after that date — per-se unauthorized billing / possible identity theft",
                 True,
@@ -837,7 +842,7 @@ def dead_npi_billing(row: dict) -> SignalResult:
     nppes = row.get("nppes") or {}
     if not nppes:
         return _result(
-            "dead_npi_billing", 0.0, 90,
+            "dead_npi_billing", 0.0, 15,
             "No NPPES data available — cannot verify NPI status",
             False,
         )
@@ -861,7 +866,7 @@ def dead_npi_billing(row: dict) -> SignalResult:
     if is_deactivated:
         date_info = f", deactivated {deactivation_date}" if deactivation_date else ""
         return _result(
-            "dead_npi_billing", 1.0, 90,
+            "dead_npi_billing", 1.0, 15,
             f"NPI deactivated (status: {status or 'D'}{date_info}) but has "
             f"Medicaid billing activity — possible identity theft or "
             f"unauthorized billing",
@@ -870,7 +875,7 @@ def dead_npi_billing(row: dict) -> SignalResult:
 
     # Active / normal status
     return _result(
-        "dead_npi_billing", 0.0, 90,
+        "dead_npi_billing", 0.0, 15,
         f"NPI status: {status or 'active'} — active and valid",
         False,
     )
