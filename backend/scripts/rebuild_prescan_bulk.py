@@ -28,6 +28,37 @@ _FULL = _BACKEND / "prescan_cache.json"
 _TMP = _BACKEND / "prescan_cache.json.rebuilding"
 
 
+def _ensure_reference_data() -> None:
+    """Guarantee the per-se-fraud lookups are populated BEFORE scoring.
+
+    dead_npi_billing and oig_excluded are the highest-value signals — but they
+    silently score 0 for EVERY provider if their lookup files are missing
+    (the stores load to an empty dict). Pull npi_deactivations.json from GCS if
+    it isn't local, then report the loaded counts so a dark signal is obvious.
+    """
+    import os
+    dpath = _BACKEND / "npi_deactivations.json"
+    if not dpath.exists():
+        try:
+            from google.cloud import storage
+            bucket = storage.Client().bucket(os.environ.get("GCS_BUCKET", "medicaid-inspector-data"))
+            blob = bucket.get_blob("npi_deactivations.json")
+            if blob:
+                blob.download_to_filename(str(dpath))
+                print("  pulled npi_deactivations.json from GCS")
+        except Exception as e:  # noqa: BLE001
+            print(f"  WARN: npi_deactivations.json missing and GCS fetch failed ({e}) — dead_npi_billing will be DARK")
+    try:
+        from core.deactivation_store import count as _deact_count
+        from core.oig_store import get_oig_stats
+        oig = int((get_oig_stats() or {}).get("record_count") or 0)
+        dc = _deact_count()
+        print(f"Per-se-fraud reference loaded: {dc} deactivated NPIs, {oig} OIG exclusions"
+              + ("  WARN: dead_npi_billing will be DARK" if dc == 0 else ""))
+    except Exception as e:  # noqa: BLE001
+        print(f"  WARN: could not verify per-se-fraud reference data ({e})")
+
+
 async def main():
     import duckdb
     from data.duckdb_client import get_parquet_path
@@ -35,6 +66,7 @@ async def main():
     from collections import defaultdict
     from core.config import settings
 
+    _ensure_reference_data()
     sig = _import_signals()
     parquet = get_parquet_path()
     print(f"Parquet: {parquet}")
