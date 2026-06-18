@@ -9,7 +9,7 @@ composite is capped at 100 by min(composite, 100) in the scorer):
 
   billing_concentration          15  — single-code dominance (OIG concentration analysis)
   revenue_per_bene_outlier       20  — revenue z-score vs. same-code peers (OIG statistical method)
-  claims_per_bene_anomaly        15  — claims volume z-score vs. all providers (OIG statistical method)
+  claims_per_bene_anomaly        15  — claims/beneficiary z-score vs. SAME-top-code peers (cohort-normalized)
   billing_ramp_rate              15  — explosive growth + large absolute dollars (OIG new-provider screen)
   bust_out_pattern               15  — peak-then-exit pattern (documented in OIG enforcement actions)
   ghost_billing                   5  — CMS 12-beneficiary suppression floor abuse
@@ -121,15 +121,18 @@ def claims_per_bene_anomaly(
     peer_std: float = 0.0,
 ) -> SignalResult:
     """
-    Total claims per unique beneficiary, compared statistically against all
-    scanned providers (z-score > 3σ).
+    Total claims per unique beneficiary, z-scored against SAME-top-code peers
+    (cohort-normalized; the scorer passes cpb_stats[top_code]), flagged at >3σ.
 
     OIG basis: OIG enforcement cases document extreme examples — 312 claims
     per beneficiary in a single year (nearly one per day), or 48 claims/month
-    when peers average 4. The threshold must be data-driven because legitimate
-    rates vary hugely by service type: a home health agency will naturally have
-    higher ratios than a specialist. Comparing against the peer distribution
-    of ALL providers in the dataset is the OIG-endorsed approach.
+    when peers average 4. Legitimate rates vary hugely by service type — a home
+    health or dialysis provider naturally bills many claims per beneficiary — so
+    the comparison is made WITHIN the provider's own top-code cohort (other
+    providers whose dominant code matches), not against all providers. That is
+    what keeps high-frequency specialties from being flagged just for their
+    specialty. (Falls back to an absolute >100 threshold only when the cohort
+    has <3 providers.)
 
     Fallback threshold of 100 claims/beneficiary is used when fewer than 3
     providers have been scanned (OIG documented real fraud cases exceeding
