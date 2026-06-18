@@ -125,7 +125,7 @@ def _score_provider(row: dict, hcpcs: list, timeline: list, npi: str,
     s9 = sig["bene_concentration"](row)
     s10 = sig["upcoding_pattern"](row, hcpcs)
     s11 = sig["address_cluster_risk"](row, cluster_sizes.get(npi, 0))
-    s12 = sig["oig_excluded"](npi)
+    s12 = sig["oig_excluded"](npi, row)
     s13 = sig["specialty_mismatch"](row, hcpcs)
     s14 = sig["corporate_shell_risk"](row, auth_clusters.get(npi, 0))
     s15 = sig["dead_npi_billing"](row)

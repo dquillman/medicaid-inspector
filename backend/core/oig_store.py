@@ -62,8 +62,12 @@ async def download_oig_list() -> bool:
                     "name":      name,
                     "busname":   bname,
                     "specialty": (row.get("SPECIALTY") or "").strip(),
-                    "excl_type": (row.get("EXCL_TYPE") or "").strip(),
-                    "excl_date": (row.get("EXCL_DATE") or "").strip(),
+                    # Real LEIE column names are EXCLTYPE / EXCLDATE (no
+                    # underscore); the old EXCL_TYPE/EXCL_DATE never matched, so
+                    # excl_date came back empty and oig_excluded couldn't be
+                    # date-validated. EXCLDATE is YYYYMMDD.
+                    "excl_type": (row.get("EXCLTYPE") or row.get("EXCL_TYPE") or "").strip(),
+                    "excl_date": (row.get("EXCLDATE") or row.get("EXCL_DATE") or "").strip(),
                     "state":     (row.get("STATE") or "").strip(),
                 }
 

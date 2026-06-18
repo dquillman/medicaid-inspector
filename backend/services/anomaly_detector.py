@@ -756,32 +756,51 @@ def geographic_impossibility(row: dict) -> SignalResult:
 
 
 # ── 12. OIG exclusion boost ────────────────────────────────────────────
-def oig_excluded(npi: str) -> SignalResult:
+def oig_excluded(npi: str, row: dict | None = None) -> SignalResult:
     """
-    Automatic full-weight flag if the provider is on the OIG LEIE exclusion
-    list (List of Excluded Individuals/Entities).
+    Flag a provider on the OIG LEIE exclusion list, distinguishing ACTIVE
+    billing-while-excluded from historical exclusions.
 
-    OIG basis: Providers on the LEIE have been formally excluded from
-    participation in all Federal health care programs. Any Medicaid billing
-    by an excluded provider is per se fraudulent under 42 USC 1320a-7b.
-    This signal uses a binary score — 1.0 if excluded, 0.0 if not — because
-    there is no ambiguity or severity gradient.
+    OIG basis: any Medicaid billing by an excluded provider AFTER the exclusion
+    date is per se fraudulent under 42 USC 1320a-7b — that maxes the score. But
+    95% of raw LEIE matches in this dataset billed and were excluded LATER (the
+    exclusion postdates their billing): those are still strong RECOVERY leads
+    (clawing back payments to a since-excluded provider) but not active fraud, so
+    they get a reduced score rather than topping the list as per-se fraud.
+    EXCLDATE is YYYYMMDD; the provider's last_month is YYYY-MM.
     """
     from core.oig_store import is_excluded as _is_excluded
 
     excluded, record = _is_excluded(npi)
+    if not excluded:
+        return _result("oig_excluded", 0.0, 100, "Not on OIG exclusion list", False)
 
-    if excluded:
-        name = record.get("name", "Unknown") if record else "Unknown"
-        excl_date = record.get("excl_date", "unknown date") if record else "unknown date"
+    name = record.get("name", "Unknown") if record else "Unknown"
+    excl_date = (record or {}).get("excl_date", "") if record else ""
+
+    def _ym(s: str):
+        s = str(s or "").replace("-", "")
+        return (int(s[:4]), int(s[4:6])) if len(s) >= 6 and s[:6].isdigit() else None
+
+    ed = _ym(excl_date)
+    lm = _ym((row or {}).get("last_month")) if row else None
+
+    if ed and lm and lm < ed:
+        # All billing predates the exclusion — historical; a recovery lead, not
+        # active per-se fraud. Reduced score so it ranks below active cases.
         return _result(
-            "oig_excluded", 1.0, 100,
-            f"Provider {npi} is on OIG LEIE exclusion list "
-            f"(excluded {excl_date}, name: {name})",
+            "oig_excluded", 0.6, 100,
+            f"Provider {npi} ({name}) was OIG-excluded {excl_date}, AFTER this "
+            f"billing period — prior Medicaid payments are a recovery lead",
             True,
         )
 
-    return _result("oig_excluded", 0.0, 100, "Not on OIG exclusion list", False)
+    return _result(
+        "oig_excluded", 1.0, 100,
+        f"Provider {npi} ({name}) on the OIG LEIE exclusion list (excluded "
+        f"{excl_date or 'unknown'}) with billing on/after exclusion — per-se fraud",
+        True,
+    )
 
 
 # ── 15. Dead NPI billing ─────────────────────────────────────────────────

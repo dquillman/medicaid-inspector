@@ -71,7 +71,7 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
         bene_concentration(provider_agg),
         upcoding_pattern(provider_agg, hcpcs_rows),
         address_cluster_risk(provider_agg, cluster_sizes.get(npi, 0)),
-        oig_excluded(npi),
+        oig_excluded(npi, provider_agg),
         specialty_mismatch(provider_agg, hcpcs_rows),
         corporate_shell_risk(provider_agg, auth_clusters.get(npi, 0)),
         dead_npi_billing(provider_agg),
