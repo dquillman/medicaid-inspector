@@ -248,9 +248,12 @@ def _upload(keys: list[str]) -> None:
         t = time.time()
         size_mb = p.stat().st_size / (1024 * 1024)
         print(f"  uploading {art['blob']} ({size_mb:.1f} MB via gcloud)…")
+        # shell=True so the OS resolves `gcloud` — on Windows it's gcloud.CMD,
+        # which subprocess can't launch via CreateProcess without a shell
+        # (the cause of the earlier WinError 2 mid-rescore).
         r = subprocess.run(
-            ["gcloud", "storage", "cp", str(p), f"gs://{_BUCKET}/{art['blob']}"],
-            env=env,
+            f'gcloud storage cp "{p}" "gs://{_BUCKET}/{art["blob"]}"',
+            shell=True, env=env,
         )
         if r.returncode != 0:
             raise SystemExit(f"upload failed for {art['blob']} (gcloud exit {r.returncode})")
