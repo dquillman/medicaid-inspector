@@ -127,18 +127,21 @@ def _is_org_specialty(specialty: str | None) -> bool:
     return any(m in s for m in _ORG_SPECIALTY_MARKERS)
 
 
-# Claim-level corroboration sources that describe a single CLINICIAN's billing
-# behavior and are meaningless as fraud corroboration for an organizational NPI
-# (a facility billing under one number). Verified against the precomputed lists:
+# Corroboration sources that are meaningless for an organizational NPI (a
+# facility/agency billing under one number) and over-fire on them. Verified
+# against the precomputed lists:
 #   - "impossible": 43% of all providers, dominated by hospitals/FQHCs/labs.
 #   - "modifiers":  306/500 are General Acute Care Hospitals (a hospital billing
 #     procedures alongside E&M is normal, not modifier-25 abuse).
 #   - "pos" (surgical-in-office): dominated by legit proceduralist orgs
 #     (ambulatory surgical centers, critical access hospitals).
+#   - "doctor_shopping": dominated by home-health/personal-care AGENCIES whose
+#     patients legitimately see many providers (care coordination) — patient
+#     overlap is normal for an agency, not evidence the agency is shopping.
 # Unbundling is intentionally EXCLUDED — a lab billing component codes instead of
 # the panel is the canonical unbundling case, so org-suppressing it would drop
 # real signal.
-_INDIVIDUAL_ONLY_SOURCES = {"impossible", "modifiers", "pos"}
+_INDIVIDUAL_ONLY_SOURCES = {"impossible", "modifiers", "pos", "doctor_shopping"}
 
 
 def _ml_driver_text(prov: dict, importances: dict | None, feat_means: dict) -> str:
@@ -214,10 +217,17 @@ def _corroboration_index() -> dict[str, list[str]]:
         if npi and ((r.get("controlled_pct") or 0) > 15 or (r.get("unclassified_pct") or 0) > 10):
             by_npi.setdefault(npi, []).append("pharmacy")
 
+    # billing_diagnosis_flags is intentionally NOT a corroboration source: its
+    # detector (routes/billing_codes._build_diag_flag_for_provider) compares two
+    # STATIC reference tables (HCPCS_TO_ICD10 vs the rule's valid_icd_prefixes)
+    # for the codes a provider bills — it never looks at the provider's actual
+    # diagnoses, so it can only fire on a reference-table inconsistency and flags
+    # 0/106k. The real diagnosis-mismatch signal (diagnosis_procedure_mismatch,
+    # MUP-based) is already counted in the rule-signals component — adding this
+    # back would be a broken, double-counting wire.
     for section_key, source_key in (
         ("dme_high_risk", "dme"),
         ("doctor_shopping", "doctor_shopping"),
-        ("billing_diagnosis_flags", "diagnosis_flags"),
     ):
         for npi in _collect_npis(get_precomputed(section_key) or {}):
             by_npi.setdefault(npi, []).append(source_key)
