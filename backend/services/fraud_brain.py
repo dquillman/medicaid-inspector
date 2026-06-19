@@ -198,8 +198,23 @@ def _corroboration_index() -> dict[str, list[str]]:
         for npi in _collect_npis(claim_patterns.get(section) or []):
             by_npi.setdefault(npi, []).append(section)
 
+    # Pharmacy: high-COST drug concentration alone is standard of care for many
+    # specialties (retina/ophthalmology anti-VEGF, oncology, rheumatology and
+    # neurology infusions) — NOT fraud. The pharmacy_high_risk list also pads with
+    # zero-flag drug billers. Only controlled-substance or unclassified-code
+    # concentration is a genuine diversion signal. Measured on the precomputed
+    # list: of 500, only 122 (24%) carry a real signal; 243 are high-cost-only
+    # (100 Ophthalmology + 48 Retina) and 135 have no signal at all. Corroborate
+    # only the real-signal subset.
+    pharm = get_precomputed("pharmacy_high_risk") or {}
+    for r in (pharm.get("providers") or []):
+        if not isinstance(r, dict):
+            continue
+        npi = r.get("npi")
+        if npi and ((r.get("controlled_pct") or 0) > 15 or (r.get("unclassified_pct") or 0) > 10):
+            by_npi.setdefault(npi, []).append("pharmacy")
+
     for section_key, source_key in (
-        ("pharmacy_high_risk", "pharmacy"),
         ("dme_high_risk", "dme"),
         ("doctor_shopping", "doctor_shopping"),
         ("billing_diagnosis_flags", "diagnosis_flags"),
