@@ -62,18 +62,33 @@ function Invoke-Deploy {
   $env:TMP = 'G:\temp'; $env:TMPDIR = 'G:\temp'; $env:TEMP = 'G:\temp'
   $env:ADMIN_PASSWORD = (& gcloud secrets versions access latest --secret=admin-password --project=medicaid-inspector)
   if ([string]::IsNullOrWhiteSpace($env:ADMIN_PASSWORD)) { throw "ADMIN_PASSWORD came back empty - check gcloud/CLOUDSDK_PYTHON" }
-  # PowerShell can't find `bash` on PATH here (Git is on G:\, not the default
-  # location), so `& bash` failed with WinError 2 at the deploy step. Resolve the
-  # full path explicitly.
-  $bashExe = (Get-Command bash -ErrorAction SilentlyContinue).Source
-  if (-not $bashExe) {
-    foreach ($p in @('G:\Git\usr\bin\bash.exe', 'C:\Program Files\Git\bin\bash.exe', 'C:\Program Files\Git\usr\bin\bash.exe')) {
-      if (Test-Path $p) { $bashExe = $p; break }
-    }
+
+  # Deploy by calling gcloud DIRECTLY in PowerShell — no bash. The old
+  # `& bash deploy-backend.sh` hop kept failing on this box (Windows bash-path
+  # resolution / WinError 2), silently leaving prod on the OLD revision after a
+  # successful data upload. gcloud already works here (it fetched ADMIN_PASSWORD
+  # above), so this just inlines what deploy-backend.sh does. Keep flags in sync
+  # with deploy-backend.sh.
+  $pkgPath = Join-Path $root 'frontend\package.json'
+  $appVersion = 'dev'
+  if (Test-Path $pkgPath) {
+    try { $v = (Get-Content $pkgPath -Raw | ConvertFrom-Json).version; if ($v) { $appVersion = $v } } catch {}
   }
-  if (-not $bashExe) { throw "bash.exe not found - run 'bash deploy-backend.sh' manually" }
-  & $bashExe deploy-backend.sh
-  if ($LASTEXITCODE -ne 0) { throw "Backend deploy failed (exit $LASTEXITCODE)" }
+  Write-Host "==> App version: $appVersion" -ForegroundColor Cyan
+  $deployArgs = @(
+    'run','deploy','medicaid-inspector-api',
+    '--source','.',
+    '--project','medicaid-inspector',
+    '--region','us-central1',
+    '--memory','2Gi','--cpu','1','--max-instances','3','--concurrency','80','--timeout','300',
+    '--allow-unauthenticated','--port','8080',
+    '--set-env-vars',"PYTHONUNBUFFERED=1,ADMIN_PASSWORD=$($env:ADMIN_PASSWORD),APP_VERSION=$appVersion"
+  )
+  Push-Location $root
+  try {
+    & gcloud @deployArgs
+    if ($LASTEXITCODE -ne 0) { throw "gcloud run deploy failed (exit $LASTEXITCODE)" }
+  } finally { Pop-Location }
   Write-Host "==> Deploy complete." -ForegroundColor Green
 }
 
