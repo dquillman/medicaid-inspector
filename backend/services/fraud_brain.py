@@ -83,7 +83,7 @@ _ANALYSIS_SOURCES = {
     "duplicates":  ("Duplicate billing pattern (claim-level)", 25),
     "pos":         ("Place-of-service anomaly (claim-level)", 20),
     "modifiers":   ("Modifier abuse pattern (claim-level)", 20),
-    "impossible":  ("Impossible daily volume (claim-level)", 30),
+    "impossible":  ("Extreme daily volume — verify vs group/facility billing (claim-level)", 15),
     "pharmacy":    ("Pharmacy high-risk profile", 25),
     "dme":         ("DME high-risk profile", 25),
     "doctor_shopping": ("Doctor-shopping beneficiary overlap", 25),
@@ -104,6 +104,27 @@ _FEATURE_LABELS = {
     "distinct_hcpcs": "distinct procedure codes",
     "flag_count": "fired rule signals",
 }
+
+
+# Taxonomy/specialty substrings that mark an ORGANIZATIONAL provider (a facility
+# billing under one NPI), for which "physically impossible daily volume" is
+# meaningless — a hospital, lab, FQHC, agency or DME supplier legitimately serves
+# far more than one clinician's worth of patients per day. Matched against the
+# provider's specialty (taxonomy description), which is present in the cache;
+# NPPES entity_type (the authoritative individual/org flag) is NOT persisted in
+# the scan cache, so taxonomy is the available proxy at ranking time.
+_ORG_SPECIALTY_MARKERS = (
+    "agency", "center", "hospital", "laborator", "clinic", "pharmac", "supplier",
+    "supplies", "equipment", "facility", "education", "home health", "ambulance",
+    "nursing", "dialysis", "esrd", "fqhc", "transport", "residential", "school",
+    "treatment", "program", "institution", "assisted living", "rehabilitation",
+    "skilled nursing", "health system", "hospice",
+)
+
+
+def _is_org_specialty(specialty: str | None) -> bool:
+    s = (specialty or "").lower()
+    return any(m in s for m in _ORG_SPECIALTY_MARKERS)
 
 
 def _ml_driver_text(prov: dict, importances: dict | None, feat_means: dict) -> str:
@@ -285,8 +306,15 @@ def compute_top_frauds(limit: int = 10) -> dict:
 
         # 3. Corroborating claim-level analyses
         corr_sources = corroboration.get(npi, [])
+        is_org = _is_org_specialty(p.get("specialty"))
         corr_raw = 0.0
         for s in corr_sources:
+            # "Physically impossible daily volume" is meaningless for an
+            # organizational NPI (hospital/lab/agency legitimately serves many
+            # patients/day) — don't let it corroborate fraud for orgs. The
+            # underlying detector over-fires here until the next rescore gates it.
+            if s == "impossible" and is_org:
+                continue
             label, pts = _ANALYSIS_SOURCES.get(s, (s, 15))
             corr_raw += pts
             evidence.append({
