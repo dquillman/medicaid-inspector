@@ -7,7 +7,8 @@ returns a SignalResult (score 0.0–1.0, weight, reason, flagged flag).
 Signal weights (original 8 sum to 100; new signals 9–12 add bonus weight,
 composite is capped at 100 by min(composite, 100) in the scorer):
 
-  billing_concentration          15  — single-code dominance (OIG concentration analysis)
+  billing_concentration           5  — single-code dominance (WEAK/corroborating: normal for whole legit
+                                       specialties like dialysis/hospice/home-health; fires at >90% now, not 80%)
   revenue_per_bene_outlier       20  — revenue z-score vs. same-code peers (OIG statistical method)
   claims_per_bene_anomaly        15  — claims/beneficiary z-score vs. SAME-top-code peers (cohort-normalized)
   billing_ramp_rate              15  — explosive growth + large absolute dollars (OIG new-provider screen)
@@ -57,30 +58,39 @@ class SignalResult(TypedDict):
 # ── 1. Billing concentration ─────────────────────────────────────────────────
 def billing_concentration(provider: dict, hcpcs_rows: list[dict]) -> SignalResult:
     """
-    Flag when a single HCPCS code dominates billing (>80% of total paid).
+    WEAK / corroborating signal: extreme single-code dominance (>90% of paid).
 
-    OIG basis: Providers that bill almost entirely for one procedure code —
-    especially high-risk codes like personal care services (T1019, S5125),
-    home health (G0299, G0300), or DME — are a top enforcement target.
-    Legitimate providers serving broad patient needs bill a mix of codes.
-
-    Threshold raised from an arbitrary 70% to 80% to reduce false positives
-    on legitimate specialists who naturally concentrate on fewer codes.
+    Single-code dominance is OFTEN NOT FRAUD — whole legitimate specialties bill
+    almost entirely one code: dialysis/ESRD, hospice, home health, personal care,
+    non-emergency transport, methadone clinics. At the old 80% bar this fired for
+    ~35% of all providers, mostly legitimately. So it is now low-weight (5) and
+    only fires above 90%, serving as corroboration for providers already flagged
+    by the peer-normalized revenue/claims-per-beneficiary outlier signals (which
+    compare a provider to others billing the SAME top code and do the real
+    fraud discrimination). Concentration on its own should never drive a high
+    risk score.
     """
     total = sum(r["total_paid"] for r in hcpcs_rows) or 1
     top = max(hcpcs_rows, key=lambda r: r["total_paid"], default=None)
     if not top:
-        return _result("billing_concentration", 0.0, 15, "No HCPCS data", False)
+        return _result("billing_concentration", 0.0, 5, "No HCPCS data", False)
 
     pct = top["total_paid"] / total
-    flagged = pct > 0.80
-    score = min(max(pct - 0.80, 0) / 0.20, 1.0) if pct > 0.50 else 0.0
+    # Raised to 0.90: single-code dominance is the NORM for whole legitimate
+    # specialties (dialysis/ESRD, hospice, home health, personal care, NEMT,
+    # methadone), so concentration alone is weak evidence — it fired for ~35% of
+    # providers at the old 0.80 bar. Only EXTREME concentration is even mildly
+    # suspicious, and the real discrimination comes from the peer-normalized
+    # revenue/claims outlier signals. Hence low weight + a corroborating role.
+    flagged = pct > 0.90
+    score = min(max(pct - 0.90, 0) / 0.10, 1.0) if pct > 0.90 else 0.0
     reason = (
-        f"{top['hcpcs_code']} represents {pct:.0%} of billing — single-code dominance"
+        f"{top['hcpcs_code']} represents {pct:.0%} of billing — extreme single-code "
+        f"dominance (corroborating only; normal for single-service specialties)"
         if flagged
-        else f"Top code {top['hcpcs_code']} at {pct:.0%} (no single-code dominance)"
+        else f"Top code {top['hcpcs_code']} at {pct:.0%} (concentration not unusual)"
     )
-    return _result("billing_concentration", score, 15, reason, flagged)
+    return _result("billing_concentration", score, 5, reason, flagged)
 
 
 # ── 2. Revenue-per-beneficiary outlier ───────────────────────────────────────
