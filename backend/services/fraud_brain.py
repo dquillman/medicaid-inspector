@@ -90,6 +90,47 @@ _ANALYSIS_SOURCES = {
     "diagnosis_flags": ("Diagnosis-procedure mismatch (Medicare proxy)", 20),
 }
 
+# Human labels for the ML feature columns, so the anomaly evidence can name
+# WHICH features made a provider an outlier instead of emitting a black-box
+# percentile. Keys must match services.ml_scorer.FEATURE_COLS (extra labels are
+# harmless — only keys present in a provider's importances are ever shown).
+_FEATURE_LABELS = {
+    "total_paid": "total paid",
+    "total_claims": "total claims",
+    "total_beneficiaries": "beneficiary count",
+    "revenue_per_beneficiary": "revenue per beneficiary",
+    "claims_per_beneficiary": "claims per beneficiary",
+    "active_months": "active months",
+    "distinct_hcpcs": "distinct procedure codes",
+    "flag_count": "fired rule signals",
+}
+
+
+def _ml_driver_text(prov: dict, importances: dict | None, feat_means: dict) -> str:
+    """Name the top features that made this provider an ML outlier, each with
+    its magnitude (|z|) and direction vs the peer mean.
+
+    Turns "Isolation Forest 99th percentile" (a black box an investigator can't
+    defend) into "most unusual on total claims (25.3σ above peer mean), ..." so a
+    reviewer can immediately judge whether the anomaly is fraud-relevant or just
+    a large-provider artifact. Direction is derived at request time by comparing
+    the provider's raw value to the population mean (monotonic — correct even for
+    transformed features)."""
+    if not importances:
+        return ""
+    ranked = sorted(importances.items(), key=lambda kv: abs(kv[1]), reverse=True)
+    parts: list[str] = []
+    for col, z in ranked:
+        if abs(z) < 0.75:        # within ~0.75σ of the mean — not a real driver
+            continue
+        label = _FEATURE_LABELS.get(col, col.replace("_", " "))
+        raw = float(prov.get(col) or 0)
+        direction = "above" if raw >= feat_means.get(col, 0.0) else "below"
+        parts.append(f"{label} ({abs(z):.1f}σ {direction} peer mean)")
+        if len(parts) >= 3:
+            break
+    return ", ".join(parts)
+
 
 def _collect_npis(obj) -> set[str]:
     """Pull every 'npi' value out of an arbitrarily-shaped findings payload."""
@@ -149,6 +190,16 @@ def compute_top_frauds(limit: int = 10) -> dict:
 
     ml_trained = bool(get_ml_status().get("trained"))
     corroboration = _corroboration_index()
+
+    # Per-feature population means — one pass over all providers — so the ML
+    # evidence can state direction ("X σ ABOVE/BELOW the peer mean") instead of
+    # an unexplained percentile. Cheap and request-time; no retrain needed.
+    feat_means: dict[str, float] = {}
+    if ml_trained:
+        from services.ml_scorer import FEATURE_COLS
+        for col in FEATURE_COLS:
+            vals = [float(p.get(col) or 0) for p in providers]
+            feat_means[col] = (sum(vals) / len(vals)) if vals else 0.0
 
     # Excluded providers re-enter the ranking only when confirmed fraud
     from core.review_store import get_review_queue
@@ -220,10 +271,14 @@ def compute_top_frauds(limit: int = 10) -> dict:
                 ml_raw = float(ml_score)
                 ml_component = ml_raw * W_ML_ANOMALY
                 if ml_raw >= 50:
+                    driver = _ml_driver_text(p, ml.get("feature_importances"), feat_means)
+                    detail = (f"Isolation Forest score {ml_score:.0f}/100 "
+                              f"({ml.get('ml_percentile', 0):.0f}th percentile)")
+                    if driver:
+                        detail += f" — most unusual on {driver}"
                     evidence.append({
                         "source": "ML anomaly detection",
-                        "detail": f"Isolation Forest score {ml_score:.0f}/100 "
-                                  f"({ml.get('ml_percentile', 0):.0f}th percentile)",
+                        "detail": detail,
                         "points": round(ml_component, 1),
                     })
         components["ml_anomaly"] = ml_component

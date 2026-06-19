@@ -57,16 +57,25 @@ def _ensure_loaded() -> None:
     except Exception as e:
         log.warning("Could not restore ML scores: %s", e)
 
-# Feature columns used for the model
+# Feature columns used for the model.
+#
+# DELIBERATELY size-blind and rule-blind. Earlier the model also fed on
+# total_paid / total_claims / total_beneficiaries (raw magnitude) and flag_count.
+# That made the "anomaly" mostly a SIZE detector — the biggest providers always
+# have the biggest raw z-scores, so giant-but-legitimate institutions landed at
+# the 99th ML percentile (provable false positives). flag_count additionally just
+# re-detected the rule signals this layer is meant to COMPLEMENT, double-counting
+# them in the Fraud Brain (which already scores rule signals and dollars-at-risk
+# as separate components).
+#
+# These four are billing-PATTERN / intensity features: unusual here means an
+# unusual way of billing, independent of how big the provider is. Size and rule
+# corroboration are judged by the Brain's other components, not smuggled in here.
 FEATURE_COLS = [
-    "total_paid",
-    "total_claims",
-    "total_beneficiaries",
     "revenue_per_beneficiary",
     "claims_per_beneficiary",
     "active_months",
     "distinct_hcpcs",
-    "flag_count",
 ]
 
 
@@ -104,22 +113,12 @@ def train_and_score() -> dict:
         if not npi:
             continue
 
-        # Use flag_count directly if present (slim cache), else derive from signal_results
-        explicit_fc = p.get("flag_count")
-        if explicit_fc is not None:
-            flag_count = int(explicit_fc)
-        else:
-            flag_count = len([s for s in (p.get("signal_results") or []) if s.get("flagged")])
-
+        # Pure billing-pattern features — keep in sync with FEATURE_COLS.
         row = [
-            float(p.get("total_paid") or 0),
-            float(p.get("total_claims") or 0),
-            float(p.get("total_beneficiaries") or 0),
             float(p.get("revenue_per_beneficiary") or 0),
             float(p.get("claims_per_beneficiary") or 0),
             float(p.get("active_months") or 0),
             float(p.get("distinct_hcpcs") or 0),
-            float(flag_count),
         ]
         npis.append(npi)
         features.append(row)
