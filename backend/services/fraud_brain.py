@@ -127,6 +127,20 @@ def _is_org_specialty(specialty: str | None) -> bool:
     return any(m in s for m in _ORG_SPECIALTY_MARKERS)
 
 
+# Claim-level corroboration sources that describe a single CLINICIAN's billing
+# behavior and are meaningless as fraud corroboration for an organizational NPI
+# (a facility billing under one number). Verified against the precomputed lists:
+#   - "impossible": 43% of all providers, dominated by hospitals/FQHCs/labs.
+#   - "modifiers":  306/500 are General Acute Care Hospitals (a hospital billing
+#     procedures alongside E&M is normal, not modifier-25 abuse).
+#   - "pos" (surgical-in-office): dominated by legit proceduralist orgs
+#     (ambulatory surgical centers, critical access hospitals).
+# Unbundling is intentionally EXCLUDED — a lab billing component codes instead of
+# the panel is the canonical unbundling case, so org-suppressing it would drop
+# real signal.
+_INDIVIDUAL_ONLY_SOURCES = {"impossible", "modifiers", "pos"}
+
+
 def _ml_driver_text(prov: dict, importances: dict | None, feat_means: dict) -> str:
     """Name the top features that made this provider an ML outlier, each with
     its magnitude (|z|) and direction vs the peer mean.
@@ -309,11 +323,13 @@ def compute_top_frauds(limit: int = 10) -> dict:
         is_org = _is_org_specialty(p.get("specialty"))
         corr_raw = 0.0
         for s in corr_sources:
-            # "Physically impossible daily volume" is meaningless for an
-            # organizational NPI (hospital/lab/agency legitimately serves many
-            # patients/day) — don't let it corroborate fraud for orgs. The
-            # underlying detector over-fires here until the next rescore gates it.
-            if s == "impossible" and is_org:
+            # Single-clinician billing-behavior signals (impossible volume,
+            # modifier-25 combos, surgical-in-office) are meaningless for an
+            # organizational NPI — a hospital/lab/agency legitimately exhibits
+            # all of them. Don't let them corroborate fraud for orgs. The
+            # underlying detectors over-fire here until the next rescore gates
+            # them. Unbundling is excluded (labs unbundling panels is real).
+            if s in _INDIVIDUAL_ONLY_SOURCES and is_org:
                 continue
             label, pts = _ANALYSIS_SOURCES.get(s, (s, 15))
             corr_raw += pts
