@@ -28,10 +28,14 @@ backend/ml_scores.json
 backend/supervised_model.json
 backend/precomputed_analyses.json
 backend/oig_exclusions_cache.json
-backend/npi_deactivations.json
 backend/.prescan_cache_*.tmp
 backend/*.tmp
-backend/oig_exclusions.json
+# NOTE: oig_exclusions.json and npi_deactivations.json are reference stores loaded
+# SYNCHRONOUSLY at startup (lifespan, before serving) and are NOT pulled from GCS.
+# If they are excluded from the image, every cold start has a window where OIG
+# exclusions are dark — provable fraud (excluded providers) gets buried and the
+# Brain can cache that degraded ranking for the 15-min TTL. So they MUST ship.
+# Keep them reasonably fresh by re-downloading during the rescore/deploy cycle.
 backend/enrollment_cache.json
 backend/users.json
 backend/sessions.json

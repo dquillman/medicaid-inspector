@@ -495,7 +495,16 @@ def get_top_frauds(limit: int = 10, force_refresh: bool = False) -> dict:
         return {**cached, "top": cached["top"][:limit], "cached": True}
 
     result = compute_top_frauds(limit=max(limit, 25))  # compute a few extra for cheap re-serves
-    with _lock:
-        _cache["result"] = result
-        _cache["computed_at"] = time.time()
+
+    # Defense-in-depth: never cache a ranking computed while the OIG exclusion
+    # store is empty. On a cold start that store loads at startup / downloads from
+    # HHS; a compute in that window buries provable fraud (excluded providers dark,
+    # no OIG boost). Serve it once, but skip caching so it can't persist for the
+    # 15-min TTL — the next request recomputes once OIG is loaded.
+    from core.oig_store import get_oig_stats
+    oig_ready = get_oig_stats().get("record_count", 0) > 0
+    if oig_ready:
+        with _lock:
+            _cache["result"] = result
+            _cache["computed_at"] = time.time()
     return {**result, "top": result["top"][:limit], "cached": False}
