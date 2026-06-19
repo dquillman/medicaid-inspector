@@ -62,7 +62,17 @@ function Invoke-Deploy {
   $env:TMP = 'G:\temp'; $env:TMPDIR = 'G:\temp'; $env:TEMP = 'G:\temp'
   $env:ADMIN_PASSWORD = (& gcloud secrets versions access latest --secret=admin-password --project=medicaid-inspector)
   if ([string]::IsNullOrWhiteSpace($env:ADMIN_PASSWORD)) { throw "ADMIN_PASSWORD came back empty - check gcloud/CLOUDSDK_PYTHON" }
-  & bash deploy-backend.sh
+  # PowerShell can't find `bash` on PATH here (Git is on G:\, not the default
+  # location), so `& bash` failed with WinError 2 at the deploy step. Resolve the
+  # full path explicitly.
+  $bashExe = (Get-Command bash -ErrorAction SilentlyContinue).Source
+  if (-not $bashExe) {
+    foreach ($p in @('G:\Git\usr\bin\bash.exe', 'C:\Program Files\Git\bin\bash.exe', 'C:\Program Files\Git\usr\bin\bash.exe')) {
+      if (Test-Path $p) { $bashExe = $p; break }
+    }
+  }
+  if (-not $bashExe) { throw "bash.exe not found - run 'bash deploy-backend.sh' manually" }
+  & $bashExe deploy-backend.sh
   if ($LASTEXITCODE -ne 0) { throw "Backend deploy failed (exit $LASTEXITCODE)" }
   Write-Host "==> Deploy complete." -ForegroundColor Green
 }
