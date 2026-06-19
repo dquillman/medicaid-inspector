@@ -867,7 +867,8 @@ def dead_npi_billing(row: dict) -> SignalResult:
             return _result(
                 "dead_npi_billing", 1.0, 15,
                 f"NPI deactivated by CMS on {dd} (NPPES) but has Medicaid billing "
-                f"on/after that date — per-se unauthorized billing / possible identity theft",
+                f"on/after that date — UNVERIFIED lead (NPPES deactivation is unreliable: "
+                f"reactivated/replaced NPIs); verify before relying on it — not proof of fraud",
                 True,
             )
 
@@ -900,8 +901,8 @@ def dead_npi_billing(row: dict) -> SignalResult:
         return _result(
             "dead_npi_billing", 1.0, 15,
             f"NPI deactivated (status: {status or 'D'}{date_info}) but has "
-            f"Medicaid billing activity — possible identity theft or "
-            f"unauthorized billing",
+            f"Medicaid billing activity — UNVERIFIED lead; verify NPI status first "
+            f"(NPPES deactivation is unreliable) — not proof of fraud",
             True,
         )
 

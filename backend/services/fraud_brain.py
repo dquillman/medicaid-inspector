@@ -286,10 +286,12 @@ def compute_top_frauds(limit: int = 10) -> dict:
             any(kw in specialty_l for kw in INSTITUTIONAL_KEYWORDS)
             or (distinct_hcpcs >= INSTITUTIONAL_DISTINCT_HCPCS and benes >= INSTITUTIONAL_BENES)
         )
-        # Only confirmed-fraud / OIG / deactivated-NPI are size-independent. ML +
-        # claim-level corroboration fire on hospitals BECAUSE they're huge, so
-        # they do not rescue a giant from dampening.
-        strong_specific = confirmed or oig or bool(deact_date)
+        # Only confirmed-fraud / OIG exclusion are size-independent PROVABLE
+        # signals. Deactivated-NPI is NOT — NPPES deactivation is unreliable
+        # (reactivated/replaced NPIs, billing that predates deactivation), so it
+        # must NOT rescue a giant institution from dampening (that's how Easter
+        # Seals / NYC Health+Hospitals were topping the Brain).
+        strong_specific = confirmed or oig
         dampened = is_institutional and not strong_specific
         if dampened:
             score *= INSTITUTIONAL_DAMPEN
@@ -317,12 +319,17 @@ def compute_top_frauds(limit: int = 10) -> dict:
                 "points": OIG_BOOST,
             })
         if deact_date:
-            score += DEACTIVATED_NPI_BOOST
+            # NO score boost. NPPES "deactivation" is NOT provable fraud: NPIs get
+            # reactivated/replaced without the file tracking it, and ~70% of
+            # matches billed only BEFORE deactivation (legitimate prior activity).
+            # It is a LEAD TO VERIFY, never proof — so it informs the flag with an
+            # honest caveat but does not drive the ranking.
             evidence.append({
-                "source": "Deactivated NPI",
-                "detail": f"Billing Medicaid under an NPI CMS deactivated on {deact_date} "
-                          "— per-se unauthorized billing / possible identity theft (NPPES)",
-                "points": DEACTIVATED_NPI_BOOST,
+                "source": "Deactivated-NPI lead (UNVERIFIED)",
+                "detail": f"NPPES shows this NPI deactivated {deact_date} — verify against "
+                          "current NPPES before relying on it; NPPES deactivation is "
+                          "unreliable here and is NOT proof of fraud",
+                "points": 0,
             })
 
         scored.append({
