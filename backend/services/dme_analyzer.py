@@ -52,6 +52,37 @@ TYPICALLY_RENTED = {
 
 EM_PREFIXES = ("992", "993", "994", "995")
 
+# Taxonomy/specialty substrings that mark a provider whose BUSINESS is supplying
+# equipment/drugs (vs a clinician who also bills some DME). For a supplier,
+# "DME without E&M" is normal — they never do visits — so it must not flag them.
+_SUPPLIER_SPECIALTY_MARKERS = (
+    "durable medical equipment", "medical supplies", "supplies", "oxygen",
+    "prosthetic", "orthotic", "pharmacy", "home infusion", "parenteral",
+    "enteral", "mail order", "supplier", "equipment", "(dme)",
+)
+
+
+def _is_supplier_specialty(specialty: str) -> bool:
+    s = (specialty or "").lower()
+    return any(m in s for m in _SUPPLIER_SPECIALTY_MARKERS)
+
+
+# Facility/organizational providers — a surgical center, sleep clinic, hospital
+# or home-health agency legitimately bills DME without its own E&M (the visit is
+# billed separately by the treating clinician), so "DME without E&M" is NOT a
+# red flag for them. It only is for an INDIVIDUAL clinician who should be seeing
+# the patient. (NPPES entity_type would be the authoritative individual/org flag;
+# until that's enriched into the cache, taxonomy is the proxy.)
+_FACILITY_SPECIALTY_MARKERS = (
+    "agency", "center", "clinic", "hospital", "facility", "laboratory",
+    "institution", "home health", "health system", "ambulance",
+)
+
+
+def _is_facility_specialty(specialty: str) -> bool:
+    s = (specialty or "").lower()
+    return any(m in s for m in _FACILITY_SPECIALTY_MARKERS)
+
 
 def _is_dme_code(code: str) -> bool:
     return code.upper().startswith(DME_PREFIXES)
@@ -288,6 +319,7 @@ async def get_high_risk_providers(limit: int = 50) -> dict:
             "npi": npi,
             "provider_name": p.get("provider_name", ""),
             "state": p.get("state", ""),
+            "specialty": p.get("specialty") or "",
             "total_paid": total_paid,
             "dme_paid": dme_paid,
             "dme_pct": dme_pct,
@@ -300,36 +332,68 @@ async def get_high_risk_providers(limit: int = 50) -> dict:
             "risk_score": p.get("risk_score", 0),
         })
 
-    # Compute peer stats
-    avg_dme = statistics.mean(all_dme_paid) if all_dme_paid else 0
-    std_dme = statistics.stdev(all_dme_paid) if len(all_dme_paid) > 1 else 1
+    # Provider-type-aware scoring. A DME SUPPLIER (taxonomy says so) legitimately
+    # bills no E&M and bills far more DME than any clinician, so the old global
+    # z-score + "DME without E&M" flag fired on essentially every supplier — 483
+    # of the old top-500 were suppliers flagged for being suppliers. Now:
+    #   * Suppliers are judged ONLY against other suppliers (within-cohort volume
+    #     z) — a genuine outlier among suppliers, not "is a supplier". The E&M and
+    #     high-cost/rental flags (all supplier-normal) are dropped for them.
+    #   * Clinicians who bill DME keep the meaningful signals — DME without E&M
+    #     (billing equipment without ever seeing the patient), DME/E&M imbalance,
+    #     high-cost concentration — plus a within-clinician volume z.
+    # Requires specialty, which precompute injects from the slim onto the full
+    # cache; on prod get_prescanned() already carries it.
+    sup_paid = [r["dme_paid"] for r in provider_data if _is_supplier_specialty(r["specialty"])]
+    cli_paid = [r["dme_paid"] for r in provider_data if not _is_supplier_specialty(r["specialty"])]
+
+    def _cohort(vals: list[float]) -> tuple[float, float]:
+        if len(vals) > 1:
+            return statistics.mean(vals), statistics.stdev(vals)
+        return (vals[0] if vals else 0.0), 1.0
+
+    sup_avg, sup_std = _cohort(sup_paid)
+    cli_avg, cli_std = _cohort(cli_paid)
 
     result = []
     for r in provider_data:
+        is_supplier = _is_supplier_specialty(r["specialty"])
         high_cost_pct = (r["high_cost_paid"] / r["total_paid"] * 100) if r["total_paid"] > 0 else 0
         rental_pct = (r["rental_paid"] / r["total_paid"] * 100) if r["total_paid"] > 0 else 0
-        z_score = (r["dme_paid"] - avg_dme) / max(std_dme, 1) if avg_dme > 0 else 0
+        if is_supplier:
+            z_score = (r["dme_paid"] - sup_avg) / max(sup_std, 1)
+        else:
+            z_score = (r["dme_paid"] - cli_avg) / max(cli_std, 1)
+
+        # Only an INDIVIDUAL clinician earns the no-E&M / high-cost flags. Blank
+        # specialty (could be a supplier with missing taxonomy) and facilities
+        # (which bill DME without their own E&M legitimately) get volume-z only —
+        # we don't assert "should be doing E&M" against them.
+        is_clinician = (bool(r["specialty"]) and not is_supplier
+                        and not _is_facility_specialty(r["specialty"]))
 
         flags = []
-        if high_cost_pct > 25:
-            flags.append("High-cost DME concentration")
         if z_score > 2:
-            flags.append("Unusual DME volume")
-        if r["dme_claims"] > 10 and r["em_claims"] == 0:
-            flags.append("DME without E&M visits")
-        elif r["dme_claims"] > 10 and r["em_claims"] > 0 and r["dme_claims"] / r["em_claims"] > 5:
-            flags.append("DME/E&M ratio imbalance")
-        if rental_pct > 30:
-            flags.append("Rental item concentration")
+            flags.append("Unusual DME volume vs DME-supplier peers" if is_supplier
+                         else "Unusual DME volume for a clinician")
+        if is_clinician:
+            if high_cost_pct > 25:
+                flags.append("High-cost DME concentration")
+            if rental_pct > 30:
+                flags.append("Rental item concentration")
+            if r["dme_claims"] > 10 and r["em_claims"] == 0:
+                flags.append("DME without E&M visits")
+            elif r["dme_claims"] > 10 and r["em_claims"] > 0 and r["dme_claims"] / r["em_claims"] > 5:
+                flags.append("DME/E&M ratio imbalance")
 
-        risk = 0
-        if flags:
-            risk = min(len(flags) * 25 + r["dme_pct"] * 0.5, 100)
+        risk = min(len(flags) * 25, 100) if flags else 0
 
         result.append({
             "npi": r["npi"],
             "provider_name": r["provider_name"],
             "state": r["state"],
+            "specialty": r["specialty"],
+            "is_supplier": is_supplier,
             "total_paid": round(r["total_paid"], 2),
             "dme_paid": round(r["dme_paid"], 2),
             "dme_pct": round(r["dme_pct"], 1),
@@ -346,7 +410,9 @@ async def get_high_risk_providers(limit: int = 50) -> dict:
             "risk_score": r["risk_score"],
         })
 
-    result.sort(key=lambda x: x["dme_risk"], reverse=True)
+    # Only providers with a genuine flag corroborate fraud (no zero-flag padding).
+    result = [r for r in result if r["flag_count"] > 0]
+    result.sort(key=lambda x: (x["dme_risk"], x["z_score"]), reverse=True)
     result = result[:limit]
 
     response = {

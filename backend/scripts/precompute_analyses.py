@@ -227,6 +227,31 @@ def backfill_slim_fields(providers: list[dict]) -> int:
     return fixed
 
 
+def _inject_specialty_from_slim(providers: list[dict]) -> int:
+    """The full prescan cache carries no NPPES data, so detectors that run on it
+    (DME, pharmacy, claim patterns) can't tell a DME supplier from a clinician.
+    The slim cache DOES carry specialty (preserved across rebuilds). Copy it onto
+    the in-memory provider objects so provider-type-aware detectors work during
+    precompute exactly as they do on prod (where get_prescanned() == the slim)."""
+    slim_path = _BACKEND / "prescan_slim.json"
+    if not slim_path.exists():
+        return 0
+    try:
+        slim = json.loads(slim_path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0
+    rows = slim if isinstance(slim, list) else slim.get("providers", [])
+    spec = {str(r.get("npi")): r.get("specialty") for r in rows if r.get("specialty")}
+    n = 0
+    for p in providers:
+        if not p.get("specialty"):
+            s = spec.get(str(p.get("npi")))
+            if s:
+                p["specialty"] = s
+                n += 1
+    return n
+
+
 def main() -> int:
     from core.store import load_prescanned_from_disk, get_prescanned
 
@@ -237,6 +262,10 @@ def main() -> int:
         return 1
     providers = get_prescanned()
     print(f"Loaded {len(providers):,} providers in {time.time() - t0:.0f}s")
+
+    n_spec = _inject_specialty_from_slim(providers)
+    print(f"Injected specialty onto {n_spec:,} providers from slim "
+          f"(enables provider-type-aware detectors)")
 
     from services.slim_cache_enricher import has_hcpcs_detail
     if not has_hcpcs_detail():
