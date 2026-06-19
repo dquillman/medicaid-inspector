@@ -1268,20 +1268,36 @@ def compute_auth_official_clusters() -> dict[str, int]:
 #
 # IMPORTANT: MUP suppresses cell counts below 11 beneficiaries (CMS privacy
 # rule), so the column is empty for tiny Medicare panels. The signal treats
-# "all columns suppressed" as insufficient evidence and returns score=0 —
-# only an explicit zero (numerically reported, meaning ≥11 benes but none
-# had the condition) fires the signal.
-_BH_ANY = [
+# "all columns suppressed" as insufficient evidence and returns score=0.
+#
+# Each group is (columns, floor_pct, peer_median_pct). The signal fires when a
+# provider's max documented prevalence across the columns is BELOW floor_pct.
+#
+# floor_pct is set to ~40% of the code-peer median — the median Medicare
+# prevalence of the condition among all providers who bill the group's codes for
+# >=10% of their revenue (Tot_Benes>=100), measured against the 2026 MUP file.
+# A literal "< 1%" threshold (the old design) was unreachable: a provider billing
+# condition-specific codes always attracts SOME patients with that condition, so
+# prevalence is never ~0. The fraud pattern is prevalence ANOMALOUSLY LOW vs
+# code-peers (e.g. bills 100% diabetic supplies but only 5% of a 600-patient
+# Medicare panel is diabetic, vs a 25% peer median) — not literally zero.
+# Floors sit well below each median so only genuine outliers fire (dialysis and
+# behavioral-health specialists, whose panels truly match their billing, stay
+# silent). Peer medians (2026 MUP): diabetes 25, COPD/asthma 17, cancer 26,
+# CKD 75, behavioral 75, dementia 65.
+_BH_ANY = ([
     "Bene_CC_BH_Anxiety_V1_Pct", "Bene_CC_BH_Depress_V1_Pct",
     "Bene_CC_BH_PTSD_V1_Pct", "Bene_CC_BH_Bipolar_V1_Pct",
     "Bene_CC_BH_Mood_V2_Pct",
-]
-_RESPIRATORY = ["Bene_CC_PH_COPD_V2_Pct", "Bene_CC_PH_Asthma_V2_Pct"]
-_DIABETES = ["Bene_CC_PH_Diabetes_V2_Pct"]
-_CANCER = ["Bene_CC_PH_Cancer6_V2_Pct"]
-_KIDNEY = ["Bene_CC_PH_CKD_V2_Pct"]
+], 25.0, 75.0)
+_RESPIRATORY = (["Bene_CC_PH_COPD_V2_Pct", "Bene_CC_PH_Asthma_V2_Pct"], 8.0, 17.0)
+_DIABETES = (["Bene_CC_PH_Diabetes_V2_Pct"], 10.0, 25.0)
+_CANCER = (["Bene_CC_PH_Cancer6_V2_Pct"], 3.0, 26.0)
+_KIDNEY = (["Bene_CC_PH_CKD_V2_Pct"], 30.0, 75.0)
+_DEMENTIA = (["Bene_CC_BH_Alz_NonAlzdem_V2_Pct"], 5.0, 65.0)
 
-_HCPCS_CONDITION_MAP: dict[str, list[str]] = {
+# HCPCS code -> (columns, floor_pct, peer_median_pct)
+_HCPCS_CONDITION_MAP: dict[str, tuple[list[str], float, float]] = {
     # ── Diabetes-specific supplies / equipment ──────────────────────────────
     "E0784": _DIABETES,   # External insulin pump
     "E0607": _DIABETES,   # Home blood glucose monitor
@@ -1351,8 +1367,8 @@ _HCPCS_CONDITION_MAP: dict[str, list[str]] = {
     "H0015": _BH_ANY,    # Alcohol/drug intensive outpatient (IOP)
 
     # ── Dementia / cognitive ────────────────────────────────────────────────
-    "99483": ["Bene_CC_BH_Alz_NonAlzdem_V2_Pct"],   # Cognitive assessment & care plan
-    "G0505": ["Bene_CC_BH_Alz_NonAlzdem_V2_Pct"],   # Cognition + functional assessment for dementia
+    "99483": _DEMENTIA,   # Cognitive assessment & care plan
+    "G0505": _DEMENTIA,   # Cognition + functional assessment for dementia
 }
 
 
@@ -1411,13 +1427,14 @@ def diagnosis_procedure_mismatch(
 
     total_paid = sum(r.get("total_paid", 0) for r in hcpcs_rows) or 1.0
 
-    # Worst offender: (hcpcs, condition-label, share, observed max-pct)
-    worst: tuple[str, str, float, float] | None = None
+    # Worst offender: (hcpcs, condition-label, share, observed max-pct, floor, median)
+    worst: tuple[str, str, float, float, float, float] | None = None
     for row in hcpcs_rows:
         code = (row.get("hcpcs_code") or "").upper()
-        cc_cols = _HCPCS_CONDITION_MAP.get(code)
-        if not cc_cols:
+        cc = _HCPCS_CONDITION_MAP.get(code)
+        if not cc:
             continue
+        cc_cols, floor, median = cc
         share = (row.get("total_paid", 0) or 0) / total_paid
         if share < 0.10:
             continue
@@ -1430,30 +1447,35 @@ def diagnosis_procedure_mismatch(
         if not observed:
             continue  # all suppressed — insufficient evidence
         max_pct = max(observed)
-        if max_pct >= 1.0:
-            continue  # at least one valid condition documented — exonerated
+        if max_pct >= floor:
+            continue  # prevalence consistent with the billing — exonerated
 
         label_src = cc_cols[0] if len(cc_cols) == 1 else "behavioral-health"
         condition_label = (
             label_src.replace("Bene_CC_", "")
                      .replace("_V1_Pct", "")
                      .replace("_V2_Pct", "")
+                     .replace("PH_", "")
+                     .replace("BH_", "")
                      .replace("_", " ")
+                     .lower()
+                     .strip()
         )
         if worst is None or share > worst[2]:
-            worst = (code, condition_label, share, max_pct)
+            worst = (code, condition_label, share, max_pct, floor, median)
 
     if worst is None:
         return _result("diagnosis_procedure_mismatch", 0.0, 8,
                        "Condition-specific codes match expected Medicare diagnosis mix "
                        "(or Medicare panel too small to assess)", False)
 
-    code, condition_label, share, max_pct = worst
+    code, condition_label, share, max_pct, floor, median = worst
     score = min(0.5 + (share - 0.10) * 1.25, 1.0)
     reason = (
-        f"{code} drives {share:.0%} of billing — implies {condition_label} — but "
-        f"Medicare prevalence for that condition is {max_pct:.1f}% across "
-        f"11+ documented beneficiaries (diagnosis-fabrication signal)"
+        f"{code} drives {share:.0%} of billing — implies {condition_label} — but only "
+        f"{max_pct:.0f}% of this provider's 11+ documented Medicare beneficiaries have "
+        f"that condition, far below the {median:.0f}% typical of providers billing this "
+        f"code (Medicare-panel proxy; verify against Medicaid diagnosis data before relying)"
     )
     return _result("diagnosis_procedure_mismatch", score, 8, reason, True)
 
