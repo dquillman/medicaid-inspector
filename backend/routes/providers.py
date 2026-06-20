@@ -1521,13 +1521,31 @@ async def provider_signal_evidence(npi: str, signal: str):
         if rpb <= 0:
             _tb = float(provider.get("total_beneficiaries") or 0)
             rpb = (float(provider.get("total_paid") or 0) / _tb) if _tb > 0 else 0.0
+        # Cohort (same-top-code) peer stats are computed above. When they can't be
+        # resolved — the slim has no top_hcpcs until a rescore, or the cohort is
+        # tiny — fall back to all-provider revenue-per-bene so the box never shows
+        # $0.00. Derived from totals since the slim lacks the precomputed ratio.
+        rev_peer_group = "same-code peer group"
+        if peer_std <= 0:
+            def _rpb_all(p: dict) -> float:
+                v = float(p.get("revenue_per_beneficiary") or 0)
+                if v > 0:
+                    return v
+                tb = float(p.get("total_beneficiaries") or 0)
+                return (float(p.get("total_paid") or 0) / tb) if tb > 0 else 0.0
+            _vals = [c for c in (_rpb_all(p) for p in get_prescanned()) if c > 0]
+            if len(_vals) > 2:
+                import statistics as _st2
+                peer_mean = _st2.mean(_vals)
+                peer_std = _st2.stdev(_vals)
+                rev_peer_group = "all scanned providers"
         z = (rpb - peer_mean) / peer_std if peer_std else 0
         evidence["methodology"] = (
-            "Compares this provider's revenue-per-beneficiary against providers "
-            "billing the same top procedure code (same-service peer group). "
-            "Flags at >3 standard deviations above peer mean — the threshold "
-            "used in CMS Comparative Billing Reports."
+            f"Compares this provider's revenue-per-beneficiary against the {rev_peer_group} "
+            "(same top procedure code when available). Flags at >3 standard deviations "
+            "above peer mean — the threshold used in CMS Comparative Billing Reports."
         )
+        evidence["peer_group"] = rev_peer_group
         evidence["threshold"] = ">3σ above same-code peer mean"
         evidence["this_provider"] = round(rpb, 2)
         evidence["peer_mean"] = round(peer_mean, 2)
