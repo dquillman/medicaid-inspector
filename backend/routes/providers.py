@@ -1447,6 +1447,7 @@ async def provider_signal_evidence(npi: str, signal: str):
         peer = peer_rows[0] if peer_rows else {}
         peer_mean = float(peer.get("mean_rpb") or 0)
         peer_std = float(peer.get("std_rpb") or 0)
+        top_code = provider.get("top_hcpcs") or ((hcpcs_rows[0].get("hcpcs_code") or "") if hcpcs_rows else "")
     else:
         hcpcs_rows = provider.get("hcpcs") or []
         if not hcpcs_rows:
@@ -1466,12 +1467,18 @@ async def provider_signal_evidence(npi: str, signal: str):
 
         def _peer_stats_from_cache() -> tuple[float, float]:
             import statistics as _st
+            def _rpb(p: dict) -> float:
+                v = float(p.get("revenue_per_beneficiary") or 0)
+                if v > 0:
+                    return v
+                tb = float(p.get("total_beneficiaries") or 0)
+                return (float(p.get("total_paid") or 0) / tb) if tb > 0 else 0.0
             vals = [
-                float(p.get("revenue_per_beneficiary") or 0)
+                _rpb(p)
                 for p in get_prescanned()
                 if p.get("npi") != npi
                 and (p.get("top_hcpcs") or "") == top_code
-                and float(p.get("revenue_per_beneficiary") or 0) > 0
+                and _rpb(p) > 0
             ]
             if len(vals) >= 2:
                 return _st.mean(vals), _st.stdev(vals)
@@ -1508,7 +1515,12 @@ async def provider_signal_evidence(npi: str, signal: str):
         evidence["top_codes"] = top_codes
 
     elif signal == "revenue_per_bene_outlier":
-        rpb = provider.get("revenue_per_beneficiary") or 0.0
+        # Same as claims_per_bene: the slim lacks the precomputed ratio, so derive
+        # it from total_paid / total_beneficiaries.
+        rpb = float(provider.get("revenue_per_beneficiary") or 0.0)
+        if rpb <= 0:
+            _tb = float(provider.get("total_beneficiaries") or 0)
+            rpb = (float(provider.get("total_paid") or 0) / _tb) if _tb > 0 else 0.0
         z = (rpb - peer_mean) / peer_std if peer_std else 0
         evidence["methodology"] = (
             "Compares this provider's revenue-per-beneficiary against providers "
@@ -1524,22 +1536,38 @@ async def provider_signal_evidence(npi: str, signal: str):
         evidence["multiple_of_mean"] = round(rpb / peer_mean, 1) if peer_mean else None
 
     elif signal == "claims_per_bene_anomaly":
-        cpb = provider.get("claims_per_beneficiary") or 0.0
-        # Compute peer stats for claims_per_bene from all scanned providers
-        all_cpb = [
-            p.get("claims_per_beneficiary") or 0
-            for p in get_prescanned()
-            if (p.get("claims_per_beneficiary") or 0) > 0
-        ]
+        # The slim cache (what prod serves) stores total_claims/total_beneficiaries
+        # but NOT the precomputed claims_per_beneficiary ratio — so reading that
+        # field directly returned 0 and every evidence box showed 0.0. Derive it
+        # from the totals, for this provider AND the peer pool.
+        def _cpb(p: dict) -> float:
+            v = float(p.get("claims_per_beneficiary") or 0)
+            if v > 0:
+                return v
+            tc = float(p.get("total_claims") or 0)
+            tb = float(p.get("total_beneficiaries") or 0)
+            return (tc / tb) if tb > 0 else 0.0
+        cpb = _cpb(provider)
+        # Match the SIGNAL's methodology: z-score against same-top-code peers
+        # (cohort). Fall back to all providers only when the cohort can't be
+        # resolved — e.g. before a rescore adds top_hcpcs to the slim.
+        _all = get_prescanned()
+        cohort = ([_cpb(p) for p in _all
+                   if (p.get("top_hcpcs") or "") == top_code and p.get("npi") != npi and _cpb(p) > 0]
+                  if top_code else [])
+        pool = cohort if len(cohort) >= 3 else [c for c in (_cpb(p) for p in _all) if c > 0]
         import statistics
-        cpb_mean = statistics.mean(all_cpb) if all_cpb else 0
-        cpb_std = statistics.stdev(all_cpb) if len(all_cpb) > 2 else 0
+        cpb_mean = statistics.mean(pool) if pool else 0
+        cpb_std = statistics.stdev(pool) if len(pool) > 2 else 0
         z = (cpb - cpb_mean) / cpb_std if cpb_std else 0
+        _grp = "same-top-code peers" if len(cohort) >= 3 else "all scanned providers"
         evidence["methodology"] = (
-            "Compares claims per unique beneficiary against all scanned providers. "
-            "OIG cases document extreme examples — 312 claims per beneficiary in "
-            "a single year. Flagged at >3σ above peer mean."
+            f"Compares claims per unique beneficiary against {_grp} (cohort-"
+            "normalized so high-frequency specialties aren't flagged for their "
+            "specialty). OIG cases document extremes — 312 claims/beneficiary in a "
+            "single year. Flagged at >3σ above peer mean."
         )
+        evidence["peer_group"] = _grp
         evidence["threshold"] = ">3σ above peer mean (or >100 absolute)"
         evidence["this_provider"] = round(cpb, 1)
         evidence["peer_mean"] = round(cpb_mean, 1)

@@ -146,6 +146,10 @@ def rebuild_slim_scores(providers: list[dict]) -> int:
     score_fields = (
         "total_paid", "total_claims", "total_beneficiaries", "distinct_hcpcs",
         "active_months", "first_month", "last_month", "risk_score",
+        # Needed by the signal-evidence endpoint so its proof boxes show real
+        # numbers (and can cohort-match peers) on the slim-only prod deployment —
+        # without these the boxes read 0 and showed "0.0".
+        "claims_per_beneficiary", "revenue_per_beneficiary", "top_hcpcs",
     )
 
     out: list[dict] = []
