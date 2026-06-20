@@ -288,6 +288,17 @@ def compute_top_frauds(limit: int = 10) -> dict:
     for arr in cohort_paid.values():
         arr.sort()
 
+    # within-cohort billing INTENSITY (revenue per beneficiary), same buckets —
+    # powers the single most defensible, investigator-ready statement: "bills Nx
+    # the {specialty} median per patient".
+    cohort_rpb: dict[str, list[float]] = defaultdict(list)
+    for p in providers:
+        _b = float(p.get("total_beneficiaries") or 0)
+        if _b > 0:
+            cohort_rpb[_cohort_key(p)].append(float(p.get("total_paid") or 0) / _b)
+    for arr in cohort_rpb.values():
+        arr.sort()
+
     scored: list[dict] = []
     for p in providers:
         npi = p.get("npi")
@@ -379,6 +390,27 @@ def compute_top_frauds(limit: int = 10) -> dict:
                           f"among {ck} peers (n={n_cohort:,})",
                 "points": round(components["dollars"], 1),
             })
+
+        # 4b. Within-specialty billing intensity — the most defensible single
+        #     statement an investigator can act on. Pure context (0 points): the
+        #     intensity is already scored via the ML revenue-per-bene feature and
+        #     the cohort-normalized rule signal; this just states it in plain
+        #     terms ("bills Nx the specialty median per patient").
+        benes = float(p.get("total_beneficiaries") or 0)
+        if benes > 0:
+            rpb = total_paid / benes
+            iarr = cohort_rpb.get(ck) or []
+            if len(iarr) >= 20:
+                imed = iarr[len(iarr) // 2]
+                ipct = bisect.bisect_left(iarr, rpb) / len(iarr) * 100
+                if ipct >= 90 and imed > 0 and rpb >= 2 * imed:
+                    evidence.append({
+                        "source": "Billing intensity (within specialty)",
+                        "detail": f"Bills ${rpb:,.0f} per patient — {rpb / imed:.0f}x the "
+                                  f"{ck} median of ${imed:,.0f} (top {max(round(100 - ipct), 1)}% "
+                                  f"of {len(iarr):,} peers)",
+                        "points": 0,
+                    })
 
         # 5. Flag breadth
         components["flag_breadth"] = min(flag_count / 18.0, 1.0) * 100 * W_FLAG_BREADTH
