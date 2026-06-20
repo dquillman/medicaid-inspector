@@ -73,7 +73,7 @@ def billing_concentration(provider: dict, hcpcs_rows: list[dict]) -> SignalResul
     total = sum(r["total_paid"] for r in hcpcs_rows) or 1
     top = max(hcpcs_rows, key=lambda r: r["total_paid"], default=None)
     if not top:
-        return _result("billing_concentration", 0.0, 5, "No HCPCS data", False)
+        return _result("billing_concentration", 0.0, 2, "No HCPCS data", False)
 
     pct = top["total_paid"] / total
     # Raised to 0.90: single-code dominance is the NORM for whole legitimate
@@ -90,7 +90,10 @@ def billing_concentration(provider: dict, hcpcs_rows: list[dict]) -> SignalResul
         if flagged
         else f"Top code {top['hcpcs_code']} at {pct:.0%} (concentration not unusual)"
     )
-    return _result("billing_concentration", score, 5, reason, flagged)
+    # Weight 2 (was 5): measured against known fraud (OIG-excluded), this fires
+    # 28% on fraud vs 29% on everyone — ~1.0x lift, i.e. non-discriminative. High
+    # one-code concentration is just normal for single-service providers.
+    return _result("billing_concentration", score, 2, reason, flagged)
 
 
 # ── 2. Revenue-per-beneficiary outlier ───────────────────────────────────────
@@ -168,7 +171,10 @@ def claims_per_bene_anomaly(
             else f"{cpb:.1f} claims/beneficiary (insufficient peer data for z-score)"
         )
 
-    return _result("claims_per_bene_anomaly", score, 15, reason, flagged)
+    # Weight 22 (was 15): the STRONGEST discriminator measured against known fraud
+    # — fires 9.8% on OIG-excluded vs 1.1% on everyone (8.6x lift). Weighted to
+    # match its demonstrated fraud signal.
+    return _result("claims_per_bene_anomaly", score, 22, reason, flagged)
 
 
 # ── 4. Billing ramp rate ──────────────────────────────────────────────────────
@@ -401,7 +407,7 @@ def bene_concentration(provider: dict) -> SignalResult:
                 f"{total_claims} claims with 0 beneficiaries — possible phantom billing",
                 True,
             )
-        return _result("bene_concentration", 0.0, 8, "No claims data", False)
+        return _result("bene_concentration", 0.0, 3, "No claims data", False)
 
     ratio = total_claims / total_bene
 
@@ -432,7 +438,9 @@ def bene_concentration(provider: dict) -> SignalResult:
         score = 0.0
         reason = f"{ratio:.1f} claims/beneficiary — within normal range"
 
-    return _result("bene_concentration", score, 8, reason, flagged)
+    # Weight 3 (was 8): 14.6% on known fraud vs 14.8% on everyone — ~1.0x lift,
+    # non-discriminative against the OIG-excluded ground truth.
+    return _result("bene_concentration", score, 3, reason, flagged)
 
 
 # ── 10. Upcoding detection ──────────────────────────────────────────────
@@ -472,7 +480,7 @@ def upcoding_pattern(provider: dict, hcpcs_rows: list[dict]) -> SignalResult:
     highest code when the peer average for that code is <25%, that is flagged.
     """
     if not hcpcs_rows:
-        return _result("upcoding_pattern", 0.0, 10, "No HCPCS data", False)
+        return _result("upcoding_pattern", 0.0, 3, "No HCPCS data", False)
 
     # Build a map of code -> total_claims for this provider
     code_claims: dict[str, float] = {}
@@ -525,13 +533,16 @@ def upcoding_pattern(provider: dict, hcpcs_rows: list[dict]) -> SignalResult:
                 )
 
     if not family_found:
-        return _result("upcoding_pattern", 0.0, 10, "No E/M code families in billing", False)
+        return _result("upcoding_pattern", 0.0, 3, "No E/M code families in billing", False)
 
     flagged = worst_score > 0
     if not flagged:
         worst_reason = "E/M code distribution within normal range"
 
-    return _result("upcoding_pattern", worst_score, 10, worst_reason, flagged)
+    # Weight 3 (was 10): fires 11% on known fraud vs 13% on everyone — 0.8x lift,
+    # i.e. slightly ANTI-correlated with the OIG-excluded ground truth. Demoted to
+    # a whisper pending a redesign that actually discriminates upcoding.
+    return _result("upcoding_pattern", worst_score, 3, worst_reason, flagged)
 
 
 # ── 11. Address cluster risk ────────────────────────────────────────────
