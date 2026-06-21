@@ -7,6 +7,7 @@ import Breadcrumbs from '../components/Breadcrumbs'
 import Reticle from '../components/Reticle'
 import RedactionField from '../components/RedactionField'
 import ProviderFlags from '../components/ProviderFlags'
+import OigTipButton from '../components/OigTipButton'
 import { threatColor, threatBand, magnitudeGlyph } from '../lib/threat'
 import { gsap, useGSAP, EASE, DUR, prefersReducedMotion } from '../lib/motion'
 import type { FraudBrainProvider } from '../lib/types'
@@ -18,6 +19,57 @@ const COMPONENT_LABELS: Record<string, string> = {
   corroboration: 'Claim-Level Analyses',
   dollars: 'Dollars at Risk',
   flag_breadth: 'Signal Breadth',
+}
+
+const WORKFLOW_STEPS: { title: string; body: string; where?: string }[] = [
+  { title: 'Work this list top-down', body: 'Score is a confidence level: 85+ is proven/near-proven (OIG-excluded or confirmed); ~40–60 are strong statistical leads worth investigating.', where: 'You are here — Fraud Brain' },
+  { title: 'Open the lead & read the evidence', body: 'Check Top Fraud Odds, then expand each fired flag to see its Proof box (claims/bene, peer mean, z-score) and the "bills Nx the specialty median per patient" line — that one sentence is your case.', where: 'Click the provider name' },
+  { title: 'Corroborate', body: 'Is it tied to other NPIs (a ring)? Confirm the specific abusive codes before you commit time.', where: 'Network · Fraud Rings · Claim Patterns' },
+  { title: 'Capture it', body: 'Open a case and set status to Under Review with a one-line note (the intensity multiple + the codes).', where: 'Add to Review button → Review Queue' },
+  { title: 'Build the case', body: 'Add notes, log hours, attach documents. Move the status along as you verify — confirming here sharpens the Brain next time.', where: 'Review Queue → the case' },
+  { title: 'Generate the referral packet', body: 'Bundles every signal with its proof section, dollars at risk, and methodology — your submission document.', where: 'Referral Packet / Export button' },
+  { title: 'Report to HHS-OIG', body: 'Submit the packet with provider name + NPI, the scheme in one line, and the dollars at risk. Note: OIG never confirms receipt — keep your own record in OIG Tips.', where: 'TIPS.HHS.GOV · 1-800-HHS-TIPS · log in OIG Tips' },
+  { title: 'Close the loop', body: 'Mark the case Submitted/Confirmed so your board stays clean and the model learns from the outcome.', where: 'Review Queue' },
+]
+
+function WorkflowPanel() {
+  const [open, setOpen] = useState(false)
+  return (
+    <div className="card border-hairline">
+      <button
+        onClick={() => setOpen(o => !o)}
+        className="w-full flex items-center justify-between text-left group"
+      >
+        <span className="flex items-center gap-2">
+          <span className="text-filament-core font-mono text-xs uppercase tracking-wider">Investigation Workflow</span>
+          <span className="text-ink-tertiary text-xs">— open a case to a filed OIG referral, step by step</span>
+        </span>
+        <span className="text-ink-tertiary text-xs font-mono group-hover:text-filament-core transition-colors">
+          {open ? 'Hide ▲' : 'Show ▼'}
+        </span>
+      </button>
+      {open && (
+        <ol className="mt-4 space-y-3">
+          {WORKFLOW_STEPS.map((s, i) => (
+            <li key={i} className="flex gap-3">
+              <span className="shrink-0 w-6 h-6 rounded-full bg-surface-2 border border-hairline flex items-center justify-center text-xs font-mono text-filament-core">{i + 1}</span>
+              <div className="min-w-0">
+                <p className="text-sm text-ink-primary font-medium">{s.title}</p>
+                <p className="text-xs text-ink-tertiary leading-relaxed mt-0.5">{s.body}</p>
+                {s.where && <p className="text-[11px] font-mono text-filament-dim mt-1 uppercase tracking-wider">→ {s.where}</p>}
+              </div>
+            </li>
+          ))}
+          <li className="pt-2 mt-1 border-t border-hairline">
+            <p className="text-xs text-ink-secondary">
+              <span className="font-mono uppercase tracking-wider text-filament-core">TL;DR </span>
+              Open #1 → expand the proof → Add to Review → Referral Packet → submit to HHS-OIG (1-800-HHS-TIPS) → mark it submitted.
+            </p>
+          </li>
+        </ol>
+      )}
+    </div>
+  )
 }
 
 function BrainScore({ score }: { score: number }) {
@@ -98,6 +150,9 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
                 Deactivated NPI
               </span>
             )}
+            <div className="ml-auto">
+              <OigTipButton npi={p.npi} providerName={p.provider_name} state={p.state} riskScore={p.brain_score} />
+            </div>
           </div>
           <p className="text-xs text-ink-tertiary mt-0.5 truncate">{p.specialty || '—'}</p>
 
@@ -245,6 +300,8 @@ export default function FraudBrain() {
           <MetaStat label="Computed In" value={data.cached ? 'cached' : `${(data.computed_in_ms / 1000).toFixed(1)}s`} />
         </div>
       )}
+
+      <WorkflowPanel />
 
       {isLoading && (
         <div className="card h-40 flex items-center justify-center text-ink-tertiary text-sm font-mono">

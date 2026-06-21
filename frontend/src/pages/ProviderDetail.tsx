@@ -565,8 +565,8 @@ export default function ProviderDetail() {
                   >
                     {oigLogged ? 'Logged ✓' : 'Log as filed'}
                   </button>
-                  <a href="https://oig.hhs.gov/fraud/report-fraud/" target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-filament-dim hover:text-filament-core transition-colors">
-                    Open OIG Hotline form ↗
+                  <a href="https://tips.oig.hhs.gov/" target="_blank" rel="noopener noreferrer" className="ml-auto text-xs text-filament-dim hover:text-filament-core transition-colors">
+                    Open OIG submission portal ↗
                   </a>
                 </div>
               </div>
