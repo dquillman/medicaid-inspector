@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
 import { useQuery, useQueries } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, mutate, get } from '../lib/api'
@@ -364,12 +364,146 @@ function ColHeader({
   )
 }
 
+// ── Table row (memoized) ──────────────────────────────────────────────────────
+// Extracted + React.memo'd so a hover (focus change) or a single sparkline query
+// resolving re-renders only the affected row, not all 50 rows. All callback props
+// are stable (useCallback / setState) and `trend` keeps per-NPI array identity,
+// so memo's shallow compare holds. This is the difference between a ~140ms
+// full-table re-commit and a sub-millisecond single-row update.
+
+interface ProviderRowProps {
+  p: any
+  idx: number
+  isFocused: boolean
+  isSelected: boolean
+  trend: number[] | undefined
+  trendLoading: boolean
+  onNavigate: (npi: string) => void
+  onToggleSelect: (npi: string) => void
+  onFocus: (idx: number) => void
+  onAddToReview: (npi: string) => void
+}
+
+const ProviderRow = memo(function ProviderRow({
+  p, idx, isFocused, isSelected, trend, trendLoading,
+  onNavigate, onToggleSelect, onFocus, onAddToReview,
+}: ProviderRowProps) {
+  const name     = p.provider_name || p.nppes?.name || ''
+  const cityVal  = p.city || p.nppes?.address?.city || ''
+  const stateVal = p.state || p.nppes?.address?.state || ''
+  const isHighRisk = p.risk_score >= 50
+  const topOdd = topFraudOdds(p.flags, 1)[0]
+  const reviewStatus = p.review_status as string | undefined
+  return (
+    <tr
+      className={`cursor-pointer transition-colors group relative ${
+        isSelected
+          ? 'bg-blue-900/20'
+          : isFocused
+            ? 'bg-blue-900/30 outline outline-1 outline-blue-600'
+            : isHighRisk
+              ? 'bg-red-950/30 hover:bg-red-950/50'
+              : idx % 2 === 1
+                ? 'bg-gray-900/30 hover:bg-gray-800/50'
+                : 'hover:bg-gray-800/50'
+      }`}
+      style={{ borderLeft: `3px solid ${threatColor(p.risk_score)}` }}
+      onClick={() => onNavigate(p.npi)}
+      onMouseEnter={() => onFocus(idx)}
+    >
+      <td className="px-3 py-2.5 text-center w-10">
+        <input
+          type="checkbox"
+          className="accent-blue-500"
+          checked={isSelected}
+          onChange={() => onToggleSelect(p.npi)}
+          onClick={e => e.stopPropagation()}
+          aria-label={`Select provider ${p.npi}`}
+        />
+      </td>
+      <td className="px-3 py-2.5 font-mono-data text-blue-400 text-sm sticky left-0 z-10 bg-gray-900 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">{p.npi}</td>
+      <td className="px-3 py-2.5 text-gray-300 max-w-[220px]" title={name}>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="truncate">{name || <span className="text-gray-600 italic">--</span>}</span>
+          <ProviderFlags npi={p.npi} className="shrink-0" />
+        </div>
+      </td>
+      <td className="px-3 py-2.5 text-center">
+        {p.oig_excluded
+          ? <span className="text-xs px-1.5 py-0.5 rounded font-bold bg-red-900/60 text-red-300 border border-red-700" title={p.oig_detail?.excl_type || 'OIG Excluded'}>EXCLUDED</span>
+          : <span className="text-gray-700 text-xs">--</span>
+        }
+      </td>
+      <td className="px-3 py-2.5"><RiskScoreBadge score={p.risk_score} size="sm" /></td>
+      <td className="px-3 py-2.5 max-w-[180px]">
+        {topOdd
+          ? <div className="flex flex-col leading-tight" title={topOdd.reason}>
+              <span className="text-red-300 text-xs font-medium truncate">{topOdd.label}</span>
+              <span className="text-gray-500 text-[10px]">{p.flags.length} signal{p.flags.length !== 1 ? 's' : ''} · {topOdd.strength}%</span>
+            </div>
+          : <span className="text-gray-600 text-xs">--</span>
+        }
+      </td>
+      <td className="px-3 py-2.5 text-gray-400">{stateVal || <span className="text-gray-600">--</span>}</td>
+      <td className="px-3 py-2.5 text-gray-400 max-w-[140px] truncate" title={cityVal}>
+        {cityVal || <span className="text-gray-600">--</span>}
+      </td>
+      <td className="px-3 py-2.5 font-semibold">{fmt(p.total_paid)}</td>
+      <td className="px-3 py-2.5 text-gray-400">{p.total_claims.toLocaleString()}</td>
+      <td className="px-3 py-2.5 text-gray-400">{p.total_beneficiaries.toLocaleString()}</td>
+      <td className="px-3 py-2.5 text-gray-400">{p.active_months}</td>
+      <td className="px-3 py-2.5">
+        {reviewStatus
+          ? <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_COLORS[reviewStatus] ?? 'text-gray-400'}`}>
+              {STATUS_LABELS[reviewStatus] ?? reviewStatus}
+            </span>
+          : <span className="text-gray-700 text-xs">--</span>
+        }
+      </td>
+      <td className="px-3 py-2.5">
+        {trend ? (
+          <Sparkline data={trend} />
+        ) : trendLoading ? (
+          <div className="w-[80px] h-[24px] bg-gray-800 rounded animate-pulse" />
+        ) : null}
+      </td>
+      <td className="px-1 py-2.5 relative w-20">
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
+          <button
+            onClick={e => { e.stopPropagation(); onNavigate(p.npi) }}
+            className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white"
+            title="View details"
+            aria-label={`View provider ${p.npi}`}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          </button>
+          <button
+            onClick={e => { e.stopPropagation(); onAddToReview(p.npi) }}
+            className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-yellow-400"
+            title="Add to review queue"
+            aria-label={`Flag provider ${p.npi}`}
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2z" />
+            </svg>
+          </button>
+        </div>
+      </td>
+    </tr>
+  )
+})
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 const LIMIT = 50
 
 export default function ProviderExplorer() {
   const navigate = useNavigate()
+  // Stable callback so the memoized ProviderRow doesn't see a new prop each render.
+  const goToProvider = useCallback((npi: string) => navigate(`/providers/${npi}`), [navigate])
   const [searchParams, setSearchParams] = useSearchParams()
   const stateParam = searchParams.get('state')
   const riskMinParam = searchParams.get('risk_min')
@@ -493,28 +627,66 @@ export default function ProviderExplorer() {
   const totalPages = total > 0 ? Math.ceil(total / LIMIT) : 1
   const anyFilter  = !!search || hasFilter(filters)
 
-  // Fetch sparkline timeline data for visible providers
+  // Progressive row reveal: render a small first batch so the initial commit
+  // paints fast, then grow in chunks. Because rows are memoized, each growth
+  // step only mounts the newly-added rows — keeping every commit within a frame
+  // budget instead of one ~140ms mount of all 50 rows.
+  const ROW_BATCH = 12
+  const [visibleCount, setVisibleCount] = useState(ROW_BATCH)
+  useEffect(() => {
+    // Reset to the first batch whenever the result set changes (new page/filter).
+    setVisibleCount(ROW_BATCH)
+  }, [dataUpdatedAt])
+  useEffect(() => {
+    if (visibleCount >= providers.length) return
+    const id = setTimeout(
+      () => setVisibleCount(c => Math.min(providers.length, c + ROW_BATCH)),
+      0,
+    )
+    return () => clearTimeout(id)
+  }, [visibleCount, providers.length])
+  const visibleProviders = providers.slice(0, visibleCount)
+
+  // Fetch sparkline timeline data only for ROWS THAT ARE ACTUALLY REVEALED.
+  // Tying this to visibleProviders (rather than all 50) means the per-row
+  // timeline requests fire in the same small batches as the progressive reveal,
+  // so they arrive staggered instead of landing all at once and re-rendering
+  // every sparkline in one heavy commit — and it cuts the request fan-out too.
   const trendQueries = useQueries({
-    queries: providers.map(p => ({
+    queries: visibleProviders.map(p => ({
       queryKey: ['sparkline', p.npi],
       queryFn: () => api.providerTimeline(p.npi),
       staleTime: 5 * 60 * 1000,
-      enabled: providers.length > 0,
+      enabled: visibleProviders.length > 0,
     }))
   })
 
   const trendDataKey = trendQueries.map(q => q.dataUpdatedAt).join(',')
+  // Cache each NPI's sparkline array by its query's dataUpdatedAt, so a single
+  // sparkline resolving does NOT hand every other row a new array reference.
+  // This is what lets the memoized row skip re-rendering when a sibling's trend
+  // arrives — without it, the whole table re-commits on every sparkline.
+  const trendCacheRef = useRef<Record<string, { t: number; arr: number[] }>>({})
   const trendData = useMemo(() => {
+    const cache = trendCacheRef.current
     const lookup: Record<string, number[]> = {}
-    providers.forEach((p, i) => {
+    visibleProviders.forEach((p, i) => {
       const q = trendQueries[i]
+      const t = q?.dataUpdatedAt || 0
+      const prev = cache[p.npi]
+      if (prev && prev.t === t) {
+        lookup[p.npi] = prev.arr
+        return
+      }
       if (q?.data?.timeline) {
-        lookup[p.npi] = q.data.timeline.map(r => r.total_paid)
+        const arr = q.data.timeline.map(r => r.total_paid)
+        cache[p.npi] = { t, arr }
+        lookup[p.npi] = arr
       }
     })
     return lookup
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [providers, trendDataKey])
+  }, [visibleCount, trendDataKey])
 
   // Keyboard navigation: j/k to move, Enter to open
   useEffect(() => {
@@ -783,117 +955,21 @@ export default function ProviderExplorer() {
                 </td>
               </tr>
             )}
-            {providers.map((p, idx) => {
-              const name     = p.provider_name || (p as any).nppes?.name || ''
-              const cityVal  = p.city || (p as any).nppes?.address?.city || ''
-              const stateVal = p.state || (p as any).nppes?.address?.state || ''
-              const isFocused = focusedRow === idx
-              const reviewStatus = (p as any).review_status as string | undefined
-              const isHighRisk = p.risk_score >= 50
-              const topOdd = topFraudOdds((p as any).flags, 1)[0]
-              const isSelected = selectedNpis.has(p.npi)
-              return (
-                <tr
-                  key={p.npi}
-                  className={`cursor-pointer transition-colors group relative ${
-                    isSelected
-                      ? 'bg-blue-900/20'
-                      : isFocused
-                        ? 'bg-blue-900/30 outline outline-1 outline-blue-600'
-                        : isHighRisk
-                          ? 'bg-red-950/30 hover:bg-red-950/50'
-                          : idx % 2 === 1
-                            ? 'bg-gray-900/30 hover:bg-gray-800/50'
-                            : 'hover:bg-gray-800/50'
-                  }`}
-                  style={{ borderLeft: `3px solid ${threatColor(p.risk_score)}` }}
-                  onClick={() => navigate(`/providers/${p.npi}`)}
-                  onMouseEnter={() => setFocusedRow(idx)}
-                >
-                  <td className="px-3 py-2.5 text-center w-10">
-                    <input
-                      type="checkbox"
-                      className="accent-blue-500"
-                      checked={isSelected}
-                      onChange={() => toggleSelectRow(p.npi)}
-                      onClick={e => e.stopPropagation()}
-                      aria-label={`Select provider ${p.npi}`}
-                    />
-                  </td>
-                  <td className="px-3 py-2.5 font-mono-data text-blue-400 text-sm sticky left-0 z-10 bg-gray-900 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.3)]">{p.npi}</td>
-                  <td className="px-3 py-2.5 text-gray-300 max-w-[220px]" title={name}>
-                    <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="truncate">{name || <span className="text-gray-600 italic">--</span>}</span>
-                      <ProviderFlags npi={p.npi} className="shrink-0" />
-                    </div>
-                  </td>
-                  <td className="px-3 py-2.5 text-center">
-                    {(p as any).oig_excluded
-                      ? <span className="text-xs px-1.5 py-0.5 rounded font-bold bg-red-900/60 text-red-300 border border-red-700" title={(p as any).oig_detail?.excl_type || 'OIG Excluded'}>EXCLUDED</span>
-                      : <span className="text-gray-700 text-xs">--</span>
-                    }
-                  </td>
-                  <td className="px-3 py-2.5"><RiskScoreBadge score={p.risk_score} size="sm" /></td>
-                  <td className="px-3 py-2.5 max-w-[180px]">
-                    {topOdd
-                      ? <div className="flex flex-col leading-tight" title={topOdd.reason}>
-                          <span className="text-red-300 text-xs font-medium truncate">{topOdd.label}</span>
-                          <span className="text-gray-500 text-[10px]">{p.flags.length} signal{p.flags.length !== 1 ? 's' : ''} · {topOdd.strength}%</span>
-                        </div>
-                      : <span className="text-gray-600 text-xs">--</span>
-                    }
-                  </td>
-                  <td className="px-3 py-2.5 text-gray-400">{stateVal || <span className="text-gray-600">--</span>}</td>
-                  <td className="px-3 py-2.5 text-gray-400 max-w-[140px] truncate" title={cityVal}>
-                    {cityVal || <span className="text-gray-600">--</span>}
-                  </td>
-                  <td className="px-3 py-2.5 font-semibold">{fmt(p.total_paid)}</td>
-                  <td className="px-3 py-2.5 text-gray-400">{p.total_claims.toLocaleString()}</td>
-                  <td className="px-3 py-2.5 text-gray-400">{p.total_beneficiaries.toLocaleString()}</td>
-                  <td className="px-3 py-2.5 text-gray-400">{p.active_months}</td>
-                  <td className="px-3 py-2.5">
-                    {reviewStatus
-                      ? <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${STATUS_COLORS[reviewStatus] ?? 'text-gray-400'}`}>
-                          {STATUS_LABELS[reviewStatus] ?? reviewStatus}
-                        </span>
-                      : <span className="text-gray-700 text-xs">--</span>
-                    }
-                  </td>
-                  <td className="px-3 py-2.5">
-                    {trendData[p.npi] ? (
-                      <Sparkline data={trendData[p.npi]} />
-                    ) : trendQueries[idx]?.isLoading ? (
-                      <div className="w-[80px] h-[24px] bg-gray-800 rounded animate-pulse" />
-                    ) : null}
-                  </td>
-                  <td className="px-1 py-2.5 relative w-20">
-                    <div className="absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1">
-                      <button
-                        onClick={e => { e.stopPropagation(); navigate(`/providers/${p.npi}`) }}
-                        className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-white"
-                        title="View details"
-                        aria-label={`View provider ${p.npi}`}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                        </svg>
-                      </button>
-                      <button
-                        onClick={e => { e.stopPropagation(); handleAddSingleToReview(p.npi) }}
-                        className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-yellow-400"
-                        title="Add to review queue"
-                        aria-label={`Flag provider ${p.npi}`}
-                      >
-                        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2z" />
-                        </svg>
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              )
-            })}
+            {visibleProviders.map((p, idx) => (
+              <ProviderRow
+                key={p.npi}
+                p={p}
+                idx={idx}
+                isFocused={focusedRow === idx}
+                isSelected={selectedNpis.has(p.npi)}
+                trend={trendData[p.npi]}
+                trendLoading={!!trendQueries[idx]?.isLoading}
+                onNavigate={goToProvider}
+                onToggleSelect={toggleSelectRow}
+                onFocus={setFocusedRow}
+                onAddToReview={handleAddSingleToReview}
+              />
+            ))}
             {!isLoading && providers.length === 0 && !error && (
               <tr>
                 <td colSpan={COLUMNS.length + 2}>

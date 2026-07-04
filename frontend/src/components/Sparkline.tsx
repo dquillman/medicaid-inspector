@@ -1,10 +1,12 @@
+import { memo } from 'react'
+
 interface SparklineProps {
   data: number[]
   width?: number
   height?: number
 }
 
-export default function Sparkline({ data, width = 80, height = 24 }: SparklineProps) {
+function Sparkline({ data, width = 80, height = 24 }: SparklineProps) {
   if (data.length === 0) return null
 
   if (data.length === 1) {
@@ -44,3 +46,7 @@ export default function Sparkline({ data, width = 80, height = 24 }: SparklinePr
     </svg>
   )
 }
+
+// Memoized: sparklines re-render only when their own data array identity changes,
+// not on every parent (table) re-render.
+export default memo(Sparkline)
