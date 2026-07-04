@@ -70,7 +70,9 @@ function PeerRow({ label, value, stats, pct, money = true }: {
   money?: boolean
 }) {
   if (!stats) return null
-  const fv = (v: number) => money ? fmt(v) : v.toFixed(1)
+  // Null-safe: on the slim prod cache claims_per_beneficiary can be undefined,
+  // and a raw .toFixed() on it would throw and blank the whole detail page.
+  const fv = (v: number | null | undefined) => money ? fmt(v ?? 0) : (v ?? 0).toFixed(1)
   return (
     <tr className="border-b border-gray-800 text-sm">
       <td className="py-2 pr-4 text-gray-400">{label}</td>

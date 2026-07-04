@@ -61,6 +61,13 @@ async def analyze_provider(npi: str) -> dict:
     if not p:
         return {"npi": npi, "available": False, "note": "Provider not found", "signals": []}
 
+    # Slim cache (Cloud Run) omits per-HCPCS detail; enrich from a local parquet
+    # or surface an honest note instead of silently reporting zero drug signals.
+    from services.slim_cache_enricher import enrich_provider_detail
+    p, note = enrich_provider_detail(p)
+    if note:
+        return {"npi": npi, "available": False, "note": note, "signals": []}
+
     hcpcs_list = p.get("hcpcs") or []
     timeline = p.get("timeline") or []
     total_paid = p.get("total_paid") or 0

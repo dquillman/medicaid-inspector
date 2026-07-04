@@ -63,9 +63,24 @@ async def detect_rx_anomalies(limit: int = 100) -> dict:
     """
     Find providers with suspicious prescription/drug billing patterns.
     """
+    from services.slim_cache_enricher import (
+        has_hcpcs_detail, enrich_top_providers, parquet_is_local, SLIM_REMOTE_NOTE,
+    )
     providers = get_prescanned()
     if not providers:
         return {"flagged": [], "total_flagged": 0}
+
+    # Slim cache (Cloud Run) omits per-HCPCS arrays. Without them every provider
+    # looks like it has zero Rx billing, so the endpoint silently reports "no Rx
+    # anomalies". Enrich from a local parquet, or surface an honest note.
+    if not has_hcpcs_detail():
+        if not parquet_is_local():
+            return {"flagged": [], "total_flagged": 0, "available": False,
+                    "note": SLIM_REMOTE_NOTE}
+        import asyncio as _asyncio
+        providers = await _asyncio.to_thread(enrich_top_providers, 500, False)
+        if not providers:
+            return {"flagged": [], "total_flagged": 0}
 
     rx_profiles = []
 
@@ -171,6 +186,15 @@ async def provider_rx_profile(npi: str) -> dict:
     provider = get_provider_by_npi(npi)
     if not provider:
         return {"npi": npi, "found": False, "error": "Provider not found"}
+
+    # Slim cache (Cloud Run) omits per-HCPCS detail; enrich from a local parquet
+    # or return an honest note instead of an empty Rx profile.
+    from services.slim_cache_enricher import enrich_provider_detail
+    provider, note = enrich_provider_detail(provider, include_timeline=False)
+    if note:
+        return {"npi": npi, "found": True, "available": False, "note": note,
+                "total_paid": provider.get("total_paid") or 0,
+                "rx_paid": 0, "rx_pct": 0, "rx_codes": [], "high_cost_codes": []}
 
     hcpcs_list = provider.get("hcpcs") or []
     total_paid = 0

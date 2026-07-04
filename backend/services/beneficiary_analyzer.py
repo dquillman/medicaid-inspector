@@ -479,25 +479,37 @@ async def provider_beneficiary_fraud(npi: str) -> dict:
         peers["p90_rpb"] = round(sorted_rpb[int(len(sorted_rpb) * 0.9)], 2)
     peers["peer_count"] = len(valid)
 
-    # Code overlap from cache
-    hcpcs_list = p.get("hcpcs") or []
-    providers = get_prescanned()
-    code_npi_count: dict[str, int] = defaultdict(int)
-    for prov in providers:
-        for h in (prov.get("hcpcs") or []):
+    # Code overlap from cache — needs per-HCPCS arrays, absent on the slim cache.
+    # The utilization/revenue flags below work from totals (present on slim), so
+    # only the doctor-shopping code-overlap signal degrades; flag that honestly
+    # instead of silently reporting an empty overlap.
+    from services.slim_cache_enricher import has_hcpcs_detail
+    code_overlap = []
+    code_overlap_note = None
+    if has_hcpcs_detail():
+        hcpcs_list = p.get("hcpcs") or []
+        providers = get_prescanned()
+        code_npi_count: dict[str, int] = defaultdict(int)
+        for prov in providers:
+            for h in (prov.get("hcpcs") or []):
+                code = h.get("hcpcs_code", "")
+                if code:
+                    code_npi_count[code] += 1
+
+        for h in hcpcs_list[:10]:
             code = h.get("hcpcs_code", "")
             if code:
-                code_npi_count[code] += 1
-
-    code_overlap = []
-    for h in hcpcs_list[:10]:
-        code = h.get("hcpcs_code", "")
-        if code:
-            code_overlap.append({
-                "hcpcs_code": code,
-                "other_providers": code_npi_count.get(code, 1) - 1,
-            })
-    code_overlap.sort(key=lambda x: x["other_providers"], reverse=True)
+                code_overlap.append({
+                    "hcpcs_code": code,
+                    "other_providers": code_npi_count.get(code, 1) - 1,
+                })
+        code_overlap.sort(key=lambda x: x["other_providers"], reverse=True)
+    else:
+        code_overlap_note = (
+            "Code-overlap / doctor-shopping detection requires per-HCPCS detail, "
+            "which is not present in the slim cache. The utilization and revenue "
+            "flags below are unaffected."
+        )
 
     # Flags
     flags = []
@@ -536,6 +548,7 @@ async def provider_beneficiary_fraud(npi: str) -> dict:
         },
         "peer_comparison": peers,
         "code_overlap": code_overlap[:10],
+        "code_overlap_note": code_overlap_note,
         "flags": flags,
         "flag_count": len(flags),
     }

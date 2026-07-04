@@ -1075,6 +1075,13 @@ async def export_provider_package(npi: str):
     if not cached:
         raise HTTPException(404, f"Provider {npi} not found in scan cache — run a scan first")
 
+    # Slim cache (Cloud Run) omits per-HCPCS/timeline arrays. Enrich from a local
+    # parquet so the evidence package's HCPCS + timeline CSVs and report tables
+    # are populated; on the remote-slim path capture a note to stamp on the
+    # package instead of silently shipping empty tables.
+    from services.slim_cache_enricher import enrich_provider_detail
+    cached, slim_note = enrich_provider_detail(cached)
+
     nppes_data = cached.get("nppes") or await get_provider(npi)
 
     review_items = get_review_queue()
@@ -1102,6 +1109,24 @@ async def export_provider_package(npi: str):
 
         # HTML report
         add_text("fraud_investigation_report.html", report_html)
+
+        # Data-completeness note — when running on the slim cache with a remote
+        # dataset, the per-HCPCS and monthly-timeline tables below are empty
+        # because that detail isn't loaded, NOT because the provider billed
+        # nothing. Make that explicit so the packet isn't misread as exculpatory.
+        if slim_note:
+            add_text(
+                "DATA_COMPLETENESS_NOTE.txt",
+                "IMPORTANT — INCOMPLETE EVIDENCE PACKAGE\n"
+                "=======================================\n\n"
+                "hcpcs_breakdown.csv and monthly_timeline.csv in this package are "
+                "EMPTY because the server is running on the slim prescan cache with "
+                "a remote dataset. The absence of HCPCS/timeline rows here does NOT "
+                "mean the provider billed no codes.\n\n"
+                f"{slim_note}\n\n"
+                "The risk score, fraud signals, and billing totals in the other "
+                "files remain valid (they were computed at scan time).\n",
+            )
 
         # provider_summary.json
         summary = {

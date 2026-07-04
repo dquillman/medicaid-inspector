@@ -110,6 +110,16 @@ async def validate_provider_codes(npi: str) -> dict:
     if not provider:
         return {"npi": npi, "found": False, "error": "Provider not found"}
 
+    # Slim cache (Cloud Run) omits both per-HCPCS detail and NPPES taxonomy, so
+    # this validation cannot run there. Enrich from a local parquet (full-cache
+    # dicts already carry nppes+hcpcs, so this is a passthrough) or return the
+    # honest note instead of a misleading "0 mismatches" result.
+    from services.slim_cache_enricher import enrich_provider_detail
+    provider, note = enrich_provider_detail(provider, include_timeline=False)
+    if note:
+        return {"npi": npi, "found": True, "available": False, "note": note,
+                "codes_analyzed": 0, "mismatches": [], "mismatch_score": 0}
+
     taxonomy = (provider.get("nppes") or {}).get("taxonomy_code") or ""
     specialty = (provider.get("nppes") or {}).get("specialty") or ""
     hcpcs_list = provider.get("hcpcs") or []
@@ -182,9 +192,17 @@ async def batch_validate_codes(limit: int = 100, min_mismatch_pct: float = 30.0)
     Validate all providers' codes against their specialties.
     Returns providers with mismatch_score above the threshold.
     """
+    from services.slim_cache_enricher import has_hcpcs_detail, SLIM_REMOTE_NOTE
     providers = get_prescanned()
     if not providers:
         return {"flagged": [], "total_flagged": 0}
+
+    # Batch validation needs NPPES taxonomy + per-HCPCS arrays, neither of which
+    # is in the slim cache. Unlike pharmacy/rx, enrich_top_providers can't supply
+    # taxonomy_code, so on the slim cache this is an honest-note-only path.
+    if not has_hcpcs_detail():
+        return {"flagged": [], "total_flagged": 0, "available": False,
+                "note": SLIM_REMOTE_NOTE}
 
     flagged = []
     for p in providers:

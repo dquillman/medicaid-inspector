@@ -60,6 +60,95 @@ def has_hcpcs_detail(sample_size: int = 200) -> bool:
     return False
 
 
+def enrich_provider_detail(provider: dict,
+                           *, include_timeline: bool = True) -> tuple[dict, str | None]:
+    """Ensure a single provider dict carries per-HCPCS (and timeline) detail.
+
+    Returns ``(provider, note)``:
+
+    - If the provider already has ``hcpcs`` (full cache), returns it unchanged
+      with ``note=None``.
+    - Else if the parquet source is a LOCAL file, runs one targeted single-NPI
+      aggregation to stitch ``hcpcs`` (and optionally ``timeline``) onto a copy
+      of the dict and returns ``(enriched, None)``.
+    - Else (slim cache + REMOTE parquet, i.e. Cloud Run), returns the provider
+      unchanged with ``note=SLIM_REMOTE_NOTE``. Per-request remote scans would
+      trip the request timeout and, with a single worker, invite request-pileup,
+      so per-provider detail endpoints must surface the note instead of silently
+      recomputing signals to zero.
+
+    This is the single-NPI counterpart to ``enrich_top_providers`` for the
+    per-provider *detail* endpoints (export packet, pharmacy/DME/claim-pattern
+    /rx/dx per-provider views), which cannot rely on the top-N batch including
+    an arbitrary requested NPI.
+    """
+    if provider and provider.get("hcpcs"):
+        return provider, None
+    if not provider or not provider.get("npi"):
+        return provider, SLIM_REMOTE_NOTE
+    if not parquet_is_local():
+        return provider, SLIM_REMOTE_NOTE
+
+    from data.duckdb_client import get_connection, get_parquet_path
+
+    npi = provider["npi"]
+    parquet = get_parquet_path()
+    con = get_connection()
+    enriched = dict(provider)
+
+    t0 = time.time()
+    hcpcs_sql = f"""
+    SELECT
+        HCPCS_CODE          AS hcpcs_code,
+        SUM(TOTAL_PAID)     AS total_paid,
+        SUM(TOTAL_CLAIMS)   AS total_claims
+    FROM read_parquet('{parquet}')
+    WHERE BILLING_PROVIDER_NPI_NUM = ?
+    GROUP BY hcpcs_code
+    ORDER BY total_paid DESC
+    """
+    rel = con.execute(hcpcs_sql, (npi,))
+    cols = [d[0] for d in rel.description]
+    enriched["hcpcs"] = [
+        {
+            "hcpcs_code": r["hcpcs_code"],
+            "total_paid": r["total_paid"] or 0,
+            "total_claims": r["total_claims"] or 0,
+        }
+        for r in (dict(zip(cols, row)) for row in rel.fetchall())
+    ]
+
+    if include_timeline:
+        timeline_sql = f"""
+        SELECT
+            CLAIM_FROM_MONTH                    AS month,
+            SUM(TOTAL_PAID)                     AS total_paid,
+            SUM(TOTAL_CLAIMS)                   AS total_claims,
+            SUM(TOTAL_UNIQUE_BENEFICIARIES)     AS total_unique_beneficiaries
+        FROM read_parquet('{parquet}')
+        WHERE BILLING_PROVIDER_NPI_NUM = ?
+        GROUP BY month
+        ORDER BY month ASC
+        """
+        rel = con.execute(timeline_sql, (npi,))
+        cols = [d[0] for d in rel.description]
+        enriched["timeline"] = [
+            {
+                "month": r["month"],
+                "total_paid": r["total_paid"] or 0,
+                "total_claims": r["total_claims"] or 0,
+                "total_unique_beneficiaries": r["total_unique_beneficiaries"] or 0,
+            }
+            for r in (dict(zip(cols, row)) for row in rel.fetchall())
+        ]
+
+    logger.info(
+        "[slim_cache_enricher] Enriched single provider %s in %.2fs (timeline=%s)",
+        npi, time.time() - t0, include_timeline,
+    )
+    return enriched, None
+
+
 def enrich_top_providers(top_n: int = DEFAULT_TOPN,
                         include_timeline: bool = True) -> list[dict]:
     """Return provider dicts with hcpcs (and optionally timeline) for top-N riskiest NPIs.

@@ -392,6 +392,14 @@ async def get_provider_claim_patterns(npi: str) -> dict:
     if not prov:
         return {"npi": npi, "unbundling": [], "duplicates": [], "impossible_days": []}
 
+    # Slim cache (Cloud Run) omits per-HCPCS and per-month arrays; enrich from a
+    # local parquet or return an honest note rather than empty pattern lists.
+    from services.slim_cache_enricher import enrich_provider_detail
+    prov, note = enrich_provider_detail(prov)
+    if note:
+        return {"npi": npi, "unbundling": [], "duplicates": [],
+                "impossible_days": [], "available": False, "note": note}
+
     hcpcs_list = prov.get("hcpcs") or []
     timeline = prov.get("timeline") or []
 
