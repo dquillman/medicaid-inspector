@@ -6,6 +6,7 @@ Persists users to backend/users.json.
 import hashlib
 import hmac
 import json
+import os
 import secrets
 import time
 import uuid
@@ -17,6 +18,15 @@ from core.safe_io import atomic_write_json
 _USERS_FILE = pathlib.Path(__file__).parent.parent / "users.json"
 _SESSIONS_FILE = pathlib.Path(__file__).parent.parent / "sessions.json"
 _ADMIN_INIT_FLAG = pathlib.Path(__file__).parent.parent / ".admin_initialized"
+
+# Session lifetime: a 30-day absolute cap plus a sliding idle timeout. A token
+# unused for longer than the idle window is rejected even if it's within the
+# 30 days, limiting the exposure of a leaked token.
+_SESSION_ABSOLUTE_TTL = 30 * 24 * 3600
+_SESSION_IDLE_TTL = int(os.environ.get("MFI_SESSION_IDLE_HOURS", "12")) * 3600
+# Only re-persist last_seen when it advances by this much, to avoid a disk
+# write on every authenticated request.
+_LAST_SEEN_PERSIST_INTERVAL = 60
 
 # ── Roles & Permissions ──────────────────────────────────────────────────────
 
@@ -299,14 +309,19 @@ def update_user(username: str, updates: dict) -> Optional[dict]:
     if "display_name" in updates:
         user["display_name"] = updates["display_name"]
 
+    password_changed = False
     if "password" in updates:
         if len(updates["password"]) < 8:
             raise ValueError("Password must be at least 8 characters")
         salt = secrets.token_hex(16)
         user["salt"] = salt
         user["password_hash"] = _hash_password(updates["password"], salt)
+        password_changed = True
 
     _save_users()
+    # A password change must not leave old sessions valid — force re-login.
+    if password_changed:
+        invalidate_user_sessions(username)
     return _safe_user(user)
 
 
@@ -372,25 +387,60 @@ def load_sessions_from_disk() -> None:
 def create_session(username: str) -> str:
     """Create a session token for a user. Returns the token string."""
     token = secrets.token_hex(32)
+    now = time.time()
     _sessions[token] = {
         "username": username,
-        "created_at": time.time(),
+        "created_at": now,
+        "last_seen": now,
     }
     save_sessions_to_disk()
     return token
 
 
 def get_session_user(token: str) -> Optional[dict]:
-    """Look up a session token. Returns user dict or None if invalid/expired."""
+    """Look up a session token. Returns user dict or None if invalid/expired.
+
+    Enforces both a 30-day absolute cap and a sliding idle timeout, and
+    refreshes last_seen (persisting lazily) so an active session stays alive
+    while an abandoned one expires.
+    """
     session = _sessions.get(token)
     if not session:
         return None
-    # Sessions valid for 30 days
-    if time.time() - session["created_at"] > 30 * 24 * 3600:
+    now = time.time()
+    last_seen = session.get("last_seen", session.get("created_at", now))
+    if (now - session.get("created_at", now) > _SESSION_ABSOLUTE_TTL
+            or now - last_seen > _SESSION_IDLE_TTL):
         del _sessions[token]
         save_sessions_to_disk()
         return None
-    return get_user(session["username"])
+    user = get_user(session["username"])
+    if user is None:
+        # User was deleted out from under an active session.
+        del _sessions[token]
+        save_sessions_to_disk()
+        return None
+    # Slide the idle window; only touch disk when it advances meaningfully.
+    if now - last_seen >= _LAST_SEEN_PERSIST_INTERVAL:
+        session["last_seen"] = now
+        save_sessions_to_disk()
+    else:
+        session["last_seen"] = now
+    return user
+
+
+def invalidate_user_sessions(username: str) -> int:
+    """Remove all sessions for a user. Returns the count removed.
+
+    Called when a user's password changes so old tokens can't outlive the
+    credential they were issued against.
+    """
+    tokens = [t for t, s in _sessions.items() if s.get("username") == username]
+    for t in tokens:
+        del _sessions[t]
+    if tokens:
+        save_sessions_to_disk()
+    return len(tokens)
 
 
 def invalidate_session(token: str) -> bool:

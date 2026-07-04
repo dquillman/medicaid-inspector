@@ -181,7 +181,20 @@ class RegisterRequest(BaseModel):
 
 @router.post("/register")
 async def register(req: RegisterRequest, request: Request):
-    """Self-registration — creates a viewer account."""
+    """Self-registration — creates a viewer account.
+
+    Disabled by default: this tool exposes PHI-adjacent Medicaid claims data, so
+    anonymous account creation is closed unless an operator explicitly opts in
+    with MFI_OPEN_REGISTRATION=true. When closed, accounts are provisioned by an
+    admin via POST /api/auth/users.
+    """
+    import os as _os
+    if _os.environ.get("MFI_OPEN_REGISTRATION", "").lower() not in ("1", "true", "yes"):
+        raise HTTPException(
+            403,
+            "Self-registration is disabled. Ask an administrator to create your "
+            "account.",
+        )
     from core.rate_limiter import check_login_rate
     check_login_rate(request)
     # Validate username format before touching the store
