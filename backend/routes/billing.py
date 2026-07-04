@@ -145,13 +145,16 @@ async def get_plans():
 
 
 def _update_user_plan(email: str, plan: str) -> None:
+    # Route through the auth store rather than hand-writing users.json. The
+    # canonical on-disk schema is {"users": [...]}, but this used to read/write
+    # a flat {email: {...}} dict, which would drop every account's credentials
+    # on the next load. update_user is schema-correct and a no-op for unknown
+    # users.
     try:
-        users = json.loads(_USERS_FILE.read_text(encoding="utf-8")) if _USERS_FILE.exists() else {}
-        if email in users:
-            users[email]["plan"] = plan
-            _USERS_FILE.write_text(json.dumps(users, indent=2), encoding="utf-8")
+        from core.auth_store import update_user
+        update_user(email, {"plan": plan})
     except Exception as e:
-        log.error("Failed to update user plan: %s", e)
+        log.error("Failed to update user plan for %s: %s", email, e)
 
 
 def _get_email_from_customer(stripe, customer_id: str) -> str:

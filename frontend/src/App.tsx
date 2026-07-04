@@ -1,47 +1,52 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import { AnimatePresence } from 'framer-motion'
 import { useClickOutside } from './hooks/useClickOutside'
 import Sidebar, { useSidebarCollapsed } from './components/Sidebar'
 import PageTransition from './components/PageTransition'
+// Core daily-use pages stay eager so the common navigation path is instant.
 import Overview from './pages/Overview'
 import ProviderExplorer from './pages/ProviderExplorer'
 import AnomalyDashboard from './pages/AnomalyDashboard'
 import ProviderDetail from './pages/ProviderDetail'
-import NetworkGraph from './pages/NetworkGraph'
 import ReviewQueue from './pages/ReviewQueue'
-import AlertRules from './pages/AlertRules'
-import AuditLog from './pages/AuditLog'
-import GeographicAnalysis from './pages/GeographicAnalysis'
-import ROIDashboard from './pages/ROIDashboard'
-import OwnershipNetworks from './pages/OwnershipNetworks'
-import AdminScan from './pages/AdminScan'
-import DemographicRisk from './pages/DemographicRisk'
-import FraudHotspots from './pages/FraudHotspots'
-import BeneficiaryDensity from './pages/BeneficiaryDensity'
-import UtilizationAnalysis from './pages/UtilizationAnalysis'
-import PopulationRatio from './pages/PopulationRatio'
-import TrendDivergence from './pages/TrendDivergence'
-import Watchlist from './pages/Watchlist'
-import FraudRings from './pages/FraudRings'
-import FraudBrain from './pages/FraudBrain'
-import Excluded from './pages/Excluded'
-import Methods from './pages/Methods'
-import OigTips from './pages/OigTips'
 import { ProviderFlagsProvider } from './hooks/useProviderFlags'
-import NewsAlerts from './pages/NewsAlerts'
-import MLModel from './pages/MLModel'
-import ClaimPatterns from './pages/ClaimPatterns'
-import BeneficiaryFraud from './pages/BeneficiaryFraud'
-import PharmacyDME from './pages/PharmacyDME'
-import UserManagement from './pages/UserManagement'
-import Landing from './pages/Landing'
 import Breadcrumbs from './components/Breadcrumbs'
-import BillingCodeSearch from './pages/BillingCodeSearch'
-import InvestigatePage from './pages/InvestigatePage'
-import OwnershipTracePage from './pages/OwnershipTracePage'
-import MFCUReferralPage from './pages/MFCUReferralPage'
 import Login from './pages/Login'
+// Landing is the pre-auth marketing shell, rendered outside the Routes Suspense
+// boundary — keep it eager so it doesn't suspend on synchronous render.
+import Landing from './pages/Landing'
+// Secondary / chart-heavy / graph-heavy pages are code-split so recharts,
+// cytoscape, and the analytics bundles load only when their route is visited.
+const NetworkGraph = lazy(() => import('./pages/NetworkGraph'))
+const AlertRules = lazy(() => import('./pages/AlertRules'))
+const AuditLog = lazy(() => import('./pages/AuditLog'))
+const GeographicAnalysis = lazy(() => import('./pages/GeographicAnalysis'))
+const ROIDashboard = lazy(() => import('./pages/ROIDashboard'))
+const OwnershipNetworks = lazy(() => import('./pages/OwnershipNetworks'))
+const AdminScan = lazy(() => import('./pages/AdminScan'))
+const DemographicRisk = lazy(() => import('./pages/DemographicRisk'))
+const FraudHotspots = lazy(() => import('./pages/FraudHotspots'))
+const BeneficiaryDensity = lazy(() => import('./pages/BeneficiaryDensity'))
+const UtilizationAnalysis = lazy(() => import('./pages/UtilizationAnalysis'))
+const PopulationRatio = lazy(() => import('./pages/PopulationRatio'))
+const TrendDivergence = lazy(() => import('./pages/TrendDivergence'))
+const Watchlist = lazy(() => import('./pages/Watchlist'))
+const FraudRings = lazy(() => import('./pages/FraudRings'))
+const FraudBrain = lazy(() => import('./pages/FraudBrain'))
+const Excluded = lazy(() => import('./pages/Excluded'))
+const Methods = lazy(() => import('./pages/Methods'))
+const OigTips = lazy(() => import('./pages/OigTips'))
+const NewsAlerts = lazy(() => import('./pages/NewsAlerts'))
+const MLModel = lazy(() => import('./pages/MLModel'))
+const ClaimPatterns = lazy(() => import('./pages/ClaimPatterns'))
+const BeneficiaryFraud = lazy(() => import('./pages/BeneficiaryFraud'))
+const PharmacyDME = lazy(() => import('./pages/PharmacyDME'))
+const UserManagement = lazy(() => import('./pages/UserManagement'))
+const BillingCodeSearch = lazy(() => import('./pages/BillingCodeSearch'))
+const InvestigatePage = lazy(() => import('./pages/InvestigatePage'))
+const OwnershipTracePage = lazy(() => import('./pages/OwnershipTracePage'))
+const MFCUReferralPage = lazy(() => import('./pages/MFCUReferralPage'))
 import NotificationBell from './components/NotificationBell'
 import CommandPalette from './components/CommandPalette'
 import KeyboardShortcuts from './components/KeyboardShortcuts'
@@ -175,6 +180,11 @@ function AnimatedRoutes() {
   return (
     <AnimatePresence mode="wait">
       <PageTransition key={location.pathname}>
+        <Suspense fallback={
+          <div className="flex items-center justify-center py-24">
+            <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+          </div>
+        }>
         <Routes location={location}>
           <Route path="/"                  element={<Overview />} />
           <Route path="/providers"         element={<ProviderExplorer />} />
@@ -212,6 +222,7 @@ function AnimatedRoutes() {
           <Route path="/users"            element={<UserManagement />} />
           <Route path="*"                  element={<Navigate to="/" replace />} />
         </Routes>
+        </Suspense>
       </PageTransition>
     </AnimatePresence>
   )

@@ -56,7 +56,7 @@ export default function AnomalyDashboard() {
   const [activeSignal, setActiveSignal] = useState(signalParam)
   const [page, setPage] = useState(1)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['anomalies', activeSignal, page],
     queryFn: () => api.anomalies({ signal: activeSignal, page, limit: 50 }),
   })
@@ -134,7 +134,17 @@ export default function AnomalyDashboard() {
                 </td>
               </tr>
             )}
-            {anomalies.map(p => (
+            {isError && !isLoading && (
+              <tr>
+                <td colSpan={6} className="px-4 py-8 text-center">
+                  <p className="text-red-400 text-sm font-medium">Failed to load anomalies</p>
+                  <p className="text-gray-500 text-xs mt-1">
+                    {error instanceof Error ? error.message : 'The anomalies request failed. Try again shortly.'}
+                  </p>
+                </td>
+              </tr>
+            )}
+            {!isError && anomalies.map(p => (
               <tr
                 key={p.npi}
                 className="hover:bg-gray-800/50 cursor-pointer transition-colors"
@@ -156,7 +166,7 @@ export default function AnomalyDashboard() {
                 </td>
               </tr>
             ))}
-            {!isLoading && anomalies.length === 0 && (
+            {!isLoading && !isError && anomalies.length === 0 && (
               <tr>
                 <td colSpan={6}>
                   <EmptyState

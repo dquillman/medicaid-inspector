@@ -309,6 +309,9 @@ def update_user(username: str, updates: dict) -> Optional[dict]:
     if "display_name" in updates:
         user["display_name"] = updates["display_name"]
 
+    if "plan" in updates:
+        user["plan"] = updates["plan"]
+
     password_changed = False
     if "password" in updates:
         if len(updates["password"]) < 8:

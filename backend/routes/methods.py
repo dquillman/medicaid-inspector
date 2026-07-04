@@ -8,7 +8,7 @@ citations behind each), the measured per-signal precision from analyst feedback
 computes), an honest data-provenance statement, and how the composite score is
 formed. Nothing here is PHI or provider-identifying.
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
 router = APIRouter(prefix="/api/methods", tags=["methods"])  # intentionally NO auth — public
 
@@ -43,39 +43,53 @@ _COMPOSITE_NOTE = (
 
 
 @router.get("")
-async def get_methods() -> dict:
-    """Per-signal methodology + measured precision + provenance. Public."""
+async def get_methods(request: Request) -> dict:
+    """Per-signal methodology + provenance (public).
+
+    The methodology itself — labels, plain-English explanations, and CFR/USC
+    citations — is fully public for credibility. The measured per-signal
+    precision / true-positive / false-positive counts are only included for
+    authenticated callers: they hand an adversarial provider a roadmap of which
+    signals are weakest and are operational data, not methodology.
+    """
     from services.narrative_generator import _SIGNAL_META
     from services.feedback_tracker import get_feedback_summary
+    from routes.auth import get_current_user
+
+    authed = await get_current_user(request) is not None
 
     fb = get_feedback_summary()
     precision_by_signal = {s["signal"]: s for s in fb.get("signal_stats", [])}
 
     signals = []
     for sig, meta in _SIGNAL_META.items():
-        stats = precision_by_signal.get(sig) or {}
-        signals.append({
+        entry = {
             "signal": sig,
             "label": meta.get("label", sig.replace("_", " ").title()),
             "explanation": meta.get("explanation", ""),
             "citations": meta.get("citations", []),
+        }
+        if authed:
+            stats = precision_by_signal.get(sig) or {}
             # measured-precision block (None until enough analyst dispositions exist)
-            "precision": stats.get("precision"),
-            "true_positives": stats.get("true_positives", 0),
-            "false_positives": stats.get("false_positives", 0),
-            "sample_size": stats.get("total", 0),
-            "weight_adjustment": stats.get("weight_adjustment", 1.0),
-        })
+            entry["precision"] = stats.get("precision")
+            entry["true_positives"] = stats.get("true_positives", 0)
+            entry["false_positives"] = stats.get("false_positives", 0)
+            entry["sample_size"] = stats.get("total", 0)
+            entry["weight_adjustment"] = stats.get("weight_adjustment", 1.0)
+        signals.append(entry)
 
     signals.sort(key=lambda s: s["label"])
-    return {
+    result = {
         "signal_count": len(signals),
         "signals": signals,
         "provenance": _PROVENANCE,
         "composite_methodology": _COMPOSITE_NOTE,
-        "feedback_totals": {
+    }
+    if authed:
+        result["feedback_totals"] = {
             "dispositions": fb.get("total_dismissals", 0),
             "true_positive_signal_hits": fb.get("total_tp_signals", 0),
             "false_positive_signal_hits": fb.get("total_fp_signals", 0),
-        },
-    }
+        }
+    return result
