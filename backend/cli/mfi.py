@@ -199,6 +199,17 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
     repo_root = _BACKEND_DIR.parent
     secret_name = os.environ.get("MFI_ADMIN_PASSWORD_SECRET", "admin-password")
 
+    # Single source of truth for the app version is frontend/package.json. Inject
+    # it so /health and the FastAPI docs report the same version as the UI.
+    # NOTE: gcloud's --set-env-vars REPLACES the whole env set, so APP_VERSION
+    # must be listed here explicitly or the deployed revision reverts to "dev".
+    app_version = "dev"
+    try:
+        _pkg = json.loads((repo_root / "frontend" / "package.json").read_text(encoding="utf-8"))
+        app_version = _pkg.get("version") or "dev"
+    except Exception:
+        _log("WARNING: could not read frontend/package.json version — deploying APP_VERSION=dev")
+
     # gcloud's bundled `third_party/pyasn1` is corrupted in some Cloud SDK
     # installs (missing `pyasn1.type.univ`). Setting CLOUDSDK_PYTHON_SITEPACKAGES=1
     # lets gcloud fall back to the system Python's site-packages, where pyasn1
@@ -217,10 +228,11 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
         "--project", _DEFAULT_GCLOUD_PROJECT,
         "--region", _DEFAULT_GCLOUD_REGION,
         "--allow-unauthenticated",
-        "--set-env-vars", "PYTHONUNBUFFERED=1",
+        "--set-env-vars", f"PYTHONUNBUFFERED=1,APP_VERSION={app_version}",
         "--update-secrets", f"ADMIN_PASSWORD={secret_name}:latest",
         "--quiet",
     ]
+    _log(f"deploying backend v{app_version} to {_DEFAULT_GCLOUD_SERVICE} …")
     rc = _run_shell(cmd, env=deploy_env)
     if rc != 0:
         return _err(
@@ -229,16 +241,36 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
             f"the 'Secret Manager Secret Accessor' role on the {secret_name!r} secret."
         )
 
-    # Smoke test
+    # Smoke test — confirm 200 AND that the deployed version matches what we
+    # just built, catching the "APP_VERSION reverted / wrong image" failure mode.
     _log(f"smoke-testing {_DEFAULT_BACKEND_URL}/health …")
     deadline = time.time() + _HEALTH_TIMEOUT_SECONDS
     while time.time() < deadline:
         status, body = _http_get(f"{_DEFAULT_BACKEND_URL}/health", timeout=5.0)
         if status == 200:
             _log(f"health check passed: {body[:120]}")
+            if f'"{app_version}"' not in body:
+                _log(
+                    f"WARNING: /health does not report v{app_version} — the deployed "
+                    "revision may be serving a stale APP_VERSION or image."
+                )
             return 0
         time.sleep(3)
     return _err("health check did not return 200 within timeout — investigate before traffic shifts")
+
+
+def cmd_deploy_all(args: argparse.Namespace) -> int:
+    """Deploy backend then frontend in the correct order.
+
+    Frontend-only deploys ship UI that can break against an old API, and
+    backend-only deploys leave the UI stale — so the safe default is to ship
+    both. Backend goes first so the API is ready before the new UI reaches users.
+    """
+    _log("deploy all: backend first, then frontend")
+    rc = cmd_deploy_backend(args)
+    if rc != 0:
+        return _err("backend deploy failed — aborting before frontend so the pair stays consistent")
+    return cmd_deploy_frontend(args)
 
 
 def cmd_deploy_frontend(args: argparse.Namespace) -> int:
@@ -599,6 +631,11 @@ def _build_parser() -> argparse.ArgumentParser:
     p_deploy_fe = deploy_sub.add_parser("frontend", help="Build and deploy frontend to Firebase Hosting")
     p_deploy_fe.add_argument("--skip-build", action="store_true", help="Skip npm run build (use existing dist/)")
     p_deploy_fe.set_defaults(func=cmd_deploy_frontend)
+
+    p_deploy_all = deploy_sub.add_parser(
+        "all", help="Deploy backend then frontend (the safe default — keeps the pair in sync)")
+    p_deploy_all.add_argument("--skip-build", action="store_true", help="Skip npm run build for the frontend step")
+    p_deploy_all.set_defaults(func=cmd_deploy_all)
 
     # sync-exclusions
     p_sync = sub.add_parser("sync-exclusions", help="Refresh OIG + SAM + NPI exclusion data")

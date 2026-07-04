@@ -94,3 +94,6 @@ backend/oig_tips.json
 backend/prescan_slim.json
 backend/dataset_config.json
 backend/phi_access_log.json
+
+# Stale build-staging fossil — canonical Dockerfile is at repo root
+deploy-tmp/

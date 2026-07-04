@@ -4,23 +4,17 @@ set -euo pipefail
 PROJECT_ID="${GCP_PROJECT_ID:-medicaid-inspector}"
 REGION="${GCP_REGION:-us-central1}"
 SERVICE_NAME="medicaid-inspector-api"
+ADMIN_PASSWORD_SECRET="${MFI_ADMIN_PASSWORD_SECRET:-admin-password}"
 
-# ADMIN_PASSWORD must be set so the admin account has a stable password across
-# Cloud Run cold starts. Without it every new container generates a random
-# one-time password that is only visible in the logs.
+# The admin account password is mounted from GCP Secret Manager (secret
+# "admin-password") rather than passed as a plaintext env var. A plaintext
+# --set-env-vars value is readable by anyone with run.services.get and lingers
+# in shell history; the secret reference never crosses the shell boundary.
+# The Cloud Run service account needs the "Secret Manager Secret Accessor" role
+# on this secret (granted once via reset-admin-password.sh / setup).
 #
-# Usage:
-#   ADMIN_PASSWORD=yourpassword ./deploy-backend.sh
-#
-# Or store it in GCP Secret Manager and export before deploying:
-#   gcloud secrets versions access latest --secret=admin-password --project=$PROJECT_ID
-if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
-  echo "ERROR: ADMIN_PASSWORD is not set."
-  echo "  Set it before deploying: ADMIN_PASSWORD=yourpassword ./deploy-backend.sh"
-  echo "  Or retrieve from Secret Manager:"
-  echo "    export ADMIN_PASSWORD=\$(gcloud secrets versions access latest --secret=admin-password --project=${PROJECT_ID})"
-  exit 1
-fi
+# Usage:  ./deploy-backend.sh
+# Rotate the password by adding a new secret version, not by editing this file.
 
 # Single source of truth for the app version is frontend/package.json. Inject
 # it so the backend (/health and the FastAPI docs) reports the same version as
@@ -41,7 +35,8 @@ gcloud run deploy "$SERVICE_NAME" \
   --timeout 300 \
   --allow-unauthenticated \
   --port 8080 \
-  --set-env-vars "PYTHONUNBUFFERED=1,ADMIN_PASSWORD=${ADMIN_PASSWORD},APP_VERSION=${APP_VERSION}"
+  --set-env-vars "PYTHONUNBUFFERED=1,APP_VERSION=${APP_VERSION}" \
+  --set-secrets "ADMIN_PASSWORD=${ADMIN_PASSWORD_SECRET}:latest"
 
 echo "==> Backend deployed!"
 echo "Service URL:"

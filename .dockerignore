@@ -8,6 +8,14 @@ __pycache__/
 *.db
 *.db-shm
 *.db-wal
+# Secrets & PHI — never bake into an image. .gcloudignore already keeps these
+# out of `gcloud run deploy --source .`; this guards a plain `docker build` too.
+backend/users.json
+backend/sessions.json
+backend/phi_access_log.json
+.env
+backend/.env
+*.env
 backend/prescan_cache.json
 backend/stdout*.log
 backend/stderr*.log
