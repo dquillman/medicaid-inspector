@@ -719,19 +719,36 @@ async def start_download(force: bool = False):
 
 # ── Serve frontend static files (production) ─────────────────────────────────
 _static_dir = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend", "dist"))
+_static_root_real = os.path.realpath(_static_dir)
 log.info("Static dir: %s (exists=%s)", _static_dir, os.path.isdir(_static_dir))
 if os.path.isdir(_static_dir):
     # Serve static assets (JS, CSS, etc.)
     app.mount("/assets", StaticFiles(directory=os.path.join(_static_dir, "assets")), name="static-assets")
 
+    _index_file = os.path.join(_static_dir, "index.html")
+
+    def _safe_static_path(path: str) -> Optional[str]:
+        """Resolve a request path under the static root, or None if it escapes.
+
+        The SPA catch-all interpolates the raw URL tail into a filesystem path.
+        Without confinement, '../../backend/users.json' style inputs would let an
+        unauthenticated caller read backend source and secrets. We realpath the
+        candidate and require it to stay within the static root.
+        """
+        candidate = os.path.realpath(os.path.join(_static_dir, path))
+        if candidate == _static_root_real or candidate.startswith(_static_root_real + os.sep):
+            return candidate
+        return None
+
     # Catch-all for SPA routing — must be last
     @app.get("/", include_in_schema=False)
     async def serve_spa_root():
-        return FileResponse(os.path.join(_static_dir, "index.html"))
+        return FileResponse(_index_file)
 
     @app.get("/{path:path}", include_in_schema=False)
     async def serve_spa(path: str):
-        file_path = os.path.join(_static_dir, path)
-        if os.path.isfile(file_path):
-            return FileResponse(file_path)
-        return FileResponse(os.path.join(_static_dir, "index.html"))
+        safe = _safe_static_path(path)
+        if safe and os.path.isfile(safe):
+            return FileResponse(safe)
+        # Unknown/escaping path → serve the SPA shell (client-side routing).
+        return FileResponse(_index_file)

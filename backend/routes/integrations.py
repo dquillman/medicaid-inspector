@@ -6,12 +6,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
-from routes.auth import require_user
+from routes.auth import require_user, require_admin
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/integrations", tags=["integrations"], dependencies=[Depends(require_user)])
-admin_router = APIRouter(prefix="/api/admin", tags=["admin-integrations"], dependencies=[Depends(require_user)])
+# admin_router endpoints trigger privileged operations (bulk data refresh, email
+# sending) — gate at admin level, not viewer level.
+admin_router = APIRouter(prefix="/api/admin", tags=["admin-integrations"], dependencies=[Depends(require_admin)])
 provider_router = APIRouter(prefix="/api/providers", tags=["provider-integrations"], dependencies=[Depends(require_user)])
 
 
@@ -72,8 +74,20 @@ class TestEmailRequest(BaseModel):
     to: str
 
 @admin_router.post("/email/test")
-async def email_test(body: TestEmailRequest):
-    """Send a test email to verify SMTP configuration."""
+async def email_test(body: TestEmailRequest, user: dict = Depends(require_admin)):
+    """Send a test email to verify SMTP configuration.
+
+    The recipient is restricted to the requesting admin's own registered
+    address so this endpoint cannot be used to send app-branded mail to
+    arbitrary third parties.
+    """
+    own_email = (user.get("username") or "").strip().lower()
+    requested = (body.to or "").strip().lower()
+    if requested != own_email:
+        raise HTTPException(
+            403,
+            "Test emails may only be sent to your own registered account email.",
+        )
     from services.email_service import send_email
     result = await send_email(
         to=body.to,
