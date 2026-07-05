@@ -108,7 +108,9 @@ class Boundary extends Component<{ children: ReactNode; name?: string }, { err: 
   state = { err: false }
   static getDerivedStateFromError() { return { err: true } }
   componentDidCatch(e: Error) {
-    if (process.env.BENCH_DEBUG) console.log(`[bench-error] ${this.props.name}: ${e?.message?.split('\n')[0]}`)
+    // Access process defensively: @types/node isn't a dep, so a bare `process`
+    // reference fails the strict `tsc` build gate. It exists at runtime under vitest.
+    if ((globalThis as any).process?.env?.BENCH_DEBUG) console.log(`[bench-error] ${this.props.name}: ${e?.message?.split('\n')[0]}`)
   }
   render() { return this.state.err ? createElement('div', { 'data-errored': '1' }, 'errored') : this.props.children }
 }

@@ -986,6 +986,98 @@ async def search_by_name(q: str = Query(..., min_length=2)):
     return await search_providers(q)
 
 
+async def _timelines_for_npis(npis: tuple[str, ...]) -> list[dict]:
+    """One DuckDB scan returning monthly aggregates for MANY NPIs at once.
+
+    Replaces N per-NPI scans with a single WHERE ... IN (...) pass over the
+    parquet. Cached at the query layer (run_query is @cached_query), so repeat
+    loads of the same NPI set are instant. NPIs must be pre-validated (10 digits)
+    — they are bound as parameters here regardless.
+    """
+    if not npis:
+        return []
+    placeholders = ", ".join("?" for _ in npis)
+    sql = f"""
+    SELECT
+        BILLING_PROVIDER_NPI_NUM            AS npi,
+        CLAIM_FROM_MONTH                    AS month,
+        SUM(TOTAL_PAID)                     AS total_paid,
+        SUM(TOTAL_CLAIMS)                   AS total_claims,
+        SUM(TOTAL_UNIQUE_BENEFICIARIES)     AS total_unique_beneficiaries
+    FROM read_parquet('{get_parquet_path()}')
+    WHERE BILLING_PROVIDER_NPI_NUM IN ({placeholders})
+    GROUP BY BILLING_PROVIDER_NPI_NUM, CLAIM_FROM_MONTH
+    ORDER BY BILLING_PROVIDER_NPI_NUM, CLAIM_FROM_MONTH ASC
+    """
+    return await query_async(sql, npis)
+
+
+@router.get("/timelines")
+async def get_timelines_batch(
+    npis: str = Query(..., description="Comma-separated 10-digit NPIs (max 100)"),
+):
+    """Batched monthly billing timelines for many NPIs in a single request.
+
+    Powers the ProviderExplorer sparklines. Instead of the table firing one
+    /providers/{npi}/timeline request per visible row (up to 50 HTTP round-trips
+    — and, on a local dataset, up to 50 separate DuckDB scans), the frontend asks
+    for the whole page at once. Rows already in the prescan cache are served from
+    memory; any NPIs missing a cached timeline are resolved with ONE DuckDB scan.
+
+    Returns {"timelines": {npi: TimelineRow[]}} — every requested NPI is present
+    (empty list if it has no data or the slim deployment can't resolve it).
+    """
+    raw = [n.strip() for n in npis.split(",") if n.strip()]
+    seen: set[str] = set()
+    valid: list[str] = []
+    for n in raw:
+        if not _re.match(r"^\d{10}$", n):
+            raise HTTPException(400, f"Invalid NPI '{n}' — must be exactly 10 digits")
+        if n not in seen:
+            seen.add(n)
+            valid.append(n)
+    if not valid:
+        return {"timelines": {}}
+    if len(valid) > 100:
+        raise HTTPException(400, f"Too many NPIs ({len(valid)}) — max 100 per request")
+
+    timelines: dict[str, list] = {}
+    missing: list[str] = []
+    for npi in valid:
+        cached = get_provider_by_npi(npi)
+        if cached and cached.get("timeline"):
+            timelines[npi] = cached["timeline"]
+        else:
+            missing.append(npi)
+
+    # Every requested NPI must appear in the response, even if empty.
+    for npi in missing:
+        timelines[npi] = []
+
+    # Resolve uncached NPIs with a single scan. On slim Cloud Run the parquet is
+    # remote and a multi-NPI scan would trip the request timeout, so skip it and
+    # leave those timelines empty (same degradation as the single endpoint).
+    if missing and parquet_is_local():
+        try:
+            rows = await _asyncio.wait_for(
+                _timelines_for_npis(tuple(sorted(missing))), timeout=25.0
+            )
+            for r in rows:
+                npi = r.get("npi")
+                if npi is None:
+                    continue
+                timelines.setdefault(npi, []).append({
+                    "month": r.get("month"),
+                    "total_paid": r.get("total_paid"),
+                    "total_claims": r.get("total_claims"),
+                    "total_unique_beneficiaries": r.get("total_unique_beneficiaries"),
+                })
+        except _asyncio.TimeoutError:
+            pass  # keep whatever cached rows we have; missing stay empty
+
+    return {"timelines": timelines}
+
+
 @router.get("/{npi}")
 async def get_provider_detail(npi: str):
     """Full provider profile: NPPES identity + spending summary + risk score."""

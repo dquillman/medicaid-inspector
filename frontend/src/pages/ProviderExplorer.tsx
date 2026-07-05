@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
-import { useQuery, useQueries } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, mutate, get } from '../lib/api'
 import { fmt } from '../lib/format'
@@ -647,46 +647,38 @@ export default function ProviderExplorer() {
   }, [visibleCount, providers.length])
   const visibleProviders = providers.slice(0, visibleCount)
 
-  // Fetch sparkline timeline data only for ROWS THAT ARE ACTUALLY REVEALED.
-  // Tying this to visibleProviders (rather than all 50) means the per-row
-  // timeline requests fire in the same small batches as the progressive reveal,
-  // so they arrive staggered instead of landing all at once and re-rendering
-  // every sparkline in one heavy commit — and it cuts the request fan-out too.
-  const trendQueries = useQueries({
-    queries: visibleProviders.map(p => ({
-      queryKey: ['sparkline', p.npi],
-      queryFn: () => api.providerTimeline(p.npi),
-      staleTime: 5 * 60 * 1000,
-      enabled: visibleProviders.length > 0,
-    }))
+  // Fetch every sparkline timeline for the page in ONE batched request instead
+  // of one request per row. This collapses up to 50 HTTP round-trips (and, on a
+  // local dataset, up to 50 separate DuckDB scans) into a single call — the main
+  // lever for making the page's data-fetch feel instant. Keyed on the page's NPI
+  // set, so it fires once per page/filter change, not once per progressive-reveal
+  // step or per hover.
+  const pageNpiKey = providers.map(p => p.npi).join(',')
+  const { data: trendBatch, dataUpdatedAt: trendUpdatedAt, isLoading: trendLoading } = useQuery({
+    queryKey: ['sparklines', pageNpiKey],
+    queryFn: () => api.providerTimelines(providers.map(p => p.npi)),
+    staleTime: 5 * 60 * 1000,
+    enabled: providers.length > 0,
   })
 
-  const trendDataKey = trendQueries.map(q => q.dataUpdatedAt).join(',')
-  // Cache each NPI's sparkline array by its query's dataUpdatedAt, so a single
-  // sparkline resolving does NOT hand every other row a new array reference.
-  // This is what lets the memoized row skip re-rendering when a sibling's trend
-  // arrives — without it, the whole table re-commits on every sparkline.
-  const trendCacheRef = useRef<Record<string, { t: number; arr: number[] }>>({})
+  // Rebuild the {npi: number[]} lookup only when a new batch resolves. Holding
+  // the map identity stable between batches keeps each row's `trend` array
+  // reference stable, so the memoized <ProviderRow> skips re-rendering on hover
+  // and selection.
+  const trendCacheRef = useRef<{ t: number; map: Record<string, number[]> }>({ t: -1, map: {} })
   const trendData = useMemo(() => {
-    const cache = trendCacheRef.current
+    if (trendCacheRef.current.t === trendUpdatedAt && trendUpdatedAt !== 0) {
+      return trendCacheRef.current.map
+    }
     const lookup: Record<string, number[]> = {}
-    visibleProviders.forEach((p, i) => {
-      const q = trendQueries[i]
-      const t = q?.dataUpdatedAt || 0
-      const prev = cache[p.npi]
-      if (prev && prev.t === t) {
-        lookup[p.npi] = prev.arr
-        return
-      }
-      if (q?.data?.timeline) {
-        const arr = q.data.timeline.map(r => r.total_paid)
-        cache[p.npi] = { t, arr }
-        lookup[p.npi] = arr
-      }
-    })
+    const timelines = trendBatch?.timelines || {}
+    for (const npi in timelines) {
+      const rows = timelines[npi]
+      if (rows && rows.length) lookup[npi] = rows.map(r => r.total_paid)
+    }
+    trendCacheRef.current = { t: trendUpdatedAt, map: lookup }
     return lookup
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visibleCount, trendDataKey])
+  }, [trendUpdatedAt, trendBatch])
 
   // Keyboard navigation: j/k to move, Enter to open
   useEffect(() => {
@@ -963,7 +955,7 @@ export default function ProviderExplorer() {
                 isFocused={focusedRow === idx}
                 isSelected={selectedNpis.has(p.npi)}
                 trend={trendData[p.npi]}
-                trendLoading={!!trendQueries[idx]?.isLoading}
+                trendLoading={trendLoading}
                 onNavigate={goToProvider}
                 onToggleSelect={toggleSelectRow}
                 onFocus={setFocusedRow}

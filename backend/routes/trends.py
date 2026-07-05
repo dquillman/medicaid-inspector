@@ -1,6 +1,7 @@
 """
 Trend divergence routes — enrollment vs billing growth analysis.
 """
+import asyncio
 import logging
 import re as _re
 from fastapi import APIRouter, HTTPException, Depends
@@ -34,7 +35,10 @@ async def all_state_divergence():
     """
     All states with year-over-year enrollment vs billing trends and divergence flags.
     """
-    trends = compute_trend_divergence()
+    # Offload to a worker thread: the first (uncached) call can run a 60-300s
+    # full-parquet scan on a local dataset, which would otherwise block the whole
+    # event loop. Subsequent calls hit the 1h ttl_cache and return instantly.
+    trends = await asyncio.to_thread(compute_trend_divergence)
 
     flagged_count = sum(1 for t in trends if t["flagged"])
     with_data = [t for t in trends if t["has_billing_data"]]
@@ -76,7 +80,7 @@ async def state_detail(state: str):
     Detailed yearly breakdown for a single state.
     """
     state = _validate_state(state)
-    detail = get_state_detail(state)
+    detail = await asyncio.to_thread(get_state_detail, state)
     if not detail:
         raise HTTPException(404, f"No data found for state '{state}'")
     return detail

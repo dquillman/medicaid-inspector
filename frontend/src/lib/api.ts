@@ -231,6 +231,13 @@ export const api = {
   providerTimeline: (npi: string) =>
     get<{ npi: string; timeline: TimelineRow[] }>(`/providers/${npi}/timeline`),
 
+  // Batched sparkline timelines: one request for a whole page of NPIs instead
+  // of one request (and one DuckDB scan) per row. Returns a {npi: rows} map.
+  providerTimelines: (npis: string[]) =>
+    get<{ timelines: Record<string, TimelineRow[]> }>(
+      `/providers/timelines?npis=${npis.join(',')}`,
+    ),
+
   providerHcpcs: (npi: string) =>
     get<{ npi: string; hcpcs: HcpcsRow[] }>(`/providers/${npi}/hcpcs`),
 

@@ -11,6 +11,7 @@ from collections import defaultdict
 from typing import Any
 
 from core.store import get_prescanned
+from core.ttl_cache import ttl_cached
 
 # ---------------------------------------------------------------------------
 # Hardcoded approximate Medicaid enrollment by state, 2018-2024 (millions)
@@ -198,6 +199,7 @@ def _aggregate_billing_by_state_year() -> dict[str, dict[int, float]]:
     return dict(billing)
 
 
+@ttl_cached(seconds=3600)
 def compute_trend_divergence() -> list[dict[str, Any]]:
     """
     For each state: compute year-over-year enrollment vs billing growth,
@@ -205,6 +207,11 @@ def compute_trend_divergence() -> list[dict[str, Any]]:
     by more than DIVERGENCE_THRESHOLD_PCT for CONSECUTIVE_YEARS_FLAG+ years.
 
     Returns a list of state records sorted by divergence_score descending.
+
+    Cached for 1h: on a local/full dataset the underlying
+    _aggregate_billing_by_state_year() is a 60-300s full-parquet scan whose
+    result only changes when the parquet/prescan does. Without this every
+    /trends/divergence and /trends/state/{state} hit re-ran the whole scan.
     """
     billing_by_state = _aggregate_billing_by_state_year()
     results: list[dict[str, Any]] = []
