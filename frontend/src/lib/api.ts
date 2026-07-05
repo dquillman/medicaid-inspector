@@ -1142,5 +1142,15 @@ export const api = {
   referralStages: () => get<{ stages: string[] }>('/referrals/meta/stages'),
 
   referralOutcomes: () => get<{ outcomes: string[] }>('/referrals/meta/outcomes'),
+
+  // ── HAL assistant ─────────────────────────────────────────────────────────
+  // Relays to the shared HAL assistant (in the qcode ops app) via the MFI
+  // backend. `npi` is the provider the user is currently viewing, if any.
+  halChat: (messages: HalChatMessage[], npi?: string) =>
+    mutate<HalChatResponse>('POST', '/hal/chat', { messages, npi: npi ?? null }),
 }
+
+export type HalChatMessage = { role: 'user' | 'assistant'; content: string }
+export type HalAction = { name: string; input?: Record<string, unknown>; result?: string }
+export type HalChatResponse = { reply: string; actions: HalAction[] }
 

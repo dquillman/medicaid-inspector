@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     SMTP_PASS: str = ""
     FROM_EMAIL: str = ""
 
+    # HAL assistant relay — MFI's "Ask HAL" panel proxies chat to the shared HAL
+    # assistant that lives in the qcode ops app. HAL_URL is qcode's HAL endpoint;
+    # HAL_TOKEN is qcode's admin bearer token, held server-side so it never
+    # reaches the browser. Leave HAL_TOKEN blank to disable the panel.
+    HAL_URL: str = "http://localhost:3000/api/hal"
+    HAL_TOKEN: str = ""
+
     class Config:
         env_file = ".env"
         # Ignore unknown env vars instead of crashing at startup.

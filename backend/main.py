@@ -75,6 +75,7 @@ from routes import backup as backup_routes
 from routes import phi_admin
 from routes import billing_codes
 from routes import diagnoses
+from routes import hal as hal_routes
 from core.metrics import record_request, get_metrics, get_prometheus_text
 from core.phi_middleware import PHIAccessMiddleware
 from core.phi_logger import load_phi_log_from_disk, log_phi_access, PHI_PATH_PATTERNS
@@ -381,6 +382,7 @@ app.include_router(fraud_brain_routes.router)
 app.include_router(methods_routes.router)
 app.include_router(oig_tips_routes.router)
 app.include_router(phi_admin.router)
+app.include_router(hal_routes.router)
 app.add_middleware(PHIAccessMiddleware)
 
 
