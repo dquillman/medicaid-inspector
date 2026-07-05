@@ -1,3 +1,11 @@
+> # ⚠️ SUPERSEDED — FEATURE ALREADY SHIPPED (audit 2026-07-05)
+> This spec was written against a stale gap list. The OIG-Hotline export **already exists**
+> (`GET /api/providers/{npi}/oig-tip` in `backend/routes/providers.py`, v3.2.2): structured intake
+> fields + a copy-paste hotline text block, honest indicators-not-proof framing, and signal→category
+> mapping. The tips log also exists **in-app** (`core/oig_tips_store.py`, `pages/OigTips.tsx`,
+> TIP FILED badges, v3.2.5) — superseding this spec's `pitch/tips-log.md` file plan. T3(a) is DONE.
+> Kept for the [VERIFY-AT-SUBMISSION] checklist — still worth walking the live form on the next tip.
+
 # Spec — HHS-OIG Hotline Export (T3 blocker a)
 
 > **Why this exists:** Trigger **T3** requires an OIG-Hotline-export feature. The narrative generator already produces a 7-section MFCU-style package (`services/narrative_generator.py`), but the **HHS-OIG Hotline (`tips.oig.hhs.gov`) is a web form with its own fields and length limits** — it doesn't accept a referral PDF. Today Dave hand-carves each tip out of the narrative; this spec defines a `Hotline Export` view that emits one copy-paste-ready block per hotline field. It is also the highest-leverage dogfood feature: every tip filed through it feeds `pitch/tips-log.md` and therefore trigger **T1**.

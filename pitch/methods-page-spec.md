@@ -1,3 +1,12 @@
+> # ⚠️ SUPERSEDED — FEATURE ALREADY SHIPPED (audit 2026-07-05)
+> This spec was written against a stale gap list. The /methods page **already exists and is live**
+> (`backend/routes/methods.py`, `frontend/src/pages/Methods.tsx`, v3.2.2): public, no-auth, all 18
+> signals + citations + provenance + composite note. **One deliberate design difference vs this spec:**
+> per-signal precision is **auth-gated** (v3.3.5) — public methodology, authed-only precision, so
+> adversarial providers don't get a which-signals-are-weakest roadmap. That supersedes §2.4's
+> public-table design. T3(b) is DONE; T3(c) now only needs enough analyst dispositions for ≥6
+> signals to show numbers. Kept for the labeling rules + acceptance-criteria language only.
+
 # Spec — Public `/methods` Page (T3 blocker b)
 
 > **Why this exists:** Sales-readiness trigger **T3** requires (a) OIG-Hotline export, (b) this public `/methods` page, and (c) a labeled precision-at-50 number on ≥6 of the 18 signals — all live on `medicaid-inspector.web.app`. The data for (b) and (c) **already exists in code** (`narrative_generator._SIGNAL_META` for per-signal explanations + citations; `feedback_tracker.get_feedback_summary()` for per-signal precision). This page is a publishing job, not a research job.

@@ -35,8 +35,8 @@ When any one of these fires:
 | [`pilot-pitch-caresource.md`](./pilot-pitch-caresource.md) | 90-day fixed-price ($45K) pilot proposal — telefraud-DME cold open, data-provenance disclosure, AG/MFCU chain-of-custody section, six signals with OIG backing, explicit no-promise list | RESERVE — gated on T1-T4 trigger |
 | [`security-compliance-onepager.md`](./security-compliance-onepager.md) | One-page security & compliance for MCO InfoSec reviewers. Glossary, public methods note, honest cert posture, SOC 2 bridge mechanisms, source-code escrow language | RESERVE — gated on T1-T4 trigger |
 | [`outreach-sequence.md`](./outreach-sequence.md) | 5-touch cold-outbound sequence + 7-source name-discovery + A/B matrix + 23-column tracking sheet + 8 discipline rules | RESERVE — gated on T1-T4 trigger |
-| [`methods-page-spec.md`](./methods-page-spec.md) | Build spec for the public `/methods` page — route/API design, per-signal cards from `_SIGNAL_META`, precision-table labeling rules (n≥5 floor), honest data-limits section, gaming-resistance decision, acceptance criteria | ACTIVE — T3(b)/(c) blocker; ~1 day build |
-| [`oig-hotline-export-mapping.md`](./oig-hotline-export-mapping.md) | Build spec for the OIG-Hotline export — narrative-section → hotline-form field mapping, `render_hotline_tip` renderer, fixed data-caveat sentence, tips-log tie-in for T1 | ACTIVE — T3(a) blocker; ~1 day build; form fields [VERIFY-AT-SUBMISSION] |
+| [`methods-page-spec.md`](./methods-page-spec.md) | ⚠️ SUPERSEDED spec (audit 2026-07-05): `/methods` was already shipped in v3.2.2 and is live; precision deliberately auth-gated in v3.3.5. **T3(b) DONE.** T3(c) now needs only analyst dispositions (≥6 signals over the n≥5 floor) | HISTORICAL — kept for labeling rules |
+| [`oig-hotline-export-mapping.md`](./oig-hotline-export-mapping.md) | ⚠️ SUPERSEDED spec (audit 2026-07-05): the export was already shipped in v3.2.2 (`GET /api/providers/{npi}/oig-tip`), tip log + TIP FILED badges in v3.2.5 (in-app, replacing the `tips-log.md` plan). **T3(a) DONE.** | HISTORICAL — kept for the [VERIFY-AT-SUBMISSION] checklist |
 
 ---
 
@@ -46,20 +46,20 @@ The work this week and ongoing — none of it requires the sales pack:
 
 1. **Use MFI to submit one tip to HHS-OIG Hotline** (`tips.oig.hhs.gov`). Highest-confidence flagged provider. Walk the full submission flow end-to-end. Note every place MFI doesn't yet output what the form wants. That delta becomes the next product backlog.
 2. **Run the structured 90-minute session with the investigator friend.** He drives. You watch. Two outputs: (a) the list of every gap between MFI and his actual workflow, (b) his read on whether MFI's current dossier export is tip-quality for OIG/MFCU triage. Pay him for the time. This work also counts toward T2.
-3. **Ship the OIG-Hotline-export feature.** One-click conversion of a flagged provider into an OIG Hotline submission packet — allegation summary, providers involved, evidence index, methodology citation, attachable PDF. This is the highest-leverage product feature given the current user is Dave-as-tipster. Counts toward T3.
-4. **Build the `/methods` page.** For each of the 18 signals: cohort definition, threshold, holdout precision-at-50, false-positive rate, last-calibrated date, known limitations. Counts toward T3.
-5. **Log every tip submitted** in `pitch/tips-log.md` (create when first tip ships): date, target provider (anonymized externally), signals invoked, submission method (OIG Hotline / state MFCU / both), response received (if any). This log is the evidence file for T1.
+3. ~~Ship the OIG-Hotline-export feature.~~ ✅ **SHIPPED** (v3.2.2): `GET /api/providers/{npi}/oig-tip` — structured intake fields + copy-paste hotline text block, indicators-not-proof framing, signal→category mapping. T3(a) done.
+4. ~~Build the `/methods` page.~~ ✅ **SHIPPED and LIVE** (v3.2.2; gating v3.3.5): public methodology (18 signals + citations + provenance); per-signal precision auth-gated by design. T3(b) done. **T3(c) remains: accumulate analyst dispositions until ≥6 signals clear the n≥5 precision floor** — that's queue-review labor, not code.
+5. **Log every tip submitted** — ✅ the log is now **in-app** (v3.2.5): OIG Tips page (`pages/OigTips.tsx`, `core/oig_tips_store.py`) with status/reference-number/outcome tracking + cross-page TIP FILED badges. This store is the T1 evidence file; `pitch/tips-log.md` is no longer planned.
 
 ---
 
 ## What's NOT in this directory yet (deliberately)
 
-- **`tips-log.md`** — create when first tip is filed. Format: date, target (anonymized), signals invoked, submission channel, response received.
+- ~~`tips-log.md`~~ — superseded: the tip log shipped **in-app** (v3.2.5, OIG Tips page + `oig_tips_store`).
 - Master Services Agreement template — wait until first pilot is signed; do not over-engineer
 - Case study — requires actual pilot data (or, alternatively, an OIG-cited case)
 - Pricing tiers for production contracts — set during pilot wrap-up
 - Investor deck — different audience, different document, different time
-- Public methods note (`medicaid-inspector.web.app/methods`) — referenced by `pilot-pitch-caresource.md` and `security-compliance-onepager.md`; **part of T3**
+- ~~Public methods note~~ — ✅ live at `medicaid-inspector.web.app/methods` (v3.2.2); `pilot-pitch-caresource.md` and `security-compliance-onepager.md` can now cite it as existing
 
 ---
 
