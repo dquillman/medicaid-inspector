@@ -35,6 +35,8 @@ When any one of these fires:
 | [`pilot-pitch-caresource.md`](./pilot-pitch-caresource.md) | 90-day fixed-price ($45K) pilot proposal — telefraud-DME cold open, data-provenance disclosure, AG/MFCU chain-of-custody section, six signals with OIG backing, explicit no-promise list | RESERVE — gated on T1-T4 trigger |
 | [`security-compliance-onepager.md`](./security-compliance-onepager.md) | One-page security & compliance for MCO InfoSec reviewers. Glossary, public methods note, honest cert posture, SOC 2 bridge mechanisms, source-code escrow language | RESERVE — gated on T1-T4 trigger |
 | [`outreach-sequence.md`](./outreach-sequence.md) | 5-touch cold-outbound sequence + 7-source name-discovery + A/B matrix + 23-column tracking sheet + 8 discipline rules | RESERVE — gated on T1-T4 trigger |
+| [`methods-page-spec.md`](./methods-page-spec.md) | Build spec for the public `/methods` page — route/API design, per-signal cards from `_SIGNAL_META`, precision-table labeling rules (n≥5 floor), honest data-limits section, gaming-resistance decision, acceptance criteria | ACTIVE — T3(b)/(c) blocker; ~1 day build |
+| [`oig-hotline-export-mapping.md`](./oig-hotline-export-mapping.md) | Build spec for the OIG-Hotline export — narrative-section → hotline-form field mapping, `render_hotline_tip` renderer, fixed data-caveat sentence, tips-log tie-in for T1 | ACTIVE — T3(a) blocker; ~1 day build; form fields [VERIFY-AT-SUBMISSION] |
 
 ---
 
