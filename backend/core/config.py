@@ -36,6 +36,10 @@ class Settings(BaseSettings):
     # reaches the browser. Leave HAL_TOKEN blank to disable the panel.
     HAL_URL: str = "http://localhost:3000/api/hal"
     HAL_TOKEN: str = ""
+    # If set to the qcode repo dir, the relay will auto-start HAL (npm run dev)
+    # when it finds it offline, so HAL survives being closed mid-session without
+    # the user restarting anything. Blank disables auto-start (prod / no repo).
+    HAL_QCODE_DIR: str = "G:/Users/daveq/qcode"
 
     class Config:
         env_file = ".env"
