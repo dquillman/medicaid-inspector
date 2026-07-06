@@ -66,6 +66,7 @@ from services.ownership_tracer import trace_ownership_network
 from core.exclusion_aggregator import check_all_exclusions
 from core.phi_logger import log_phi_access, load_phi_log_from_disk
 from core.store import load_prescanned_from_disk, get_provider_by_npi
+from data.nppes_client import get_provider as nppes_get_provider
 
 from fastapi import HTTPException
 
@@ -189,6 +190,30 @@ async def _tool_top_risky_providers(args: dict) -> dict:
         top = [e for e in top if e.get("oig_excluded")]
 
     top = top[:limit]
+
+    # Backfill missing identity fields. Many prescan-cache rows have no
+    # provider_name/state/specialty (the slim cache stores only billing stats),
+    # which left HAL answering with bare NPIs. Best-effort NPPES lookup (cached
+    # via @cached_nppes) for just the entries being returned — never fails the
+    # tool if the registry is slow or down.
+    async def _fill(entry: dict) -> None:
+        if entry.get("provider_name") and entry.get("state"):
+            return
+        try:
+            info = await nppes_get_provider(entry.get("npi", ""))
+        except Exception:
+            return
+        if not info:
+            return
+        if not entry.get("provider_name"):
+            entry["provider_name"] = info.get("name", "")
+        if not entry.get("state"):
+            entry["state"] = (info.get("address") or {}).get("state", "")
+        if not entry.get("specialty"):
+            entry["specialty"] = (info.get("taxonomy") or {}).get("description", "")
+
+    await asyncio.gather(*(_fill(e) for e in top), return_exceptions=True)
+
     return {**result, "top": top, "filters": {"state": state, "signal": signal}}
 
 
