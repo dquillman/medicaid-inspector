@@ -1146,6 +1146,8 @@ export const api = {
   // ── HAL assistant ─────────────────────────────────────────────────────────
   // Relays to the shared HAL assistant (in the qcode ops app) via the MFI
   // backend. `npi` is the provider the user is currently viewing, if any.
+  halStatus: () => get<{ configured: boolean }>('/hal/status'),
+
   halChat: (messages: HalChatMessage[], npi?: string) =>
     mutate<HalChatResponse>('POST', '/hal/chat', { messages, npi: npi ?? null }),
 }

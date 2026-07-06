@@ -69,7 +69,18 @@ export default function HalPanel() {
   const [listening, setListening] = useState(false)
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) !== 'off')
   const [canListen, setCanListen] = useState(false)
+  // Deploy gate: only render when the backend has a HAL relay configured
+  // (HAL_TOKEN set). On prod — where qcode/HAL isn't reachable — the whole
+  // panel stays hidden instead of showing a button that can only error.
+  const [configured, setConfigured] = useState(false)
   const npi = useCurrentNpi()
+
+  useEffect(() => {
+    api
+      .halStatus()
+      .then((r) => setConfigured(r.configured))
+      .catch(() => setConfigured(false))
+  }, [])
 
   const endRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
@@ -222,6 +233,8 @@ export default function HalPanel() {
 
   const eyeState: 'idle' | 'thinking' | 'speaking' = speaking ? 'speaking' : busy ? 'thinking' : 'idle'
   const status = listening ? 'LISTENING' : speaking ? 'SPEAKING' : busy ? 'PROCESSING' : 'OPERATIONAL'
+
+  if (!configured) return null
 
   return (
     <>

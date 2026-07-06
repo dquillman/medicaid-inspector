@@ -50,6 +50,14 @@ class HalChatResponse(BaseModel):
     actions: List[HalAction] = []
 
 
+@router.get("/status")
+async def hal_status(user: dict = Depends(require_user)):
+    """Whether the HAL relay is configured on this deployment. The frontend
+    hides the Ask HAL panel entirely when it isn't — so shipping this build to
+    prod (where qcode/HAL isn't reachable) doesn't show a dead button."""
+    return {"configured": bool(settings.HAL_TOKEN)}
+
+
 def _inject_provider_context(messages: List[dict], npi: Optional[str]) -> List[dict]:
     """If the user is on a provider page, tell HAL which NPI — prepended to the
     most recent user message so HAL can call its mfi_* tools without the user
