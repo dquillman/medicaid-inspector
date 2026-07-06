@@ -93,7 +93,11 @@ async def hal_chat(req: HalChatRequest, user: dict = Depends(require_user)):
     messages = _inject_provider_context(trimmed, req.npi)
 
     try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
+        # Generous read timeout: a multi-tool HAL answer is 2-8 Anthropic rounds
+        # plus MCP data lookups and can exceed 60s when caches are cold.
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(connect=5.0, read=170.0, write=30.0, pool=30.0)
+        ) as client:
             resp = await client.post(
                 settings.HAL_URL,
                 json={"messages": messages},
@@ -105,8 +109,14 @@ async def hal_chat(req: HalChatRequest, user: dict = Depends(require_user)):
             "HAL is offline — start the qcode ops server (run `npm run dev` in the "
             "qcode repo, or set HAL_URL to its address).",
         )
+    except httpx.ReadTimeout:
+        raise HTTPException(
+            504,
+            "HAL took too long to answer (over ~3 minutes). Try again, or ask a "
+            "narrower question — big multi-provider sweeps are the slow ones.",
+        )
     except httpx.HTTPError as e:
-        logger.error("HAL relay transport error: %s", e)
+        logger.error("HAL relay transport error: %s", type(e).__name__)
         raise HTTPException(502, "Could not reach HAL.")
 
     if resp.status_code != 200:
