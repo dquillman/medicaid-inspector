@@ -50,7 +50,7 @@ const MFCUReferralPage = lazy(() => import('./pages/MFCUReferralPage'))
 import NotificationBell from './components/NotificationBell'
 import CommandPalette from './components/CommandPalette'
 import KeyboardShortcuts from './components/KeyboardShortcuts'
-import HalPanel from './components/HalPanel'
+import HalPanel, { useHalOpen } from './components/HalPanel'
 import { mutate } from './lib/api'
 
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
@@ -235,6 +235,12 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed()
   const sidebarMargin = collapsed ? 'lg:ml-16' : 'lg:ml-56'
+  // HAL's panel is a fixed-width (max-w-md = 28rem) overlay on the right; push
+  // main content left by the same amount while it's open so nothing underneath
+  // is covered. Gated at lg: like the sidebar margin above, since the panel
+  // occupies the full viewport width below that anyway (nothing to push into).
+  const { open: halOpen, setOpen: setHalOpen } = useHalOpen()
+  const halMargin = halOpen ? 'lg:mr-[28rem]' : 'lg:mr-0'
 
   // Restore session from localStorage (with expiry check)
   useEffect(() => {
@@ -427,7 +433,7 @@ export default function App() {
 
         {/* Page content */}
         <main
-          className={`flex-1 p-4 md:p-6 mt-12 transition-[margin-left] duration-200 ${sidebarMargin}`}
+          className={`flex-1 p-4 md:p-6 mt-12 transition-[margin-left,margin-right] duration-200 ${sidebarMargin} ${halMargin}`}
           role="main"
         >
           <AnimatedRoutes />
@@ -435,7 +441,7 @@ export default function App() {
 
         {/* Footer */}
         <footer
-          className={`no-print py-4 text-center transition-[margin-left] duration-200 ${sidebarMargin}`}
+          className={`no-print py-4 text-center transition-[margin-left,margin-right] duration-200 ${sidebarMargin} ${halMargin}`}
         >
           <div className="divider mb-4 mx-auto max-w-2xl" />
           <p className="text-xs text-gray-600 uppercase tracking-[0.2em] font-medium">
@@ -445,7 +451,7 @@ export default function App() {
 
         <CommandPalette />
         <KeyboardShortcuts />
-        <HalPanel />
+        <HalPanel open={halOpen} setOpen={setHalOpen} />
       </div>
       </ProviderFlagsProvider>
       )}

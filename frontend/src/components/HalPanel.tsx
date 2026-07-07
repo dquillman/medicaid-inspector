@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
-import { useLocation } from 'react-router-dom'
+import { useState, useRef, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react'
+import { useLocation, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
-import { api, type HalAction } from '../lib/api'
+import { api, type HalAction, type HalProvider } from '../lib/api'
+import { buildReportSlideshow } from './halReport'
 
 // HAL slide-out — a global "Ask HAL" panel. HAL itself lives in the qcode ops
 // app; the MFI backend relays chat to it (routes/hal.py). When the user is on a
@@ -16,7 +17,43 @@ type Msg = {
   role: 'user' | 'assistant'
   content: string
   actions?: HalAction[]
+  providers?: HalProvider[]
   error?: boolean
+}
+
+// Render assistant text, turning any known provider name into a link to its
+// page (/providers/<npi>). Longest names first so overlapping names match
+// greedily; case-insensitive; each name linked on every occurrence.
+function LinkifiedText({ text, providers }: { text: string; providers?: HalProvider[] }) {
+  if (!providers || providers.length === 0) {
+    return <p className="whitespace-pre-wrap leading-relaxed">{text}</p>
+  }
+  const uniq = Array.from(new Map(providers.map((p) => [p.name.toLowerCase(), p])).values())
+    .filter((p) => p.name && p.name.length >= 3)
+    .sort((a, b) => b.name.length - a.name.length)
+  const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const pattern = new RegExp(`(${uniq.map((p) => esc(p.name)).join('|')})`, 'gi')
+  const byLower = new Map(uniq.map((p) => [p.name.toLowerCase(), p]))
+  const parts = text.split(pattern)
+  return (
+    <p className="whitespace-pre-wrap leading-relaxed">
+      {parts.map((part, i) => {
+        const hit = byLower.get(part.toLowerCase())
+        return hit ? (
+          <Link
+            key={i}
+            to={`/providers/${hit.npi}`}
+            className="font-medium text-brand-400 underline decoration-dotted underline-offset-2 hover:text-brand-300"
+            title={`Open provider ${hit.npi}`}
+          >
+            {part}
+          </Link>
+        ) : (
+          <span key={i}>{part}</span>
+        )
+      })}
+    </p>
+  )
 }
 
 // Minimal local typing for the vendor-prefixed Web Speech recognition API.
@@ -28,7 +65,19 @@ type Recognition = {
   stop: () => void
   onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
   onend: (() => void) | null
-  onerror: (() => void) | null
+  onerror: ((e: { error?: string }) => void) | null
+}
+
+// Human-readable causes for SpeechRecognition failures. Without this the mic
+// button fails silently (onerror just reset state) and reads as "broken".
+const MIC_ERRORS: Record<string, string> = {
+  'not-allowed':
+    'Microphone access is blocked for this site. Click the lock icon in the address bar → Site settings → Microphone → Allow, then try again. (Tabs opened by automation tools often have the prompt suppressed — open the app in a regular window if so.)',
+  'service-not-allowed':
+    'The browser blocked the speech service for this site — check Site settings → Microphone.',
+  'audio-capture': 'No microphone was found. Check that a mic is connected and not in use by another app.',
+  'network': 'The speech service could not be reached — Chrome speech recognition needs internet.',
+  'no-speech': "I didn't catch anything — try again, a bit closer to the mic.",
 }
 
 // Derive the NPI the user is currently viewing from the URL. Matches
@@ -46,13 +95,67 @@ const SUGGESTIONS = [
 ]
 
 const VOICE_KEY = 'mfi-hal-voice' // persisted VOICE ON/OFF preference
+const FACE_KEY = 'mfi-hal-face' // persisted active persona
 
-// The HAL 9000 lens — red radial eye with breathe/thinking/speaking states.
-function HalEye({ size, state }: { size: number; state: 'idle' | 'thinking' | 'speaking' }) {
+// House rule: every HAL surface carries the face switcher — same transcript,
+// same tools, only the persona/voice changes (mirrors qcode's AssistantWindow).
+export type Face = 'assistant' | 'hal' | 'jarvis'
+const FACES: Record<
+  Face,
+  { name: string; dot: string; tint?: string; voicePref: string[]; rate: number; pitch: number }
+> = {
+  assistant: {
+    name: 'ASSISTANT',
+    dot: '#9aa4b2',
+    tint: 'saturate(0.15) brightness(1.15)',
+    voicePref: ['Microsoft Aria Online (Natural) - English (United States)', 'Google US English'],
+    rate: 1.0,
+    pitch: 1.0,
+  },
+  hal: {
+    name: 'HAL 9000',
+    dot: '#ff4020',
+    voicePref: [
+      'Microsoft Guy Online (Natural) - English (United States)',
+      'Microsoft Davis Online (Natural) - English (United States)',
+      'Microsoft David - English (United States)',
+      'Microsoft Mark - English (United States)',
+      'Google US English',
+      'Daniel',
+      'Alex',
+    ],
+    rate: 0.82,
+    pitch: 0.85,
+  },
+  jarvis: {
+    name: 'J.A.R.V.I.S.',
+    dot: '#37a4ff',
+    tint: 'hue-rotate(215deg) saturate(1.15)',
+    voicePref: [
+      'Microsoft Ryan Online (Natural) - English (United Kingdom)',
+      'Microsoft George - English (United Kingdom)',
+      'Google UK English Male',
+      'Daniel',
+    ],
+    rate: 0.98,
+    pitch: 1.02,
+  },
+}
+
+// The lens — red radial eye by default, tinted per persona.
+function HalEye({
+  size,
+  state,
+  tint,
+}: {
+  size: number
+  state: 'idle' | 'thinking' | 'speaking'
+  tint?: string
+}) {
   return (
     <span
       className={`hal-lens hal-${state}`}
-      style={{ width: size, height: size }}
+      style={{ width: size, height: size, filter: tint }}
       aria-hidden="true"
     >
       <span className="hal-glint" />
@@ -60,14 +163,43 @@ function HalEye({ size, state }: { size: number; state: 'idle' | 'thinking' | 's
   )
 }
 
-export default function HalPanel() {
+// Lifted out of HalPanel (mirrors useSidebarCollapsed in Sidebar.tsx) so the
+// app shell can read/drive "open" too — it needs to know when HAL is open to
+// push main content left instead of letting the panel cover it. Not persisted
+// to localStorage: HAL should always start closed on a fresh page load.
+export function useHalOpen() {
   const [open, setOpen] = useState(false)
+  return { open, setOpen }
+}
+
+export default function HalPanel({
+  open,
+  setOpen,
+}: {
+  open: boolean
+  setOpen: Dispatch<SetStateAction<boolean>>
+}) {
   const [messages, setMessages] = useState<Msg[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [speaking, setSpeaking] = useState(false)
   const [listening, setListening] = useState(false)
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) !== 'off')
+  const [face, setFace] = useState<Face>(() => {
+    const f = localStorage.getItem(FACE_KEY)
+    return f === 'assistant' || f === 'jarvis' ? f : 'hal'
+  })
+  const faceRef = useRef<Face>(face)
+  faceRef.current = face
+  const pickFace = (f: Face) => {
+    window.speechSynthesis?.cancel()
+    setFace(f)
+    try {
+      localStorage.setItem(FACE_KEY, f)
+    } catch {
+      /* private mode */
+    }
+  }
   const [canListen, setCanListen] = useState(false)
   // Deploy gate: only render when the backend has a HAL relay configured
   // (HAL_TOKEN set). On prod — where qcode/HAL isn't reachable — the whole
@@ -113,28 +245,20 @@ export default function HalPanel() {
     const synth = window.speechSynthesis
     synth.cancel()
 
+    const persona = FACES[faceRef.current]
     const utt = new SpeechSynthesisUtterance(text)
-    utt.lang = 'en-US'
-    // HAL: soft, unhurried, perfectly even.
-    utt.rate = 0.82
-    utt.pitch = 0.85
+    utt.lang = faceRef.current === 'jarvis' ? 'en-GB' : 'en-US'
+    // HAL: soft, unhurried. JARVIS: brisk, British. Assistant: neutral.
+    utt.rate = persona.rate
+    utt.pitch = persona.pitch
     utt.volume = 1
 
     // Best-effort voice pick — never block on voiceschanged (Chrome can
     // transiently return an empty list and never re-fire the event).
     const voices = synth.getVoices()
-    const preferred = [
-      'Microsoft Guy Online (Natural) - English (United States)',
-      'Microsoft Davis Online (Natural) - English (United States)',
-      'Microsoft David - English (United States)',
-      'Microsoft Mark - English (United States)',
-      'Google US English',
-      'Daniel',
-      'Alex',
-    ]
     const pick =
-      preferred.map((n) => voices.find((v) => v.name === n)).find(Boolean) ??
-      voices.find((v) => v.lang === 'en-US') ??
+      persona.voicePref.map((n) => voices.find((v) => v.name === n)).find(Boolean) ??
+      voices.find((v) => v.lang === utt.lang) ??
       voices.find((v) => v.lang.startsWith('en'))
     if (pick) utt.voice = pick
 
@@ -174,9 +298,10 @@ export default function HalPanel() {
         const res = await api.halChat(
           next.map((m) => ({ role: m.role, content: m.content })),
           npi ?? undefined,
+          faceRef.current,
         )
         const reply = res.reply || '(no reply)'
-        setMessages((m) => [...m, { role: 'assistant', content: reply, actions: res.actions }])
+        setMessages((m) => [...m, { role: 'assistant', content: reply, actions: res.actions, providers: res.providers }])
         speak(reply)
       } catch (e) {
         setMessages((m) => [
@@ -209,10 +334,24 @@ export default function HalPanel() {
       if (t) void send(t)
     }
     rec.onend = () => setListening(false)
-    rec.onerror = () => setListening(false)
+    rec.onerror = (e) => {
+      setListening(false)
+      const why = MIC_ERRORS[e?.error ?? '']
+      if (why) {
+        setMessages((m) => [...m, { role: 'assistant', content: why, error: true }])
+      }
+    }
     recRef.current = rec
     setListening(true)
-    rec.start()
+    try {
+      rec.start()
+    } catch {
+      setListening(false)
+      setMessages((m) => [
+        ...m,
+        { role: 'assistant', content: 'The microphone could not be started in this window.', error: true },
+      ])
+    }
   }, [canListen, listening, busy, send])
 
   // Stop audio when the panel closes or unmounts.
@@ -291,13 +430,46 @@ export default function HalPanel() {
             role="dialog"
             aria-label="HAL assistant"
           >
-            {/* Header — the eye, name, live status */}
+            {/* Header — the eye, name, live status, face switcher */}
             <div className="flex items-center gap-3 border-b border-hairline px-4 py-3">
-              <HalEye size={34} state={eyeState} />
+              <HalEye size={34} state={eyeState} tint={FACES[face].tint} />
               <div className="flex-1">
-                <div className="text-sm font-bold uppercase tracking-[0.3em] text-ink-primary">HAL 9000</div>
+                <div className="text-sm font-bold uppercase tracking-[0.3em] text-ink-primary">
+                  {FACES[face].name}
+                </div>
                 <div className="text-[10px] uppercase tracking-[0.25em] text-ink-tertiary">{status}</div>
               </div>
+              {/* Face switcher — same transcript, same tools, different persona */}
+              <div className="flex items-center gap-1.5" role="group" aria-label="Choose persona">
+                {(Object.keys(FACES) as Face[]).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => pickFace(f)}
+                    title={FACES[f].name}
+                    aria-label={`Talk to ${FACES[f].name}`}
+                    aria-pressed={face === f}
+                    className="rounded-full p-0.5 transition-transform hover:scale-125"
+                    style={{
+                      outline: face === f ? `1px solid ${FACES[f].dot}` : 'none',
+                      outlineOffset: 2,
+                    }}
+                  >
+                    <span
+                      className="block h-2.5 w-2.5 rounded-full"
+                      style={{ background: FACES[f].dot, opacity: face === f ? 1 : 0.45 }}
+                    />
+                  </button>
+                ))}
+              </div>
+              {messages.some((m) => m.role === 'assistant') && (
+                <button
+                  onClick={() => buildReportSlideshow(messages)}
+                  className="text-[10px] uppercase tracking-wider text-threat-critical hover:text-threat-high transition-colors"
+                  title="Turn this conversation into a slideshow report"
+                >
+                  Report
+                </button>
+              )}
               {messages.length > 0 && (
                 <button
                   onClick={() => setMessages([])}
@@ -362,7 +534,11 @@ export default function HalPanel() {
                             : 'rounded-2xl rounded-bl-sm border-l-2 border-threat-critical/60 bg-surface-2 px-3.5 py-2 text-sm text-ink-primary'
                       }
                     >
-                      <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                      {m.role === 'assistant' ? (
+                        <LinkifiedText text={m.content} providers={m.providers} />
+                      ) : (
+                        <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                      )}
                     </div>
                     {m.actions && m.actions.length > 0 && (
                       <div className="mt-1.5 flex flex-wrap gap-1 pl-1">

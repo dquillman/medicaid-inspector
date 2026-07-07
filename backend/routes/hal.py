@@ -143,17 +143,26 @@ class HalAction(BaseModel):
     result: str = ""
 
 
+class HalProvider(BaseModel):
+    npi: str
+    name: str
+
+
 class HalChatResponse(BaseModel):
     reply: str
     actions: List[HalAction] = []
+    # Providers referenced in the reply (npi + name) so the UI can linkify names.
+    providers: List[HalProvider] = []
 
 
 @router.get("/status")
 async def hal_status(user: dict = Depends(require_user)):
-    """Whether the HAL relay is configured on this deployment. The frontend
-    hides the Ask HAL panel entirely when it isn't — so shipping this build to
-    prod (where qcode/HAL isn't reachable) doesn't show a dead button."""
-    return {"configured": bool(settings.HAL_TOKEN)}
+    """Whether HAL is configured — either MFI's own local expert loop
+    (ANTHROPIC_API_KEY) or the qcode relay (HAL_TOKEN). The frontend hides the
+    Ask HAL panel entirely when neither is set, so a bare deploy shows no dead
+    button."""
+    from core import hal_expert
+    return {"configured": bool(settings.HAL_TOKEN) or hal_expert.available()}
 
 
 _SLOW_MSG = (
@@ -196,15 +205,31 @@ def _inject_provider_context(messages: List[dict], npi: Optional[str]) -> List[d
 
 @router.post("/chat", response_model=HalChatResponse)
 async def hal_chat(req: HalChatRequest, user: dict = Depends(require_user)):
-    """Relay one chat turn to HAL and return its reply + the tools it used."""
+    """Answer one chat turn. Prefers MFI's OWN local expert loop (its fraud tools
+    + a brain_ask into the Second Brain) so this HAL is the expert of THIS app;
+    falls back to relaying to qcode's HAL when no ANTHROPIC_API_KEY is set."""
+    if not req.messages:
+        raise HTTPException(400, "No messages.")
+
+    # App-HAL pattern: run MFI's own expert loop in-process when we can. This is
+    # the path that actually reaches the fraud data (top_risky_providers, etc.).
+    from core import hal_expert
+    if hal_expert.available():
+        try:
+            out = await hal_expert.run(
+                [m.model_dump() for m in req.messages][-20:], req.face, req.npi)
+            return {"reply": out.get("reply", ""),
+                    "actions": [{"name": n} for n in out.get("actions", [])],
+                    "providers": out.get("providers", [])}
+        except Exception as e:  # noqa: BLE001 — fall back to the relay on any error
+            logger.error("local HAL expert failed, relaying to qcode: %s", e)
+
     if not settings.HAL_TOKEN:
         raise HTTPException(
             503,
-            "HAL is not configured — set HAL_TOKEN (the qcode admin token) in the "
-            "backend environment to enable the Ask HAL panel.",
+            "HAL is not configured — set ANTHROPIC_API_KEY (for MFI's own expert "
+            "HAL) or HAL_TOKEN (to relay to qcode's HAL) in the backend environment.",
         )
-    if not req.messages:
-        raise HTTPException(400, "No messages.")
 
     # Keep the payload bounded (qcode trims to the last 16 anyway).
     trimmed = [m.model_dump() for m in req.messages][-20:]

@@ -1148,11 +1148,17 @@ export const api = {
   // backend. `npi` is the provider the user is currently viewing, if any.
   halStatus: () => get<{ configured: boolean }>('/hal/status'),
 
-  halChat: (messages: HalChatMessage[], npi?: string) =>
-    mutate<HalChatResponse>('POST', '/hal/chat', { messages, npi: npi ?? null }),
+  halChat: (messages: HalChatMessage[], npi?: string, face?: HalFace) =>
+    mutate<HalChatResponse>('POST', '/hal/chat', {
+      messages,
+      npi: npi ?? null,
+      face: face ?? 'hal',
+    }),
 }
 
+export type HalFace = 'assistant' | 'hal' | 'jarvis'
 export type HalChatMessage = { role: 'user' | 'assistant'; content: string }
 export type HalAction = { name: string; input?: Record<string, unknown>; result?: string }
-export type HalChatResponse = { reply: string; actions: HalAction[] }
+export type HalProvider = { npi: string; name: string }
+export type HalChatResponse = { reply: string; actions: HalAction[]; providers?: HalProvider[] }
 
