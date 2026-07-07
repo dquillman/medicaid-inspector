@@ -29,18 +29,61 @@ def _normalize(s: str) -> str:
     return (s or "").strip().upper().replace(".", "").replace(",", "")
 
 
-def trace_ownership_network(npi: str) -> dict:
+def official_name(nppes: dict | None) -> str:
+    """Canonical authorized-official display name from an NPPES dict.
+
+    The canonical shape produced by BOTH the prescan cache (backfill) and the
+    live NPPES client is {"name": ..., "title": ...}. This previously read
+    first_name/last_name — keys that never exist in that shape — so every
+    shared-official comparison silently saw an empty string and matched nothing.
+    Falls back to first_name/last_name defensively for any legacy record.
+    """
+    ao = (nppes or {}).get("authorized_official") or {}
+    name = ao.get("name") or " ".join(
+        filter(None, [ao.get("first_name", ""), ao.get("last_name", "")]))
+    return (name or "").strip()
+
+
+async def trace_ownership_network_async(npi: str) -> dict:
+    """Async entry point used by the HTTP route and the MCP tool.
+
+    Resolves the target's authorized-official from the SAME canonical source
+    get_provider uses — the prescan cache, falling back to a live NPPES fetch
+    when the cache lacks it (e.g. the slim Cloud Run cache) — so the ownership
+    view and the provider-detail view can never disagree about the official.
+    The heavy candidate scan then runs in a worker thread.
+    """
+    import asyncio
+
+    cached = get_provider_by_npi(npi)
+    target_nppes = (cached or {}).get("nppes") or {}
+    if not official_name(target_nppes):
+        try:
+            from data.nppes_client import get_provider as _live_nppes
+            live = await _live_nppes(npi)
+            if live:
+                target_nppes = live
+        except Exception as e:  # noqa: BLE001 — degrade to cache-only, never crash
+            log.warning("ownership live NPPES fallback failed for %s: %s", npi, e)
+    return await asyncio.to_thread(trace_ownership_network, npi, target_nppes)
+
+
+def trace_ownership_network(npi: str, target_nppes: dict | None = None) -> dict:
     """
     Trace the ownership chain for a specific provider.
     Returns all connected entities via authorized official, address, phone/fax.
+
+    target_nppes, when provided, is the canonical NPPES for the target (already
+    resolved cache->live by the async wrapper) so this matches get_provider.
     """
     provider = get_provider_by_npi(npi)
-    if not provider:
+    if not provider and not target_nppes:
         return {"npi": npi, "found": False, "error": "Provider not found"}
+    provider = provider or {"npi": npi}
 
-    nppes = provider.get("nppes") or {}
+    nppes = target_nppes if target_nppes is not None else (provider.get("nppes") or {})
     auth_official = nppes.get("authorized_official") or {}
-    auth_name = _normalize(f"{auth_official.get('first_name', '')} {auth_official.get('last_name', '')}")
+    auth_name = _normalize(official_name(nppes))
     addr = nppes.get("address") or {}
     address_key = _normalize(f"{addr.get('address_1', '')} {addr.get('city', '')} {addr.get('state', '')}")
     phone = _normalize(nppes.get("phone") or "")
@@ -55,15 +98,19 @@ def trace_ownership_network(npi: str) -> dict:
         "by_phone": [],
     }
     seen = {npi}
+    candidates_total = 0
+    candidates_with_official = 0
 
     for p in providers:
         p_npi = p.get("npi", "")
         if p_npi == npi or p_npi in seen:
             continue
+        candidates_total += 1
 
         p_nppes = p.get("nppes") or {}
-        p_auth = p_nppes.get("authorized_official") or {}
-        p_auth_name = _normalize(f"{p_auth.get('first_name', '')} {p_auth.get('last_name', '')}")
+        p_auth_name = _normalize(official_name(p_nppes))
+        if len(p_auth_name) > 3:
+            candidates_with_official += 1
         p_addr = p_nppes.get("address") or {}
         p_address_key = _normalize(f"{p_addr.get('address_1', '')} {p_addr.get('city', '')} {p_addr.get('state', '')}")
         p_phone = _normalize(p_nppes.get("phone") or "")
@@ -127,16 +174,15 @@ def trace_ownership_network(npi: str) -> dict:
     elif len(all_connected) >= 3 or avg_risk >= 30:
         network_risk = "MEDIUM"
 
-    return {
+    result = {
         "npi": npi,
         "found": True,
         "provider_name": nppes.get("name") or provider.get("provider_name") or "",
         "authorized_official": {
-            "name": auth_name,
-            "first_name": auth_official.get("first_name", ""),
-            "last_name": auth_official.get("last_name", ""),
+            # Canonical display name — same value get_provider surfaces. Non-null
+            # whenever the record has an official, which is the whole point.
+            "name": official_name(nppes),
             "title": auth_official.get("title", ""),
-            "credential": auth_official.get("credential", ""),
         },
         "address": dict(addr),
         "connections": connections,
@@ -146,8 +192,22 @@ def trace_ownership_network(npi: str) -> dict:
             "avg_connected_risk_score": round(avg_risk, 1),
             "network_risk": network_risk,
             "connected_npis": all_connected,
+            # Coverage so "0 connections" is never confused with "no data to
+            # compare" — the slim Cloud Run cache strips authorized officials.
+            "official_match_coverage": {
+                "candidates_total": candidates_total,
+                "candidates_with_official_data": candidates_with_official,
+            },
         },
     }
+    if auth_name and len(auth_name) > 3 and candidates_with_official == 0:
+        result["data_quality_warning"] = (
+            "This deployment's provider cache holds no authorized-official data "
+            "to compare against (e.g. the slim Cloud Run cache), so shared-official "
+            "ownership matches cannot be computed. Zero here means 'no data', not "
+            "'no connections' — run against the full cache for shared-official links."
+        )
+    return result
 
 
 def find_ownership_clusters(min_size: int = 2, limit: int = 50) -> dict:
@@ -164,8 +224,7 @@ def find_ownership_clusters(min_size: int = 2, limit: int = 50) -> dict:
 
     for p in providers:
         nppes = p.get("nppes") or {}
-        auth = nppes.get("authorized_official") or {}
-        auth_name = _normalize(f"{auth.get('first_name', '')} {auth.get('last_name', '')}")
+        auth_name = _normalize(official_name(nppes))
 
         if not auth_name or len(auth_name) <= 3:
             continue

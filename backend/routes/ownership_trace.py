@@ -4,7 +4,7 @@ Ownership chain tracing API routes.
 import logging
 from fastapi import APIRouter, HTTPException, Depends
 from routes.auth import require_user
-from services.ownership_tracer import trace_ownership_network, find_ownership_clusters
+from services.ownership_tracer import trace_ownership_network_async, find_ownership_clusters
 
 router = APIRouter(prefix="/api/ownership-trace", tags=["ownership"], dependencies=[Depends(require_user)])
 log = logging.getLogger(__name__)
@@ -17,7 +17,7 @@ async def trace_provider_ownership(npi: str):
     via shared authorized official, address, or phone/fax.
     """
     try:
-        result = trace_ownership_network(npi)
+        result = await trace_ownership_network_async(npi)
         if not result.get("found"):
             raise HTTPException(404, result.get("error", "Provider not found"))
         return result
