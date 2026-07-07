@@ -62,7 +62,6 @@ from routes.billing_codes import diagnoses_for_code
 from data.cpt_descriptions import CPT_DESCRIPTIONS
 from data.icd10_descriptions import ICD10_DESCRIPTIONS
 from routes.network import get_network
-from services.ownership_tracer import trace_ownership_network
 from core.exclusion_aggregator import check_all_exclusions
 from core.phi_logger import log_phi_access, load_phi_log_from_disk
 from core.store import load_prescanned_from_disk, get_provider_by_npi
@@ -292,7 +291,8 @@ async def _tool_provider_network(args: dict) -> dict:
                 out["billing_network_error"] = f"{e.status_code}: {e.detail}"
 
     if include_ownership:
-        out["ownership"] = await asyncio.to_thread(trace_ownership_network, npi)
+        from services.ownership_tracer import trace_ownership_network_async
+        out["ownership"] = await trace_ownership_network_async(npi)
 
     _log_phi("read", "provider", npi, tool="provider_network")
     return out
@@ -438,7 +438,34 @@ TOOLS: list[Tool] = [
             "required": ["npi"],
         },
     ),
+    Tool(
+        name="data_freshness",
+        description="Report when each exclusion data source (OIG LEIE, SAM.gov, NPPES) was last successfully updated, its record count, and refresh cadence. Use for questions like 'how current is the SAM data' or 'when was the exclusion list last updated'.",
+        inputSchema={"type": "object", "properties": {}},
+    ),
 ]
+
+
+async def _tool_data_freshness(args: dict) -> dict:
+    import os
+    from core.oig_store import get_oig_stats
+    from core.sam_extract_store import status as sam_status, ensure_loaded
+    try:
+        await ensure_loaded()
+    except Exception:
+        pass
+    oig = get_oig_stats()
+    sam = sam_status()
+    _log_phi("read", "system", "data_freshness", tool="data_freshness")
+    return {
+        "oig_leie": {"loaded": oig.get("loaded", False),
+                     "record_count": oig.get("record_count", 0),
+                     "source": "OIG LEIE (local monthly CSV)"},
+        "sam": {**sam, "mode": "live API + extract fallback" if os.environ.get("SAM_API_KEY")
+                else "public extract (keyless)"},
+        "nppes": {"mode": "live registry lookup on demand (keyless)"},
+    }
+
 
 _HANDLERS = {
     "get_provider": _tool_get_provider,
@@ -448,6 +475,7 @@ _HANDLERS = {
     "oig_status": _tool_oig_status,
     "provider_timeline": _tool_provider_timeline,
     "draft_oig_tip": _tool_draft_oig_tip,
+    "data_freshness": _tool_data_freshness,
 }
 
 

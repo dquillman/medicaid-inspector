@@ -23,6 +23,18 @@ APP_VERSION=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' 
 APP_VERSION="${APP_VERSION:-dev}"
 echo "==> App version: ${APP_VERSION}"
 
+# SAM.gov cross-check: auto-wire the key IF the secret exists. Create it once
+# (free key from sam.gov -> Account Details -> Public API Key) with:
+#   gcloud secrets create sam-api-key --project medicaid-inspector --data-file=<file>
+# and every subsequent deploy picks it up automatically — no script edits.
+SECRETS="ADMIN_PASSWORD=${ADMIN_PASSWORD_SECRET}:latest,HAL_TOKEN=${HAL_TOKEN_SECRET:-hal-token}:latest,ANTHROPIC_API_KEY=${ANTHROPIC_KEY_SECRET:-anthropic-api-key}:latest"
+if gcloud secrets describe "${SAM_KEY_SECRET:-sam-api-key}" --project "$PROJECT_ID" >/dev/null 2>&1; then
+  SECRETS="${SECRETS},SAM_API_KEY=${SAM_KEY_SECRET:-sam-api-key}:latest"
+  echo "==> SAM.gov key secret found - wiring SAM_API_KEY"
+else
+  echo "==> No sam-api-key secret yet - SAM.gov cross-check stays off"
+fi
+
 echo "==> Deploying backend to Cloud Run..."
 gcloud run deploy "$SERVICE_NAME" \
   --source . \
@@ -35,8 +47,8 @@ gcloud run deploy "$SERVICE_NAME" \
   --timeout 300 \
   --allow-unauthenticated \
   --port 8080 \
-  --set-env-vars "PYTHONUNBUFFERED=1,APP_VERSION=${APP_VERSION}" \
-  --set-secrets "ADMIN_PASSWORD=${ADMIN_PASSWORD_SECRET}:latest"
+  --set-env-vars "PYTHONUNBUFFERED=1,APP_VERSION=${APP_VERSION},HAL_URL=${HAL_URL:-https://qcode-9a2dc.web.app/api/hal}" \
+  --set-secrets "$SECRETS"
 
 echo "==> Backend deployed!"
 echo "Service URL:"

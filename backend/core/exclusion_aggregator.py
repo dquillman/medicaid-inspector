@@ -16,6 +16,46 @@ log = logging.getLogger(__name__)
 _batch_results: dict | None = None
 
 
+async def _live_nppes_status(npi: str) -> dict | None:
+    """Live NPI status straight from the CMS NPPES registry (keyless, ~200ms).
+
+    Used as a fallback when the prescan cache has no NPPES status for a
+    provider — previously that meant reporting 'unavailable' even though the
+    registry answers for free. Also catches what data/nppes_client.get_provider
+    cannot: a DEACTIVATED NPI comes back as an `Errors` array (not a result),
+    which the client collapses into {} — indistinguishable from 'not found'.
+    Returns {status, enumeration_date, deactivation_date, detail} or None.
+    """
+    try:
+        import httpx
+        from core.config import settings
+        url = f"{settings.NPPES_BASE_URL}?version=2.1&number={npi}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            data = resp.json()
+    except Exception as e:  # network/registry down — caller keeps 'unavailable'
+        log.warning("live NPPES lookup failed for %s: %s", npi, e)
+        return None
+
+    for err in data.get("Errors", []) or []:
+        desc = str(err.get("description", ""))
+        if "deactiv" in desc.lower():
+            return {"status": "DEACTIVATED", "enumeration_date": "",
+                    "deactivation_date": "", "detail": desc}
+
+    results = data.get("results", [])
+    if not results:
+        return None
+    basic = results[0].get("basic", {}) or {}
+    return {
+        "status": (basic.get("status") or "").upper() or "A",
+        "enumeration_date": basic.get("enumeration_date", ""),
+        "deactivation_date": basic.get("deactivation_date", ""),
+        "detail": "live NPPES registry lookup",
+    }
+
+
 async def check_all_exclusions(npi: str, name: str = "") -> dict:
     """
     Run all exclusion checks for a single provider.
@@ -70,15 +110,30 @@ async def check_all_exclusions(npi: str, name: str = "") -> dict:
                 "source": "SAM.gov",
                 "status": "excluded",
                 "details": {
-                    "message": "Provider found on SAM.gov federal exclusion list",
+                    "message": "Provider found on SAM.gov federal exclusion list"
+                    + (f" ({sam_result['source']}, as of {sam_result.get('as_of','?')})"
+                       if sam_result.get("source") else "")
+                    + (f"; matched by {sam_result['matched_by']}"
+                       if sam_result.get("matched_by") else ""),
                     "records": sam_result.get("records", []),
                 },
             })
         else:
+            fresh = ""
+            if sam_result.get("source"):
+                fresh = (f" ({sam_result['source']}, data as of {sam_result.get('as_of','?')}, "
+                         f"{sam_result.get('records_in_list','?')} records")
+                if sam_result.get("last_success_utc"):
+                    fresh += f"; last refreshed {sam_result['last_success_utc']}"
+                fresh += ")"
             checks.append({
                 "source": "SAM.gov",
                 "status": "clear",
-                "details": {"message": "Not found on SAM.gov exclusion list"},
+                "details": {
+                    "message": "Not found on SAM.gov exclusion list" + fresh,
+                    "as_of": sam_result.get("as_of"),
+                    "last_success_utc": sam_result.get("last_success_utc"),
+                },
             })
     except Exception as e:
         log.warning("SAM.gov check failed for %s: %s", npi, e)
@@ -100,15 +155,27 @@ async def check_all_exclusions(npi: str, name: str = "") -> dict:
 
         nppes = provider.get("nppes", {}) if provider else {}
 
-        # NPI deactivation check
+        # NPI deactivation check — cache first, LIVE NPPES registry as fallback
+        # (the cache rarely stores status; the registry answers keyless, so
+        # "unavailable" should be the exception, not the norm).
         npi_status = nppes.get("status", "").upper() if nppes else ""
+        status_src = "prescan cache"
+        live = None
+        if not npi_status:
+            live = await _live_nppes_status(npi)
+            if live:
+                npi_status = live["status"]
+                status_src = "live NPPES registry"
         if npi_status and npi_status != "A" and npi_status != "ACTIVE":
             checks.append({
                 "source": "NPI Status",
                 "status": "excluded",
                 "details": {
-                    "message": f"NPI is deactivated or inactive (status: {npi_status})",
+                    "message": f"NPI is deactivated or inactive (status: {npi_status}; {status_src})",
                     "npi_status": npi_status,
+                    "deactivation_date": (live or {}).get("deactivation_date", "")
+                    or nppes.get("deactivation_date", ""),
+                    "checked_via": status_src,
                 },
             })
         elif npi_status:
@@ -116,19 +183,23 @@ async def check_all_exclusions(npi: str, name: str = "") -> dict:
                 "source": "NPI Status",
                 "status": "clear",
                 "details": {
-                    "message": "NPI is active",
+                    "message": f"NPI is active ({status_src})",
                     "npi_status": npi_status,
+                    "checked_via": status_src,
                 },
             })
         else:
             checks.append({
                 "source": "NPI Status",
                 "status": "unavailable",
-                "details": {"message": "No NPPES status data available for this provider"},
+                "details": {"message": "No NPPES status data — cache empty and live registry lookup failed"},
             })
 
-        # Enumeration date check (flag if < 6 months old)
+        # Enumeration date check (flag if < 6 months old). Prefer the TRUE
+        # enumeration date from the live registry over the cache's last_updated.
         last_updated = nppes.get("last_updated", "") if nppes else ""
+        if live and live.get("enumeration_date"):
+            last_updated = live["enumeration_date"]
         if last_updated:
             try:
                 # NPPES last_updated format varies; try common formats

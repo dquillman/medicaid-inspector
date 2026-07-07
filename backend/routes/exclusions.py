@@ -4,6 +4,37 @@ from routes.auth import require_user, require_admin
 router = APIRouter(prefix="/api/exclusions", tags=["exclusions"], dependencies=[Depends(require_user)])
 
 
+@router.get("/data-sources")
+async def exclusion_data_sources():
+    """Freshness of every exclusion data source — so the UI/HAL can show WHEN
+    each was last successfully updated, not just what it contains."""
+    import os
+    from core.oig_store import get_oig_stats
+    from core.sam_extract_store import status as sam_status, ensure_loaded
+
+    # touch the extract so its freshness reflects reality (cheap if already cached)
+    try:
+        await ensure_loaded()
+    except Exception:
+        pass
+
+    oig = get_oig_stats()
+    sam = sam_status()
+    sam_mode = "live API + extract fallback" if os.environ.get("SAM_API_KEY") else "public extract (keyless)"
+    return {
+        "oig_leie": {
+            "loaded": oig.get("loaded", False),
+            "record_count": oig.get("record_count", 0),
+            "source": "OIG LEIE (local monthly CSV)",
+        },
+        "sam": {**sam, "mode": sam_mode},
+        "nppes": {
+            "mode": "live registry lookup on demand (keyless)",
+            "source": "CMS NPPES registry",
+        },
+    }
+
+
 @router.post("/scan-all", dependencies=[Depends(require_admin)])
 async def scan_all_exclusions():
     """

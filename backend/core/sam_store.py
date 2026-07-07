@@ -19,22 +19,23 @@ _SAM_API_KEY = os.environ.get("SAM_API_KEY", "")
 async def check_sam_exclusion(npi: str = "", name: str = "") -> dict:
     """
     Check if a provider is on the SAM.gov federal exclusion list.
-    Can search by name since SAM doesn't index by NPI.
-    Returns {"excluded": bool, "records": [...]}
+
+    Two sources, best-available:
+      1. Live SAM.gov API (intraday-fresh) — when SAM_API_KEY is set.
+      2. The KEYLESS public daily extract (core/sam_extract_store.py) — used
+         when no key is configured, and as fallback if the API errors. The
+         extract also enables NPI-first matching, which the API cannot do.
+    Returns {"excluded": bool, "records": [...], ...}
     """
     if not _SAM_API_KEY:
-        return {
-            "excluded": False,
-            "records": [],
-            "error": "No SAM_API_KEY configured. Get a free key at sam.gov/profile/details and set SAM_API_KEY env var.",
-        }
+        from core.sam_extract_store import check_extract
+        return await check_extract(npi=npi, name=name)
 
     if not name:
-        return {
-            "excluded": False,
-            "records": [],
-            "error": "No provider name available for SAM.gov lookup (requires name, not NPI).",
-        }
+        # API is name-indexed; without a name, the extract's NPI index is
+        # strictly better than erroring out.
+        from core.sam_extract_store import check_extract
+        return await check_extract(npi=npi, name=name)
 
     try:
         params = {
@@ -50,19 +51,12 @@ async def check_sam_exclusion(npi: str = "", name: str = "") -> dict:
                 records = data.get("excludedEntity", []) or []
                 total = data.get("totalRecords", len(records))
                 return {"excluded": total > 0, "records": records[:5]}
-            elif resp.status_code == 403:
-                return {
-                    "excluded": False,
-                    "records": [],
-                    "error": "SAM.gov API key is invalid or rate-limited. Check your SAM_API_KEY.",
-                }
             else:
-                log.warning("SAM.gov API returned %d", resp.status_code)
-                return {
-                    "excluded": False,
-                    "records": [],
-                    "error": f"SAM.gov API returned {resp.status_code}",
-                }
+                log.warning("SAM.gov API returned %d - falling back to public extract",
+                            resp.status_code)
+                from core.sam_extract_store import check_extract
+                return await check_extract(npi=npi, name=name)
     except Exception as e:
-        log.warning("SAM.gov check failed: %s", e)
-        return {"excluded": False, "records": [], "error": str(e)}
+        log.warning("SAM.gov check failed (%s) - falling back to public extract", e)
+        from core.sam_extract_store import check_extract
+        return await check_extract(npi=npi, name=name)
