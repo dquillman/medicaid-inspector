@@ -16,12 +16,22 @@ This catches:
 - Franchise fraud (one owner, multiple locations, coordinated billing)
 """
 import logging
+import os
 from collections import defaultdict
 from typing import Optional
 
 from core.store import get_prescanned, get_provider_by_npi
 
 log = logging.getLogger(__name__)
+
+# Precision filter: many NPPES "authorized officials" are registration agents /
+# credentialing services, not owners — e.g. one name controlling 1,200+ NPIs and
+# $4B in billing. Above this cluster size a shared official is treated as a
+# probable registration agent: the link is reported (with the true total) but
+# capped, flagged, and EXCLUDED from network-risk escalation so it can't drown
+# the real ownership signal.
+AGENT_CLUSTER_THRESHOLD = int(os.environ.get("MFI_OFFICIAL_CLUSTER_CAP", "25"))
+_AGENT_LIST_CAP = 15  # matches shown for an agent-scale official (top by risk)
 
 
 def _normalize(s: str) -> str:
@@ -155,8 +165,23 @@ def trace_ownership_network(npi: str, target_nppes: dict | None = None) -> dict:
                 elif ct in ("phone", "fax"):
                     connections["by_phone"].append(entry)
 
-    # Compute network risk
-    all_connected = list({e["npi"] for lst in connections.values() for e in lst})
+    # Precision filter: an "official" shared by more NPIs than any plausible
+    # owner is almost certainly a registration agent / credentialing service.
+    # Keep the signal honest: report the true total, show only the top few by
+    # risk, flag it, and keep agent-scale links OUT of network-risk escalation.
+    official_cluster_total = len(connections["by_auth_official"])
+    probable_agent = official_cluster_total > AGENT_CLUSTER_THRESHOLD
+    if probable_agent:
+        connections["by_auth_official"] = sorted(
+            connections["by_auth_official"],
+            key=lambda e: e.get("risk_score", 0), reverse=True,
+        )[:_AGENT_LIST_CAP]
+
+    # Compute network risk — for agent-scale officials, only address/phone
+    # links count toward escalation (shared paperwork is not shared ownership).
+    risk_lists = ([connections["by_address"], connections["by_phone"]]
+                  if probable_agent else list(connections.values()))
+    all_connected = list({e["npi"] for lst in risk_lists for e in lst})
     total_network_paid = sum(
         (get_provider_by_npi(n) or {}).get("total_paid", 0) for n in all_connected
     ) + (provider.get("total_paid", 0))
@@ -186,6 +211,8 @@ def trace_ownership_network(npi: str, target_nppes: dict | None = None) -> dict:
         },
         "address": dict(addr),
         "connections": connections,
+        "shared_official_total": official_cluster_total,
+        "probable_registration_agent": probable_agent,
         "network_summary": {
             "total_connected_entities": len(all_connected),
             "total_network_paid": round(total_network_paid, 2),
@@ -200,6 +227,16 @@ def trace_ownership_network(npi: str, target_nppes: dict | None = None) -> dict:
             },
         },
     }
+    if probable_agent:
+        result["registration_agent_note"] = (
+            f"The authorized official here is shared by {official_cluster_total} "
+            f"NPIs — far beyond owner scale (cap {AGENT_CLUSTER_THRESHOLD}); this is "
+            "almost certainly a registration agent or credentialing service, not "
+            "common ownership. Showing only the top "
+            f"{min(_AGENT_LIST_CAP, official_cluster_total)} by risk, and these "
+            "links are excluded from network-risk escalation. Shared address/phone "
+            "links, if any, remain fully weighted."
+        )
     if auth_name and len(auth_name) > 3 and candidates_with_official == 0:
         result["data_quality_warning"] = (
             "This deployment's provider cache holds no authorized-official data "
@@ -250,22 +287,33 @@ def find_ownership_clusters(min_size: int = 2, limit: int = 50) -> dict:
         avg_risk = sum(m["risk_score"] for m in members) / len(members) if members else 0
         states = list(set(m["state"] for m in members if m["state"]))
 
+        probable_agent = len(members) > AGENT_CLUSTER_THRESHOLD
         clusters.append({
             "authorized_official": auth_name,
             "entity_count": len(members),
+            "probable_registration_agent": probable_agent,
             "total_paid": round(total_paid, 2),
             "avg_risk_score": round(avg_risk, 1),
             "max_risk_score": max(m["risk_score"] for m in members),
             "states": states,
             "multi_state": len(states) > 1,
-            "members": sorted(members, key=lambda x: x["risk_score"], reverse=True),
+            # Agent-scale clusters keep only a risk-ranked sample of members —
+            # 1,200 rows of a credentialing service's clients is noise.
+            "members": sorted(members, key=lambda x: x["risk_score"], reverse=True)[
+                :_AGENT_LIST_CAP if probable_agent else len(members)],
         })
 
-    clusters.sort(key=lambda x: (x["entity_count"], x["total_paid"]), reverse=True)
+    # Actionable (owner-scale) clusters first; agent-scale ones trail, flagged.
+    clusters.sort(key=lambda x: (x["probable_registration_agent"],
+                                 -x["entity_count"], -x["total_paid"]))
     clusters = clusters[:limit]
 
     return {
         "clusters": clusters,
         "total_clusters": len(clusters),
-        "note": "Provider groups sharing the same authorized official — potential common ownership",
+        "agent_cluster_threshold": AGENT_CLUSTER_THRESHOLD,
+        "note": ("Provider groups sharing the same authorized official — potential "
+                 "common ownership. Clusters larger than the threshold are flagged "
+                 "probable_registration_agent (credentialing services, not owners) "
+                 "and ranked last with sampled members."),
     }

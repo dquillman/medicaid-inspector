@@ -134,6 +134,50 @@ def test_coverage_reported_when_cache_lacks_officials(monkeypatch):
     assert "data_quality_warning" in result
 
 
+def test_agent_scale_official_is_flagged_and_capped(monkeypatch):
+    """An 'official' shared by >threshold NPIs is a registration agent, not an
+    owner: flag it, cap the listed matches, and keep it out of risk escalation."""
+    agent_kids = []
+    for i in range(30):  # > AGENT_CLUSTER_THRESHOLD (25)
+        agent_kids.append({
+            "npi": f"19{i:08d}", "provider_name": f"CLIENT {i}", "total_paid": 1000,
+            "risk_score": i,  # distinct risks so the top-N cap is testable
+            "nppes": {"name": f"CLIENT {i}",
+                      "authorized_official": {"name": "Agent Smith", "title": "Agent"},
+                      "address": {"address_1": f"{i} Unique St", "city": "X", "state": "TX"}},
+        })
+    target = {
+        "npi": "1111111111", "provider_name": "TARGET", "total_paid": 5000, "risk_score": 90,
+        "nppes": {"name": "TARGET",
+                  "authorized_official": {"name": "Agent Smith", "title": "Agent"},
+                  "address": {"address_1": "0 Target Way", "city": "Y", "state": "TX"}},
+    }
+    providers = [target] + agent_kids
+    index = {p["npi"]: p for p in providers}
+    monkeypatch.setattr(OT, "get_prescanned", lambda: providers)
+    monkeypatch.setattr(OT, "get_provider_by_npi", lambda npi: index.get(npi))
+
+    r = trace_ownership_network("1111111111")
+    assert r["probable_registration_agent"] is True
+    assert r["shared_official_total"] == 30
+    assert len(r["connections"]["by_auth_official"]) == OT._AGENT_LIST_CAP
+    # capped list is the TOP by risk
+    listed = [e["risk_score"] for e in r["connections"]["by_auth_official"]]
+    assert listed == sorted(listed, reverse=True)
+    # agent links must not escalate network risk (no shared address/phone here)
+    assert r["network_summary"]["total_connected_entities"] == 0
+    assert r["network_summary"]["network_risk"] == "LOW"
+    assert "registration_agent_note" in r
+
+
+def test_owner_scale_official_not_flagged(cache):
+    """A normal 1-sibling official stays unflagged and fully weighted."""
+    r = trace_ownership_network("1111111111")
+    assert r["probable_registration_agent"] is False
+    assert r["shared_official_total"] == 1
+    assert r["network_summary"]["total_connected_entities"] >= 1
+
+
 def test_async_wrapper_uses_live_fallback(monkeypatch):
     """When the cache lacks the target's official, the async wrapper backfills
     from the live NPPES client — so it agrees with get_provider's fallback."""
