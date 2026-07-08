@@ -294,6 +294,7 @@ function ScanControl({
   isLocal,
   onScanBatch,
   onReset,
+  onForceRefresh,
   onAutoStart,
   onAutoStop,
   onRescore,
@@ -306,6 +307,7 @@ function ScanControl({
   isLocal: boolean
   onScanBatch: (stateFilter: string) => void
   onReset: () => void
+  onForceRefresh: () => void
   onAutoStart: (stateFilter: string) => void
   onAutoStop: () => void
   onRescore: () => void
@@ -465,6 +467,15 @@ function ScanControl({
         )}
         {cachedCount > 0 && !isScanning && !isAutoMode && (
           <button
+            onClick={onForceRefresh}
+            className="px-4 py-2 bg-surface-2 hover:bg-hairline text-amber-400 hover:text-amber-300 text-sm rounded transition-colors border border-amber-800/50"
+            title="Re-aggregate every provider from the current dataset — fixes stale claim counts that drifted from the network graph. Re-scans in place, no data gap."
+          >
+            Force Re-scan (fix stale)
+          </button>
+        )}
+        {cachedCount > 0 && !isScanning && !isAutoMode && (
+          <button
             onClick={onReset}
             className="px-4 py-2 bg-surface-2 hover:bg-hairline text-red-400 hover:text-red-300 text-sm rounded transition-colors border border-hairline"
           >
@@ -517,6 +528,13 @@ export default function AdminScan() {
     queryClient.invalidateQueries({ queryKey: ['prescan-status'] })
     queryClient.invalidateQueries({ queryKey: ['signal-summary'] })
     queryClient.invalidateQueries({ queryKey: ['state-heatmap'] })
+  }, [queryClient])
+
+  const handleForceRefresh = useCallback(async () => {
+    if (!confirm('Force a full re-scan? This re-aggregates every provider from the current dataset to fix stale claim counts (the detail-vs-network drift). It runs in the background and updates providers in place — no data gap.')) return
+    await api.forceRefresh()
+    queryClient.invalidateQueries({ queryKey: ['prescan-status'] })
+    queryClient.invalidateQueries({ queryKey: ['summary'] })
   }, [queryClient])
 
   const handleAutoStart = useCallback(async (stateFilter: string) => {
@@ -602,6 +620,7 @@ export default function AdminScan() {
             isLocal={ds?.is_local ?? false}
             onScanBatch={handleScanBatch}
             onReset={handleReset}
+            onForceRefresh={handleForceRefresh}
             onAutoStart={handleAutoStart}
             onAutoStop={handleAutoStop}
             onRescore={handleRescore}

@@ -472,6 +472,35 @@ async def reset_scan_endpoint():
     return {"ok": True}
 
 
+@app.post("/api/prescan/refresh", dependencies=[Depends(require_admin)])
+async def refresh_prescan_endpoint(body: Optional[ScanBatchRequest] = None):
+    """One-click remediation for stale provider aggregates: re-aggregate EVERY
+    provider from the current dataset (force=True), correcting entries that drifted
+    against the fully-rebuilt network/hcpcs indexes (the detail-vs-network claim
+    mismatch). Keeps the existing cache visible while it re-scans in place — the
+    offset is rewound to 0 but providers are overwritten as each batch completes,
+    so there is no data gap. Admin-only."""
+    if body is None:
+        body = ScanBatchRequest()
+    body.state_filter = _validate_state_filter(body.state_filter)
+    if is_scan_active():
+        raise HTTPException(409, "A scan is already in progress")
+    stop_auto_mode()
+    # Rewind to the start (keep the cache visible); force=True re-aggregates every
+    # provider instead of skipping already-scanned NPIs, so stale values get fixed.
+    set_scan_progress(0, None, body.state_filter or None, 0)
+    task_id = start_auto_scan(body.batch_size, body.state_filter or None, True)
+    return {
+        "started": True,
+        "mode": "force-refresh",
+        "auto_mode": True,
+        "batch_size": body.batch_size,
+        "task_id": task_id,
+        "note": "Re-aggregating all providers from the current dataset (force). "
+                "Stale entries are corrected as batches complete.",
+    }
+
+
 # ── Summary + status ──────────────────────────────────────────────────────────
 
 @app.get("/api/summary", dependencies=[Depends(require_user)])

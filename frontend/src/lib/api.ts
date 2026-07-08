@@ -268,6 +268,12 @@ export const api = {
   resetScan: () =>
     mutate<{ status: string }>('POST', '/prescan/reset'),
 
+  // Force a full re-aggregation of every provider from the current dataset —
+  // fixes entries that went stale against the rebuilt indexes. Re-scans in place
+  // (no data gap). Admin-only.
+  forceRefresh: (stateFilter?: string) =>
+    mutate<{ started: boolean; note?: string }>('POST', '/prescan/refresh', { state_filter: stateFilter ?? null }),
+
   dataStatus: () => get<{
     is_local: boolean
     is_cloud?: boolean

@@ -1,7 +1,9 @@
 """
 Global mutable state store — avoids circular imports between main.py and routes.
 Prescan results are persisted to disk so backend restarts don't re-trigger the scan.
-Cache is invalidated by Parquet URL change (new data release) rather than by TTL.
+Cache is invalidated by dataset filename OR content-size change (a new/restated
+data release) rather than by TTL — so per-provider aggregates can't go stale
+against the fully-rebuilt network/hcpcs indexes.
 """
 import json
 import time
@@ -29,11 +31,37 @@ scan_progress: dict = {
 
 # ── disk persistence ──────────────────────────────────────────────────────────
 
+def _dataset_fingerprint() -> str:
+    """Content signature of the dataset the app actually reads.
+
+    The filename-only invalidation below misses a dataset that is updated IN
+    PLACE (same filename, new/restated rows) — which let stale per-provider
+    aggregates survive while the fully-rebuilt network/hcpcs indexes moved on,
+    the source of the detail-vs-network claim-count drift. The file SIZE changes
+    whenever the content changes, and is stable across identical re-downloads, so
+    it invalidates on a real data refresh without needlessly discarding 100k+
+    providers of scan state. Falls back to the filename when the parquet isn't
+    local (can't cheaply size a remote object) — the caller only acts when both
+    sides carry a real size signature."""
+    from core.config import settings
+    url = settings.PARQUET_URL or ""
+    name = url.rsplit("/", 1)[-1].split("?", 1)[0].lower()
+    try:
+        from data.duckdb_client import get_parquet_path
+        p = pathlib.Path(get_parquet_path())
+        if p.exists() and p.is_file():
+            return f"{name}:{p.stat().st_size}"
+    except Exception:
+        pass
+    return name
+
+
 def save_to_disk() -> None:
     from core.config import settings
     try:
         atomic_write_json(_CACHE_FILE, {
             "parquet_url": settings.PARQUET_URL,
+            "dataset_fingerprint": _dataset_fingerprint(),
             "saved_at": time.time(),
             "scan_progress": scan_progress,
             "providers": prescanned_providers,
@@ -65,6 +93,16 @@ def load_from_disk(filename: str = "prescan_cache.json") -> bool:
             return False
         if cached_url and cached_url != current_url:
             print(f"[store] Parquet host changed but dataset filename matches — keeping cache")
+        # Content check: same filename but a different file SIZE means the dataset
+        # was updated in place (new/restated rows). Invalidate so the scan rebuilds
+        # every provider instead of retaining stale aggregates (detail-vs-network
+        # drift). Only acts when BOTH sides carry a real size signature, so a
+        # not-yet-downloaded remote dataset never discards a good cache.
+        cached_fp = raw.get("dataset_fingerprint") or ""
+        current_fp = _dataset_fingerprint()
+        if ":" in cached_fp and ":" in current_fp and cached_fp != current_fp:
+            print(f"[store] Dataset content changed ({cached_fp} -> {current_fp}) — cache invalidated for a fresh re-scan")
+            return False
         loaded_providers = raw.get("providers", [])
         loaded_index = {p["npi"]: p for p in loaded_providers}
         saved_prog = raw.get("scan_progress", {})
