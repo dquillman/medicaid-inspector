@@ -483,7 +483,7 @@ export default function HalPanel({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'tween', duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            className="no-print fixed top-0 right-0 z-50 flex h-full w-full max-w-md flex-col border-l border-hairline bg-surface-1 elev-3"
+            className="no-print fixed top-0 right-0 z-50 flex h-full w-full sm:max-w-md flex-col border-l border-hairline bg-surface-1 elev-3"
             role="dialog"
             aria-label="HAL assistant"
           >

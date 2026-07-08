@@ -239,9 +239,10 @@ export default function App() {
   // main content left by the same amount while it's open so nothing underneath
   // is covered. Pushed from md: up (>=768px) — at md-lg the panel is only 28rem
   // wide (not full width), so gating this at lg: left it overlapping the right
-  // of the app. Below md there's no room to push, so it stays a full overlay.
+  // of the app. Pushed from sm: up (>=640px); below sm the panel goes full-width
+  // (see HalPanel), so there's nothing to push and it's a clean overlay you close.
   const { open: halOpen, setOpen: setHalOpen } = useHalOpen()
-  const halMargin = halOpen ? 'md:mr-[28rem]' : 'md:mr-0'
+  const halMargin = halOpen ? 'sm:mr-[28rem]' : 'sm:mr-0'
 
   // Restore session from localStorage (with expiry check)
   useEffect(() => {
