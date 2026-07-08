@@ -1,10 +1,12 @@
 """
 MCP (Model Context Protocol) stdio server for Medicaid Inspector (MFI).
 
-Exposes 7 read-only tools over the existing FastAPI route/service functions so
-an external app (HAL) can query provider risk, the Fraud Brain ranking,
+Exposes 9 tools over the existing FastAPI route/service functions so an
+external app (HAL) can query provider risk, the Fraud Brain ranking,
 billing-code reference data, provider networks, OIG/exclusion status, billing
-timelines, and drafted OIG-tip narratives without going through HTTP.
+timelines, and drafted OIG-tip narratives without going through HTTP. Eight are
+read-only; the ninth (log_bug) is the sole writer and only ever appends to the
+project's MFIBugs.md log — never an arbitrary path.
 
 Run as a subprocess, stdio transport:
     G:/Python311/python.exe G:/Users/daveq/medicaid inspector/backend/mcp_server.py
@@ -443,6 +445,28 @@ TOOLS: list[Tool] = [
         description="Report when each exclusion data source (OIG LEIE, SAM.gov, NPPES) was last successfully updated, its record count, and refresh cadence. Use for questions like 'how current is the SAM data' or 'when was the exclusion list last updated'.",
         inputSchema={"type": "object", "properties": {}},
     ),
+    Tool(
+        name="log_bug",
+        description=(
+            "Append a bug report to the project's MFIBugs.md log. Use when the user reports "
+            "a bug, defect, or something broken in the app and wants it recorded. Writes a "
+            "structured, timestamp-stamped entry to the repo file. Locally this persists to "
+            "the real file for the user to commit; on the deployed (Cloud Run) instance the "
+            "filesystem is ephemeral, so the entry is best-effort and won't survive a restart "
+            "— the response says which case applied."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short one-line summary of the bug"},
+                "detail": {"type": "string", "description": "What's wrong: symptom, expected vs actual, impact"},
+                "severity": {"type": "string", "enum": ["low", "medium", "high", "critical"], "default": "medium"},
+                "npi": {"type": "string", "description": "Optional NPI used to reproduce, if provider-specific"},
+                "area": {"type": "string", "description": "Optional area/page/feature the bug is in (e.g. 'Referral Packet', 'Provider Detail')"},
+            },
+            "required": ["title"],
+        },
+    ),
 ]
 
 
@@ -467,6 +491,76 @@ async def _tool_data_freshness(args: dict) -> dict:
     }
 
 
+# ── Tool 9: log_bug ───────────────────────────────────────────────────────────
+
+# MFIBugs.md lives at the repo root — one level up from backend/.
+_BUGLOG_PATH = _BACKEND_DIR.parent / "MFIBugs.md"
+
+
+async def _tool_log_bug(args: dict) -> dict:
+    """Append a structured bug entry to MFIBugs.md.
+
+    This is the ONE write tool this server exposes. It only ever appends to a
+    single fixed project file (never an arbitrary path), and every field is
+    ASCII-sanitized before it touches the file — same reason the OIG tip is
+    sanitized: a bug title pasted from a chat may carry curly quotes/em-dashes,
+    and the log is a plain-text/markdown artifact meant to be committed.
+    """
+    from core.text_sanitize import to_ascii
+    from datetime import datetime, timezone
+
+    title = to_ascii((args.get("title") or "").strip())
+    if not title:
+        raise ValueError("log_bug: 'title' is required")
+    detail = to_ascii((args.get("detail") or "").strip())
+    severity = (args.get("severity") or "medium").strip().lower()
+    if severity not in ("low", "medium", "high", "critical"):
+        severity = "medium"
+    npi = _require_npi(args["npi"]) if args.get("npi") else ""
+    area = to_ascii((args.get("area") or "").strip())
+
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    lines = [
+        f"\n### {title}",
+        f"- **Logged:** {ts} (via HAL)",
+        f"- **Severity:** {severity}",
+    ]
+    if area:
+        lines.append(f"- **Area:** {area}")
+    if npi:
+        lines.append(f"- **Repro NPI:** {npi}")
+    if detail:
+        lines.append(f"- **Detail:** {detail}")
+    lines.append(f"- **Status:** OPEN")
+    entry = "\n".join(lines) + "\n"
+
+    # Ensure the file exists with a header, then append.
+    ephemeral = not parquet_is_local()  # remote parquet == Cloud Run == ephemeral FS
+    try:
+        if not _BUGLOG_PATH.exists():
+            _BUGLOG_PATH.write_text(
+                "# MFI Bug Log\n\nBugs logged via HAL and manual entry. "
+                "Newest entries appended below.\n", encoding="utf-8",
+            )
+        with _BUGLOG_PATH.open("a", encoding="utf-8") as f:
+            f.write(entry)
+    except Exception as exc:  # noqa: BLE001
+        raise ValueError(f"log_bug: could not write {_BUGLOG_PATH.name}: {exc}") from exc
+
+    _log_phi("write", "system", "MFIBugs.md", tool="log_bug", title=title, severity=severity)
+
+    note = (
+        "Logged to MFIBugs.md. NOTE: this deployment has an ephemeral filesystem "
+        "(remote dataset / Cloud Run), so this entry will not survive a restart and "
+        "is not committed to the repo. Report it from a local session to persist it."
+        if ephemeral else
+        "Logged to MFIBugs.md in the local repo. Commit the file to keep the entry."
+    )
+    return {"logged": True, "file": "MFIBugs.md", "title": title,
+            "severity": severity, "persisted": not ephemeral, "note": note}
+
+
 _HANDLERS = {
     "get_provider": _tool_get_provider,
     "top_risky_providers": _tool_top_risky_providers,
@@ -476,6 +570,7 @@ _HANDLERS = {
     "provider_timeline": _tool_provider_timeline,
     "draft_oig_tip": _tool_draft_oig_tip,
     "data_freshness": _tool_data_freshness,
+    "log_bug": _tool_log_bug,
 }
 
 
