@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback, type Dispatch, type SetStateAction } from 'react'
-import { useLocation, Link } from 'react-router-dom'
+import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api, type HalAction, type HalProvider } from '../lib/api'
 import { buildReportSlideshow } from './halReport'
@@ -86,6 +86,44 @@ function useCurrentNpi(): string | null {
   const { pathname } = useLocation()
   const m = pathname.match(/^\/providers\/(\d{10})\b/)
   return m ? m[1] : null
+}
+
+// Parse a navigation command ("go to the Network page", "open providers",
+// "show me anomalies") and resolve it to a route by matching the app's own
+// in-app links (the sidebar NavLinks). Returns null for anything that isn't a
+// navigation command, so real questions still reach HAL's brain. Client-side:
+// HAL drives React Router itself, since the backend can't move the browser.
+function halFindRoute(text: string): { path: string; label: string } | null {
+  const t = text.toLowerCase().trim().replace(/[.!?]+$/, '')
+  let target: string | null = null
+  const m = t.match(
+    /^(?:(?:hal|jarvis|assistant)[,:\s]+|please\s+)*(?:go(?:\s*to)?|goto|show(?:\s*me)?|open|take me to|switch to|navigate to|jump to|bring up|pull up)\s+(?:the\s+)?(.+)$/,
+  )
+  if (m) target = m[1]
+  else {
+    const b = t.match(/^(?:the\s+)?(.+?)\s+(?:page|tab|section|view|screen)$/)
+    if (b) target = b[1]
+  }
+  if (!target) return null
+  const q = target
+    .replace(/\s+(page|tab|section|view|screen)$/, '')
+    .replace(/[^a-z0-9+ ]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  if (q.length < 2) return null
+  const cands = Array.from(document.querySelectorAll<HTMLAnchorElement>('a[href^="/"]'))
+    .map((a) => ({
+      label: (a.textContent || '').toLowerCase().replace(/[^a-z0-9+ ]/g, ' ').replace(/\s+/g, ' ').trim(),
+      path: a.getAttribute('href') || '',
+    }))
+    .filter((c) => c.label && c.path && !/^\/providers\/\d/.test(c.path))
+  const pick = (pred: (l: string) => boolean) => cands.find((c) => pred(c.label)) || null
+  const hit =
+    pick((l) => l === q) ||
+    pick((l) => l.indexOf(q) === 0) ||
+    pick((l) => q.indexOf(l + ' ') === 0) ||
+    pick((l) => l.split(' ').indexOf(q) > -1)
+  return hit ? { path: hit.path, label: hit.label } : null
 }
 
 const SUGGESTIONS = [
@@ -206,6 +244,7 @@ export default function HalPanel({
   // panel stays hidden instead of showing a button that can only error.
   const [configured, setConfigured] = useState(false)
   const npi = useCurrentNpi()
+  const navigate = useNavigate()
 
   useEffect(() => {
     api
@@ -293,6 +332,24 @@ export default function HalPanel({
       const next: Msg[] = [...messages, { role: 'user', content: trimmed }]
       setMessages(next)
       setInput('')
+      // Client-side navigation: "go to the Network page", "open providers", etc.
+      // HAL drives React Router itself instead of relaying to the backend (which
+      // can't move the browser). Anything else falls through to HAL's brain.
+      const route = halFindRoute(trimmed)
+      if (route) {
+        const name = route.label.replace(/\b\w/g, (c) => c.toUpperCase())
+        const who = FACES[faceRef.current].name
+        const line =
+          who === 'J.A.R.V.I.S.'
+            ? `Right away, sir — ${name}.`
+            : who === 'HAL 9000'
+              ? `Certainly, Dave. Bringing up ${name}.`
+              : `Opening ${name}.`
+        setMessages([...next, { role: 'assistant', content: line }])
+        speak(line)
+        navigate(route.path)
+        return
+      }
       setBusy(true)
       try {
         const res = await api.halChat(
@@ -316,7 +373,7 @@ export default function HalPanel({
         setBusy(false)
       }
     },
-    [busy, messages, npi, speak],
+    [busy, messages, npi, speak, navigate],
   )
 
   // ---- HAL's ears -----------------------------------------------------------
