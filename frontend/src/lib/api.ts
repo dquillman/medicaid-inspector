@@ -374,16 +374,16 @@ export const api = {
     const html = await res.text()
     const blob = new Blob([html], { type: 'text/html' })
     const url = URL.createObjectURL(blob)
-    // 'noopener,noreferrer' prevents the opened tab from accessing window.opener
-    // and leaking Referer headers.
-    const win = window.open(url, '_blank', 'noopener,noreferrer')
-    // Release the blob URL shortly after opening so it doesn't leak if
-    // the popup is blocked or the user closes the tab quickly.
-    if (!win) {
-      URL.revokeObjectURL(url)
-      throw new Error('Pop-up was blocked — please allow pop-ups and retry.')
-    }
-    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    // Trigger a download/save rather than rendering inline, so the packet can be
+    // saved and forwarded for OIG submission. Clean filename per house style:
+    // lowercase, underscore-separated, no spaces or " - " segments.
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `referral_packet_${npi}.html`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   },
 
   addToReview: (data: { npi: string; status?: string; notes?: string; assigned_to?: string }) =>

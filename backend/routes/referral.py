@@ -40,7 +40,14 @@ async def generate_referral_packet(npi: str):
     # ── Fetch provider from scan cache ───────────────────────────────────────
     cached = get_provider_by_npi(npi)
     if not cached:
-        raise HTTPException(404, f"Provider {npi} not found in scan cache — run a scan first")
+        raise HTTPException(404, f"Provider {npi} not found in scan cache - run a scan first")
+
+    # Slim cache (Cloud Run) omits per-HCPCS/timeline arrays. Enrich from a local
+    # parquet when available; on the remote-slim path capture a note so the
+    # HCPCS/timeline sections fall back to the aggregate summary the slim cache
+    # DOES carry (distinct_hcpcs, top_hcpcs) instead of rendering blank tables.
+    from services.slim_cache_enricher import enrich_provider_detail
+    cached, slim_note = enrich_provider_detail(cached)
 
     # ── Enrich billing data from DuckDB if slim cache has gaps ───────────────
     tp = cached.get("total_paid") or 0
@@ -103,11 +110,55 @@ async def generate_referral_packet(npi: str):
         desc = hcpcs_descriptions.get(code, "")
         hcpcs_rows += (
             f"<tr><td><strong>{_esc(code)}</strong></td>"
-            f"<td>{_esc(desc) if desc else '<em style=color:#9ca3af>—</em>'}</td>"
+            f"<td>{_esc(desc) if desc else '<em style=color:#9ca3af>&mdash;</em>'}</td>"
             f"<td style='text-align:right'>{_fmt(paid)}</td>"
             f"<td style='text-align:right'>{h.get('total_claims', 0):,}</td>"
             f"<td style='text-align:right'>{pct:.1f}%</td></tr>\n"
         )
+
+    # HCPCS section: full per-code table when available, else fall back to the
+    # aggregate summary the slim cache carries (distinct code count + top code)
+    # with a visible note — never a silently-empty table.
+    if hcpcs_rows:
+        hcpcs_section = (
+            '<table>'
+            '<tr><th>Code</th><th>Description</th><th style="text-align:right">Amount Billed</th>'
+            '<th style="text-align:right">Claims</th><th style="text-align:right">% of Total</th></tr>'
+            f'{hcpcs_rows}</table>'
+        )
+    else:
+        distinct = cached.get("distinct_hcpcs") or 0
+        top_code = cached.get("top_hcpcs") or ""
+        top_desc = ""
+        if top_code:
+            top_desc = (await fetch_hcpcs_descriptions([top_code])).get(top_code, "")
+        summary_bits = []
+        if distinct:
+            summary_bits.append(f'<li><strong>{distinct:,}</strong> distinct HCPCS codes billed</li>')
+        if top_code:
+            summary_bits.append(
+                f'<li>Top code: <strong>{_esc(top_code)}</strong>'
+                + (f' &mdash; {_esc(top_desc)}' if top_desc else '') + '</li>'
+            )
+        note = (
+            'Per-code billing detail is not loaded on this deployment (running on the '
+            'slim prescan cache with a remote dataset). The aggregate summary below is '
+            'computed at scan time and remains valid; run a fresh scan or restore the '
+            'full cache from GCS for the full per-code breakdown.'
+        )
+        if summary_bits:
+            hcpcs_section = (
+                f'<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;'
+                f'padding:14px 16px;margin:12px 0"><p style="margin:0 0 8px;color:#92400e;'
+                f'font-size:13px">{note}</p><ul style="margin:0;padding-left:20px;font-size:13px;'
+                f'color:#374151">{"".join(summary_bits)}</ul></div>'
+            )
+        else:
+            hcpcs_section = (
+                f'<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;'
+                f'padding:14px 16px;margin:12px 0"><p style="margin:0;color:#92400e;font-size:13px">'
+                f'{note}</p></div>'
+            )
 
     # ── OIG exclusion ────────────────────────────────────────────────────────
     oig_excluded = False
@@ -332,17 +383,14 @@ tr:hover td{{background:#f9fafb}}
 </div>
 
 <h2>4. Top HCPCS Codes Billed</h2>
-<table>
-<tr><th>Code</th><th>Description</th><th style="text-align:right">Amount Billed</th><th style="text-align:right">Claims</th><th style="text-align:right">% of Total</th></tr>
-{hcpcs_rows}
-</table>
+{hcpcs_section}
 
 <h2>5. Fraud Signal Analysis</h2>
 <p style="color:#6b7280;font-size:13px">Each fraud signal is scored 0&ndash;1 and multiplied by its weight. The composite risk score is the weighted sum, capped at 100. Signals marked TRIGGERED indicate anomalous behavior that warrants investigation.</p>
 {signal_cards}
 
 <h2>6. Monthly Billing Timeline</h2>
-{'<table><tr><th>Month</th><th style="text-align:right">Amount Paid</th><th style="text-align:right">Claims</th><th style="text-align:right">Beneficiaries</th></tr>' + timeline_rows + '</table>' if timeline_rows else '<p style="color:#6b7280">No monthly timeline data available.</p>'}
+{'<table><tr><th>Month</th><th style="text-align:right">Amount Paid</th><th style="text-align:right">Claims</th><th style="text-align:right">Beneficiaries</th></tr>' + timeline_rows + '</table>' if timeline_rows else '<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:14px 16px;margin:12px 0"><p style="margin:0;color:#92400e;font-size:13px">Monthly timeline detail is not loaded on this deployment (slim prescan cache with a remote dataset). Billing-period bounds (' + fm + ' through ' + lm + ', ' + str(am) + ' active months) are computed at scan time and shown in the Risk Score Summary above. Run a fresh scan or restore the full cache from GCS for the month-by-month breakdown.</p></div>'}
 
 {review_html}
 

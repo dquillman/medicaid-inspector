@@ -2693,16 +2693,27 @@ async def provider_oig_tip(npi: str):
         "  the OIG FOIA officer no sooner than 6 months after submission.\n"
     )
 
+    # HHS-OIG's submission form rejects non-ASCII typographic characters. The
+    # narrative (and the free-text fields the caller may paste) must be plain
+    # 7-bit ASCII so the packet is submittable without manual editing.
+    from core.text_sanitize import to_ascii
+
+    text = to_ascii(text)
+    for ind in indicators:
+        ind["label"] = to_ascii(ind["label"])
+        ind["finding"] = to_ascii(ind["finding"])
+        ind["citations"] = [to_ascii(c) for c in ind["citations"]]
+
     return {
         "npi": npi,
         "text": text,
         "fields": {
-            "subject_name": name,
+            "subject_name": to_ascii(name),
             "npi": npi,
-            "provider_type": specialty,
-            "address": address_str,
+            "provider_type": to_ascii(specialty),
+            "address": to_ascii(address_str),
             "program": "Medicaid",
-            "complaint_category": category,
+            "complaint_category": to_ascii(category),
             "risk_score": round(risk, 1),
             "time_period": f"{first_m} to {last_m}",
             "total_medicaid_paid": round(total_paid, 2),
