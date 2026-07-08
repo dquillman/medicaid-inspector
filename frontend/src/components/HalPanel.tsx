@@ -221,6 +221,7 @@ export default function HalPanel({
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [speaking, setSpeaking] = useState(false)
+  const [paused, setPaused] = useState(false)
   const [listening, setListening] = useState(false)
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) !== 'off')
   const [face, setFace] = useState<Face>(() => {
@@ -258,6 +259,9 @@ export default function HalPanel({
   const recRef = useRef<Recognition | null>(null)
   const voiceOnRef = useRef(voiceOn)
   voiceOnRef.current = voiceOn
+  // True while the USER has paused speech. The keep-alive interval below must
+  // not fight this (its pause/resume would otherwise instantly un-pause us).
+  const userPausedRef = useRef(false)
 
   useEffect(() => {
     setCanListen('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)
@@ -283,6 +287,9 @@ export default function HalPanel({
     if (!voiceOnRef.current || !('speechSynthesis' in window)) return
     const synth = window.speechSynthesis
     synth.cancel()
+    // A new utterance always starts un-paused.
+    userPausedRef.current = false
+    setPaused(false)
 
     const persona = FACES[faceRef.current]
     const utt = new SpeechSynthesisUtterance(text)
@@ -309,6 +316,8 @@ export default function HalPanel({
         keepAlive = null
         return
       }
+      // Don't fight a deliberate user pause — only nudge Chrome when playing.
+      if (userPausedRef.current) return
       synth.pause()
       synth.resume()
     }, 10000)
@@ -317,6 +326,8 @@ export default function HalPanel({
         clearInterval(keepAlive)
         keepAlive = null
       }
+      userPausedRef.current = false
+      setPaused(false)
       setSpeaking(false)
     }
     utt.onend = finish
@@ -411,11 +422,28 @@ export default function HalPanel({
     }
   }, [canListen, listening, busy, send])
 
+  // ---- Pause / resume the current spoken reply ------------------------------
+  const togglePause = useCallback(() => {
+    const synth = window.speechSynthesis
+    if (!synth || !synth.speaking) return
+    if (userPausedRef.current) {
+      synth.resume()
+      userPausedRef.current = false
+      setPaused(false)
+    } else {
+      synth.pause()
+      userPausedRef.current = true
+      setPaused(true)
+    }
+  }, [])
+
   // Stop audio when the panel closes or unmounts.
   useEffect(() => {
     if (!open) {
       window.speechSynthesis?.cancel()
       recRef.current?.stop()
+      userPausedRef.current = false
+      setPaused(false)
       setSpeaking(false)
     }
   }, [open])
@@ -671,19 +699,40 @@ export default function HalPanel({
                 <p className="text-[10px] text-ink-ghost">
                   HAL can make mistakes — verify figures before acting.
                 </p>
-                <button
-                  onClick={() => {
-                    if (voiceOn) window.speechSynthesis?.cancel()
-                    setVoiceOn((v) => {
-                      localStorage.setItem(VOICE_KEY, v ? 'off' : 'on')
-                      return !v
-                    })
-                  }}
-                  className="text-[10px] uppercase tracking-wider text-ink-tertiary hover:text-ink-secondary transition-colors"
-                  title="Toggle HAL's voice"
-                >
-                  Voice {voiceOn ? 'On' : 'Off'}
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={togglePause}
+                    disabled={!speaking}
+                    className="text-[10px] uppercase tracking-wider text-ink-tertiary hover:text-ink-secondary transition-colors disabled:opacity-30 disabled:hover:text-ink-tertiary"
+                    title={paused ? 'Resume HAL’s speech' : 'Pause HAL’s speech'}
+                    aria-label={paused ? 'Resume speech' : 'Pause speech'}
+                  >
+                    {paused ? '► Resume' : '❚❚ Pause'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      // Muting stops any in-flight speech immediately; unmuting
+                      // just re-enables it for the next reply.
+                      window.speechSynthesis?.cancel()
+                      userPausedRef.current = false
+                      setPaused(false)
+                      setSpeaking(false)
+                      setVoiceOn((v) => {
+                        localStorage.setItem(VOICE_KEY, v ? 'off' : 'on')
+                        return !v
+                      })
+                    }}
+                    className={`text-[10px] uppercase tracking-wider transition-colors ${
+                      voiceOn
+                        ? 'text-ink-tertiary hover:text-ink-secondary'
+                        : 'text-threat-critical hover:text-threat-critical/80'
+                    }`}
+                    title={voiceOn ? 'Mute HAL’s voice' : 'Unmute HAL’s voice'}
+                    aria-label={voiceOn ? 'Mute voice' : 'Unmute voice'}
+                  >
+                    {voiceOn ? '🔊 Mute' : '🔇 Muted'}
+                  </button>
+                </div>
               </div>
             </div>
           </motion.aside>
