@@ -105,26 +105,108 @@ async def _brain_ask_mcp(question: str) -> str:
             return ("\n".join(t for t in texts if t))[:4000]
 
 
+# The brain is synced to qcode's Firestore by `hal sync` — meta/second_brain
+# holds a JSON blob of every memory. On Cloud Run (where the local hal.py does
+# not exist) MFI reads THAT, so its HAL is brain-aware in production too.
+SECOND_BRAIN_PROJECT = os.environ.get("SECOND_BRAIN_PROJECT", "qcode-9a2dc")
+_BRAIN_STOP = set(
+    "a an and are as at be by for from has have i in is it its of on or that the to "
+    "was were what when where which who why will with you your how do does what's".split())
+
+
+def _gcp_access_token() -> str:
+    """SA access token from the Cloud Run metadata server (no creds file)."""
+    import urllib.request
+    req = urllib.request.Request(
+        "http://metadata.google.internal/computeMetadata/v1/instance/"
+        "service-accounts/default/token",
+        headers={"Metadata-Flavor": "Google"})
+    with urllib.request.urlopen(req, timeout=5) as r:
+        return json.loads(r.read().decode())["access_token"]
+
+
+def _brain_ask_firestore_sync(question: str) -> str:
+    """Read the synced brain from Firestore and return the best memory. Plain
+    keyword scoring — same spirit as HAL's deterministic retrieval."""
+    import urllib.request
+    token = _gcp_access_token()
+    url = (f"https://firestore.googleapis.com/v1/projects/{SECOND_BRAIN_PROJECT}"
+           "/databases/(default)/documents/meta/second_brain")
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + token})
+    with urllib.request.urlopen(req, timeout=15) as r:
+        doc = json.loads(r.read().decode())
+    raw = (doc.get("fields", {}).get("json", {}) or {}).get("stringValue", "")
+    memories = (json.loads(raw).get("memories", []) if raw else [])
+    if not memories:
+        return ""
+    import re
+    kws = [w for w in re.findall(r"[a-z0-9][a-z0-9'-]*", question.lower())
+           if w not in _BRAIN_STOP and len(w) > 1]
+    if not kws:
+        return ""
+
+    def score(m):
+        title = (m.get("title", "") or "").lower()
+        desc = (m.get("desc", "") or "").lower()
+        body = (m.get("body", "") or "").lower()
+        s = 0
+        for k in kws:
+            if k in title:
+                s += 3
+            if k in desc:
+                s += 1
+            if k in body:
+                s += 1
+        return s
+
+    ranked = sorted(((score(m), m) for m in memories), key=lambda x: -x[0])
+    if ranked[0][0] == 0:
+        return ("NO MATCH in the Second Brain (synced copy). Nothing there answers "
+                "that yet.")
+    top = ranked[0][1]
+    out = [f"From the Second Brain — {top.get('title','')}:", top.get("body", "")]
+    if len(ranked) > 1 and ranked[1][0] > 0:
+        out.append(f"\nAlso relevant — {ranked[1][1].get('title','')}: "
+                   f"{ranked[1][1].get('body','')[:400]}")
+    synced = (json.loads(raw).get("syncedAt", "") if raw else "")
+    if synced:
+        out.append(f"\n(synced {synced[:10]})")
+    return "\n".join(out)[:4000]
+
+
 async def _brain_ask(question: str) -> str:
-    """Consult the shared Second Brain. Prefer the MCP boundary; fall back to the
-    CLI, then to a clear 'unreachable' message (e.g. on Cloud Run)."""
-    if not os.path.isfile(BRAIN_HAL_PY):
-        return "The Second Brain is not reachable from this machine."
+    """Consult the shared Second Brain. Locally: prefer the live engine over MCP
+    then CLI. On Cloud Run (no local hal.py): read the copy synced to Firestore
+    — so MFI's HAL is brain-aware in production, not just on Dave's machine."""
+    # 1. Live local brain (dev machine).
+    if os.path.isfile(BRAIN_HAL_PY):
+        try:
+            out = await asyncio.wait_for(_brain_ask_mcp(question), timeout=25)
+            if out:
+                return out
+        except Exception as exc:  # noqa: BLE001 — MCP unavailable → fall back to CLI
+            logger.info("brain_ask MCP path unavailable (%s); using CLI", exc)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                BRAIN_PYTHON, BRAIN_HAL_PY, "ask", question,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
+            decoded = out.decode("utf-8", "replace")[:4000]
+            if decoded.strip():
+                return decoded
+        except Exception as exc:  # noqa: BLE001
+            logger.info("brain_ask CLI path failed (%s); trying Firestore", exc)
+    # 2. Synced brain in Firestore (Cloud Run / no local brain).
     try:
-        out = await asyncio.wait_for(_brain_ask_mcp(question), timeout=25)
-        if out:
-            return out
-    except Exception as exc:  # noqa: BLE001 — MCP unavailable → fall back to CLI
-        logger.info("brain_ask MCP path unavailable (%s); using CLI", exc)
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            BRAIN_PYTHON, BRAIN_HAL_PY, "ask", question,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        )
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=20)
-        return out.decode("utf-8", "replace")[:4000] or "(no evidence)"
+        fs = await asyncio.wait_for(
+            asyncio.to_thread(_brain_ask_firestore_sync, question), timeout=20)
+        if fs:
+            return fs
     except Exception as exc:  # noqa: BLE001
-        return f"(brain_ask failed: {exc})"
+        logger.info("brain_ask Firestore fallback failed: %s", exc)
+    return ("The Second Brain isn't reachable from here right now — I can still "
+            "help with everything in this app.")
 
 
 def _anthropic_tools() -> List[dict]:

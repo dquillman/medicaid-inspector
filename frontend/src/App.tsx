@@ -237,10 +237,11 @@ export default function App() {
   const sidebarMargin = collapsed ? 'lg:ml-16' : 'lg:ml-56'
   // HAL's panel is a fixed-width (max-w-md = 28rem) overlay on the right; push
   // main content left by the same amount while it's open so nothing underneath
-  // is covered. Gated at lg: like the sidebar margin above, since the panel
-  // occupies the full viewport width below that anyway (nothing to push into).
+  // is covered. Pushed from md: up (>=768px) — at md-lg the panel is only 28rem
+  // wide (not full width), so gating this at lg: left it overlapping the right
+  // of the app. Below md there's no room to push, so it stays a full overlay.
   const { open: halOpen, setOpen: setHalOpen } = useHalOpen()
-  const halMargin = halOpen ? 'lg:mr-[28rem]' : 'lg:mr-0'
+  const halMargin = halOpen ? 'md:mr-[28rem]' : 'md:mr-0'
 
   // Restore session from localStorage (with expiry check)
   useEffect(() => {
