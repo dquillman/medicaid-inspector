@@ -208,10 +208,11 @@ function HalEye({
     )
   }
   const lensSize = bezel ? Math.round(size * 0.61) : size
+  const steel = face === 'assistant'
   const lens = (
     <span
-      className={`hal-lens hal-${state}`}
-      style={{ width: lensSize, height: lensSize, filter: tint }}
+      className={`hal-lens hal-${state}${steel ? ' hal-steel' : ''}`}
+      style={{ width: lensSize, height: lensSize, filter: steel ? undefined : tint }}
       aria-hidden="true"
     >
       <span className="hal-glint" />
@@ -500,6 +501,12 @@ export default function HalPanel({
         }
         .hal-lens.hal-thinking { animation: halBreathe 1.4s ease-in-out infinite; }
         .hal-lens.hal-speaking { animation: halSpeak .55s ease-in-out infinite; }
+        /* Assistant: a neutral STEEL lens (its own identity, not a dimmed HAL eye). */
+        .hal-lens.hal-steel {
+          background: radial-gradient(circle at 50% 44%,
+            #fff 0%, #eef2f8 6%, #c2ccda 20%, #8a97a9 42%, #444e5c 66%, #1a1f27 84%, #000 96%);
+          box-shadow: 0 0 18px 4px rgba(150,175,210,.5);
+        }
         /* Metallic bezel ring for the plate eye (qcode console design). */
         .hal-ring {
           border-radius: 9999px; box-sizing: border-box;
@@ -629,7 +636,7 @@ export default function HalPanel({
               <HalEye size={72} state={eyeState} tint={FACES[face].tint} face={face} bezel />
               <div
                 className="hal-console-name"
-                style={{ color: face === 'jarvis' ? '#ffd47e' : '#9db4ff' }}
+                style={{ color: face === 'jarvis' ? '#ffd47e' : face === 'assistant' ? '#b8c4d4' : '#9db4ff' }}
               >
                 {FACES[face].name}
               </div>
