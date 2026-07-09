@@ -257,7 +257,26 @@ export default function TemporalAnalysisSection({ npi }: { npi: string }) {
 
   if (error) {
     const errMsg = String(error)
-    if (errMsg.includes('404')) return null
+    // Genuinely no billing data for this provider — nothing to show, hide it.
+    if (/no billing data/i.test(errMsg)) return null
+    // Full-dataset-only feature on a slim/remote deployment. The backend 404s
+    // with an explanatory detail; surface that as an informative note rather
+    // than a generic failure — the month-by-month drill-down isn't loaded here,
+    // but ramp/volume anomalies are still captured in the risk score from
+    // scan-time summary data (so this is a cosmetic gap, not a blind spot).
+    if (/local dataset|deployment|requires the full/i.test(errMsg)) {
+      return (
+        <div className="card">
+          <h2 className="text-base font-semibold text-gray-300 mb-3">Temporal Anomaly Detection</h2>
+          <p className="text-xs text-gray-500">
+            Month-by-month temporal detail isn&apos;t loaded on this deployment (running on the
+            slim cache with a remote dataset). Billing-ramp and volume anomalies remain captured
+            in this provider&apos;s risk score from scan-time summary data. Run a fresh scan or
+            restore the full cache from GCS for the month-by-month breakdown.
+          </p>
+        </div>
+      )
+    }
     return (
       <div className="card">
         <h2 className="text-base font-semibold text-gray-300 mb-3">Temporal Anomaly Detection</h2>

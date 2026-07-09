@@ -1,10 +1,19 @@
 """
-Medicare Fee-for-Service Provider Utilization lookup via CMS Socrata API.
+Medicare Fee-for-Service Provider Utilization lookup via the CMS data-api.
 Fetches Medicare utilization data for a given NPI from the CMS
 Provider Utilization & Payment Data (Medicare Physician & Other
-Practitioners by Provider).
+Practitioners - by Provider and Service).
 
 Uses the same caching pattern as NPPES client.
+
+NOTE: CMS retired the old Socrata endpoint (data.cms.gov/resource/<id>.json)
+— it now returns HTTP 410 Gone. The current platform is the DKAN data-api at
+data.cms.gov/data-api/v1/dataset/<uuid>/data, with PascalCase column names and
+filter[Col]=val / size= paging (NOT the old $limit / lowercase columns).
+
+To refresh to a newer annual release: pull the catalog at
+https://data.cms.gov/data.json, find the newest "Medicare Physician & Other
+Practitioners - by Provider and Service" distribution, and update the UUID below.
 """
 import logging
 import httpx
@@ -12,10 +21,11 @@ from core.cache import cached_nppes  # reuse 24-hour TTL cache
 
 log = logging.getLogger(__name__)
 
-# CMS Medicare Physician & Other Practitioners — by Provider
-# Dataset identifier: fs4p-t5eq (2022 data, latest public)
+# CMS Medicare Physician & Other Practitioners — by Provider and Service.
+# data-api UUID for the 2024 release (catalog-modified 2026-05-21).
+_MEDICARE_DATASET_UUID = "92396110-2aed-4d63-a6a2-5d6207d46a29"
 _MEDICARE_UTIL_URL = (
-    "https://data.cms.gov/resource/fs4p-t5eq.json"
+    f"https://data.cms.gov/data-api/v1/dataset/{_MEDICARE_DATASET_UUID}/data"
 )
 
 
@@ -26,8 +36,8 @@ async def get_medicare_utilization(npi: str) -> dict:
     Returns normalized summary dict or empty dict if no data.
     """
     params = {
-        "rndrng_npi": npi,
-        "$limit": 500,  # all HCPCS rows for this provider
+        "filter[Rndrng_NPI]": npi,
+        "size": 500,  # all HCPCS rows for this provider (data-api page size)
     }
 
     try:
@@ -63,10 +73,10 @@ async def get_medicare_utilization(npi: str) -> dict:
     hcpcs_map: dict[str, dict] = {}
 
     for row in rows:
-        submitted = float(row.get("avg_sbmtd_chrg", 0)) * int(row.get("tot_srvcs", 0))
-        paid = float(row.get("avg_mdcr_pymt_amt", 0)) * int(row.get("tot_srvcs", 0))
-        services = int(row.get("tot_srvcs", 0))
-        benes = int(row.get("tot_benes", 0))
+        submitted = float(row.get("Avg_Sbmtd_Chrg", 0) or 0) * int(row.get("Tot_Srvcs", 0) or 0)
+        paid = float(row.get("Avg_Mdcr_Pymt_Amt", 0) or 0) * int(row.get("Tot_Srvcs", 0) or 0)
+        services = int(row.get("Tot_Srvcs", 0) or 0)
+        benes = int(row.get("Tot_Benes", 0) or 0)
 
         total_submitted += submitted
         total_paid += paid
@@ -76,14 +86,14 @@ async def get_medicare_utilization(npi: str) -> dict:
         total_beneficiaries = max(total_beneficiaries, benes)
 
         if not provider_type:
-            provider_type = row.get("rndrng_prvdr_type", None)
+            provider_type = row.get("Rndrng_Prvdr_Type", None)
 
-        code = row.get("hcpcs_cd", "")
+        code = row.get("HCPCS_Cd", "")
         if code:
             if code not in hcpcs_map:
                 hcpcs_map[code] = {
                     "hcpcs_code": code,
-                    "description": row.get("hcpcs_desc", ""),
+                    "description": row.get("HCPCS_Desc", ""),
                     "total_paid": 0.0,
                     "total_services": 0,
                     "total_beneficiaries": 0,
@@ -100,7 +110,7 @@ async def get_medicare_utilization(npi: str) -> dict:
     # Sum total unique beneficiaries from the provider-level bene count
     # Use the tot_benes from the first row as an approximation of unique benes
     # (CMS provides tot_benes at HCPCS level, not truly additive)
-    unique_benes = max(int(row.get("tot_benes", 0)) for row in rows) if rows else 0
+    unique_benes = max(int(row.get("Tot_Benes", 0) or 0) for row in rows) if rows else 0
 
     avg_per_bene = total_paid / unique_benes if unique_benes > 0 else 0
 

@@ -535,30 +535,57 @@ async def _tool_log_bug(args: dict) -> dict:
     lines.append(f"- **Status:** OPEN")
     entry = "\n".join(lines) + "\n"
 
-    # Ensure the file exists with a header, then append.
-    ephemeral = not parquet_is_local()  # remote parquet == Cloud Run == ephemeral FS
-    try:
-        if not _BUGLOG_PATH.exists():
-            _BUGLOG_PATH.write_text(
-                "# MFI Bug Log\n\nBugs logged via HAL and manual entry. "
-                "Newest entries appended below.\n", encoding="utf-8",
-            )
-        with _BUGLOG_PATH.open("a", encoding="utf-8") as f:
-            f.write(entry)
-    except Exception as exc:  # noqa: BLE001
-        raise ValueError(f"log_bug: could not write {_BUGLOG_PATH.name}: {exc}") from exc
+    _HEADER = ("# MFI Bug Log\n\nBugs logged via HAL and manual entry. "
+               "Newest entries appended below.\n")
 
-    _log_phi("write", "system", "MFIBugs.md", tool="log_bug", title=title, severity=severity)
+    def _try_append(path: Path) -> bool:
+        try:
+            if not path.exists():
+                path.write_text(_HEADER, encoding="utf-8")
+            with path.open("a", encoding="utf-8") as f:
+                f.write(entry)
+            return True
+        except OSError:
+            return False
 
+    # Best target first: the committable repo file. On Cloud Run that lives under
+    # a read-only root (/MFIBugs.md -> Errno 13), so fall back to a writable temp
+    # path — best-effort capture for the session. This tool must NEVER raise on a
+    # write failure (its whole contract is graceful degradation); if every target
+    # is unwritable we return logged=False and hand the formatted entry back so
+    # the caller can relay it to Dave for manual capture.
+    import tempfile
+
+    tmp_path = Path(tempfile.gettempdir()) / "MFIBugs.md"
+    targets = [_BUGLOG_PATH] + ([tmp_path] if tmp_path != _BUGLOG_PATH else [])
+    written_to = next((p for p in targets if _try_append(p)), None)
+
+    _log_phi("write", "system", "MFIBugs.md", tool="log_bug",
+             title=title, severity=severity, persisted=bool(written_to))
+
+    if written_to is None:
+        return {
+            "logged": False,
+            "persisted": False,
+            "title": title,
+            "severity": severity,
+            "entry": entry.strip(),
+            "note": ("Could not write MFIBugs.md on this deployment (read-only "
+                     "filesystem). Nothing was persisted. Relay the 'entry' text "
+                     "to Dave so it can be added to MFIBugs.md from a local session."),
+        }
+
+    persisted = written_to == _BUGLOG_PATH  # only the repo file is committable
     note = (
-        "Logged to MFIBugs.md. NOTE: this deployment has an ephemeral filesystem "
-        "(remote dataset / Cloud Run), so this entry will not survive a restart and "
-        "is not committed to the repo. Report it from a local session to persist it."
-        if ephemeral else
         "Logged to MFIBugs.md in the local repo. Commit the file to keep the entry."
+        if persisted else
+        f"This deployment's repo path is read-only, so the entry was written to a "
+        f"temporary file ({written_to}) and will NOT survive a restart or reach the "
+        f"repo. Relay it to Dave to persist it from a local session."
     )
-    return {"logged": True, "file": "MFIBugs.md", "title": title,
-            "severity": severity, "persisted": not ephemeral, "note": note}
+    return {"logged": True, "file": str(written_to), "title": title,
+            "severity": severity, "persisted": persisted, "entry": entry.strip(),
+            "note": note}
 
 
 _HANDLERS = {

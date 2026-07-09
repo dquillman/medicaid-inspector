@@ -20,3 +20,19 @@ Reported by Dave via JARVIS/MFI session. Repro NPI: `1720390115`.
 ### 4. Dash in Referral Packet file name — FIXED
 **Was:** Saving the packet produced a filename with a " - " segment (from the document `<title>`, "... — NPI ...").
 **Fix:** The download now uses an explicit, house-style filename: `referral_packet_<npi>.html` (lowercase, underscore-separated, no spaces or dashes).
+
+## 2026-07-09 — HAL field report from deployed instance (FIXED, v3.7.13)
+
+Surfaced by HAL/JARVIS while investigating NPI `1720390115` (Dunlap) on the Cloud Run deployment. HAL could not write these to this log itself (see item 5) — captured here from a local session.
+
+### 5. log_bug crashes on Cloud Run instead of degrading — FIXED
+**Was:** The `log_bug` MCP/HAL tool threw `[Errno 13] Permission denied: '/MFIBugs.md'` on the deployed instance. Two defects: (a) `_BACKEND_DIR.parent / "MFIBugs.md"` resolves to the read-only container root `/MFIBugs.md` on Cloud Run; (b) the handler `raise`d on write failure, violating its own "best-effort, degrade gracefully" contract. Ironically, a bug in the bug-logger.
+**Fix:** `backend/mcp_server.py` — try the committable repo file, fall back to a writable temp path, and NEVER raise on write failure. When every target is unwritable it returns `logged:false` with the formatted `entry` text so the caller (HAL) can relay it. `persisted` now accurately reflects whether it hit the repo file.
+
+### 6. Temporal Anomaly panel shows generic failure on slim deployment — FIXED
+**Was:** On Cloud Run (no local parquet) the Temporal Anomaly Detection panel showed "Could not load temporal analysis." The backend already 404s with an explanatory detail, but the frontend's `errMsg.includes('404')` check never matched (the thrown error carries the FastAPI `detail` string, not the status code), so both the "unavailable here" and "no data" cases fell through to the generic error.
+**Fix:** `frontend/src/components/TemporalAnalysisSection.tsx` — match on the detail message: "no billing data" hides the panel; the full-dataset-only case shows an informative note (month-by-month detail isn't loaded here, but ramp/volume anomalies remain captured in the risk score from scan-time summary data). Cosmetic gap, not an analytical one.
+
+### 7. CMS Medicare FFS Utilization API returns 410 Gone — FIXED (higher priority)
+**Was:** `services/medicare_lookup.py` called the retired CMS Socrata endpoint `data.cms.gov/resource/fs4p-t5eq.json`, which now returns HTTP 410. The Medicare Cross-Reference / discrepancy check was blind for ALL providers, not just Dunlap.
+**Fix:** Migrated to the current CMS data-api: `data.cms.gov/data-api/v1/dataset/92396110-2aed-4d63-a6a2-5d6207d46a29/data` (2024 release), with `filter[Rndrng_NPI]=`/`size=` paging and PascalCase column names (`Rndrng_NPI`, `HCPCS_Cd`, `Avg_Sbmtd_Chrg`, `Avg_Mdcr_Pymt_Amt`, `Tot_Srvcs`, `Tot_Benes`, `Rndrng_Prvdr_Type`, `HCPCS_Desc`). Verified live: real data returns; non-Medicare providers return `has_data:false` with no error. To bump to a future annual release, pull `data.cms.gov/data.json` and update the UUID.
