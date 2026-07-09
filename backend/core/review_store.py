@@ -19,6 +19,27 @@ _review_lock = threading.Lock()
 VALID_STATUSES = {"pending", "assigned", "investigating", "confirmed_fraud", "referred", "dismissed"}
 VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 
+# ── Case-ledger status (queue_status) ─────────────────────────────────────────
+# The canonical *case ledger* state for an NPI, DELIBERATELY DECOUPLED from the
+# live-computed Fraud Brain risk score: it is written only by explicit human
+# action and never recomputed from billing data, so it does not flicker as the
+# score refreshes. The Fraud Brain may READ this (for badges / de-prioritising
+# already-actioned providers) but must NEVER write it, and it must never feed
+# back into the computed risk score. One-way, read-only.
+VALID_QUEUE_STATUSES = {"open", "under_review", "tip_filed", "dismissed", "confirmed", "referred"}
+DEFAULT_QUEUE_STATUS = "open"
+# Transitions that carry real-world weight (a tip was actually filed with OIG; a
+# case was confirmed) must be a deliberate HUMAN action — never an automatic
+# side effect of an AI drafting a document or narrative. Enforced in
+# set_queue_status by requiring actor_type == "user" for these.
+HUMAN_GATED_QUEUE_STATUSES = {"tip_filed", "confirmed"}
+VALID_ACTOR_TYPES = {"user", "system", "ai"}
+
+
+def _queue_status_of(item: dict) -> str:
+    """queue_status for an item, defaulting for rows created before this field."""
+    return item.get("queue_status") or DEFAULT_QUEUE_STATUS
+
 
 # ── disk persistence ──────────────────────────────────────────────────────────
 
@@ -81,11 +102,22 @@ def add_to_review_queue(providers: list[dict]) -> int:
                 "total_paid": p.get("total_paid", 0),
                 "total_claims": p.get("total_claims", 0),
                 "status": "pending",
+                # Case-ledger state — every promoted NPI enters at "open". Only an
+                # explicit human action advances it (see set_queue_status).
+                "queue_status": DEFAULT_QUEUE_STATUS,
                 "notes": "",
                 "assigned_to": None,
                 "added_at": now,
                 "updated_at": now,
-                "audit_trail": [],
+                "audit_trail": [{
+                    "action": "queue_status_change",
+                    "previous_queue_status": None,
+                    "new_queue_status": DEFAULT_QUEUE_STATUS,
+                    "actor": p.get("_promoted_by") or "system",
+                    "actor_type": "user" if p.get("_promoted_by") else "system",
+                    "timestamp": now,
+                    "note": "Promoted into review queue",
+                }],
             }
             added += 1
     if added:
@@ -175,6 +207,95 @@ def update_review_item(
         result = dict(item)
     save_review_to_disk()
     return result
+
+
+# ── case-ledger status (queue_status) mutations ───────────────────────────────
+
+class QueueStatusError(Exception):
+    """Raised when a queue_status transition is rejected (bad value, or a
+    human-gated transition attempted by a non-human actor)."""
+
+
+def set_queue_status(
+    npi: str,
+    new_status: str,
+    *,
+    actor: str,
+    actor_type: str = "user",
+    note: str = "",
+) -> Optional[dict]:
+    """Explicitly set the case-ledger status for an NPI already in the queue.
+
+    - Never auto-creates a queue entry: returns None if the NPI isn't in the
+      queue (promotion is a separate, deliberate step — the Fraud Brain surfacing
+      a candidate must NOT drag it into the ledger).
+    - Human-gated transitions (tip_filed / confirmed) require actor_type=="user";
+      an AI/system caller is refused, so drafting a tip can never *record* that a
+      tip was filed as a side effect.
+    - Appends a full audit entry (prior state, actor, actor_type, timestamp).
+
+    Raises QueueStatusError on an invalid status value or a refused human-gated
+    transition. Returns the updated item, or None if the NPI isn't in the queue.
+    """
+    if new_status not in VALID_QUEUE_STATUSES:
+        raise QueueStatusError(
+            f"Invalid queue_status {new_status!r}. Must be one of {sorted(VALID_QUEUE_STATUSES)}"
+        )
+    if actor_type not in VALID_ACTOR_TYPES:
+        raise QueueStatusError(
+            f"Invalid actor_type {actor_type!r}. Must be one of {sorted(VALID_ACTOR_TYPES)}"
+        )
+    if new_status in HUMAN_GATED_QUEUE_STATUSES and actor_type != "user":
+        raise QueueStatusError(
+            f"Transition to {new_status!r} must be a human-initiated action "
+            f"(actor_type='user'); refused for actor_type={actor_type!r}. Record "
+            f"this from the review UI, not automatically."
+        )
+
+    now = time.time()
+    with _review_lock:
+        item = _review_items.get(npi)
+        if item is None:
+            return None  # not in queue — no auto-create
+        if "audit_trail" not in item:
+            item["audit_trail"] = []
+        previous = _queue_status_of(item)
+        item["queue_status"] = new_status
+        item["queue_status_updated_at"] = now
+        item["updated_at"] = now
+        item["audit_trail"].append({
+            "action": "queue_status_change",
+            "previous_queue_status": previous,
+            "new_queue_status": new_status,
+            "actor": actor or "unknown",
+            "actor_type": actor_type,
+            "timestamp": now,
+            "note": note or "",
+        })
+        result = dict(item)
+    save_review_to_disk()
+    return result
+
+
+def get_queue_status(npi: str) -> Optional[str]:
+    """Case-ledger status for an NPI, or None if it's not in the queue."""
+    with _review_lock:
+        item = _review_items.get(npi)
+        return _queue_status_of(item) if item is not None else None
+
+
+def get_queue_statuses(npis: list[str]) -> dict[str, str]:
+    """Batch read of queue_status for many NPIs. Only NPIs actually in the queue
+    appear in the result — callers (e.g. the Fraud Brain badge) treat a missing
+    key as 'not in queue'. READ-ONLY: this is the one-way link from ledger to
+    the candidate engine."""
+    wanted = set(npis)
+    with _review_lock:
+        return {
+            npi: _queue_status_of(item)
+            for npi, item in _review_items.items()
+            if npi in wanted
+        }
 
 
 # ── queries ───────────────────────────────────────────────────────────────────

@@ -40,13 +40,15 @@ W_FLAG_BREADTH = 0.10   # how many distinct signals fired
 # probability joins the blend at this weight and the base components are
 # scaled by (1 - W_SUPERVISED) so the total still sums to 1.0.
 W_SUPERVISED = 0.25
-# Review-queue confirmed frauds always get a flat boost so they surface on
-# the board regardless of dollar size. OIG-excluded providers are SKIPPED —
-# they're already barred and live on the dedicated Excluded page — UNLESS
-# they're confirmed_fraud, in which case the exclusion stacks as additional
-# evidence. Total score stays capped at 100.
-CONFIRMED_FRAUD_BOOST = 25.0
-OIG_BOOST = 25.0
+# DEPRECATED / UNUSED as of the candidate-engine / case-ledger separation:
+# review-queue disposition (confirmed_fraud) no longer boosts the Brain score —
+# case decisions must not steer the ranking they were made from. OIG-excluded
+# providers are filtered from the candidate ranking by federal-LEIE *data*
+# (they live on the Excluded page), independent of any case decision. These
+# constants are retained only to avoid breaking any external reference; they are
+# not applied to the score.
+CONFIRMED_FRAUD_BOOST = 25.0  # no longer applied
+OIG_BOOST = 25.0  # no longer applied
 DEACTIVATED_NPI_BOOST = 20.0  # billing Medicaid under a CMS-deactivated NPI
 
 # Size-bias correction. The single biggest ranking flaw was giant institutions
@@ -261,11 +263,14 @@ def compute_top_frauds(limit: int = 10) -> dict:
             vals = [float(p.get(col) or 0) for p in providers]
             feat_means[col] = (sum(vals) / len(vals)) if vals else 0.0
 
-    # Excluded providers re-enter the ranking only when confirmed fraud
-    from core.review_store import get_review_queue
-    confirmed_fraud_npis = {
-        i.get("npi") for i in get_review_queue() if i.get("status") == "confirmed_fraud"
-    }
+    # NOTE (candidate-engine / case-ledger separation): the Fraud Brain score is
+    # a pure function of billing/fraud/data signals. Review-queue DISPOSITION
+    # (queue_status: under_review / tip_filed / confirmed / …) is deliberately
+    # NOT read here and never alters the computed score — that would let case
+    # decisions feed back into the very ranking they were made from. Disposition
+    # is attached AFTER scoring, as a read-only display badge (see below), and
+    # OIG-excluded providers are filtered by federal LEIE *data* (not by any
+    # case decision) since they belong on the Excluded page.
 
     # Label-trained supervised model — empty dict until the user has labeled
     # >=10 providers and trained it (ML Model page)
@@ -305,10 +310,11 @@ def compute_top_frauds(limit: int = 10) -> dict:
         if not npi:
             continue
 
-        # Already barred from the program — belongs on the Excluded page,
-        # unless the review queue confirmed the fraud
+        # OIG-excluded providers belong on the Excluded page, not the candidate
+        # ranking. This is a federal-LEIE *data* filter, independent of any
+        # review-queue decision (which must not steer the candidate engine).
         oig = is_excluded(npi)[0]
-        if oig and npi not in confirmed_fraud_npis:
+        if oig:
             continue
         deact_date = get_deactivation(npi)
 
@@ -430,8 +436,6 @@ def compute_top_frauds(limit: int = 10) -> dict:
 
         score = sum(components.values())
 
-        confirmed = npi in confirmed_fraud_npis
-
         # Institutional-giant suppression: a large institution with NO
         # provider-specific signal beyond raw scale gets dampened so it stops
         # crowding out small, genuinely anomalous billers.
@@ -442,13 +446,12 @@ def compute_top_frauds(limit: int = 10) -> dict:
             any(kw in specialty_l for kw in INSTITUTIONAL_KEYWORDS)
             or (distinct_hcpcs >= INSTITUTIONAL_DISTINCT_HCPCS and benes >= INSTITUTIONAL_BENES)
         )
-        # Only confirmed-fraud / OIG exclusion are size-independent PROVABLE
-        # signals. Deactivated-NPI is NOT — NPPES deactivation is unreliable
-        # (reactivated/replaced NPIs, billing that predates deactivation), so it
-        # must NOT rescue a giant institution from dampening (that's how Easter
-        # Seals / NYC Health+Hospitals were topping the Brain).
-        strong_specific = confirmed or oig
-        dampened = is_institutional and not strong_specific
+        # Dampening is size-vs-signal only. Review-queue disposition (e.g.
+        # "confirmed") deliberately does NOT rescue a provider here — case
+        # decisions must not steer the candidate ranking (see the note above).
+        # OIG providers were already filtered out above, so the only remaining
+        # size-independent consideration is the provider's own signal profile.
+        dampened = is_institutional
         if dampened:
             score *= INSTITUTIONAL_DAMPEN
             evidence.append({
@@ -459,21 +462,6 @@ def compute_top_frauds(limit: int = 10) -> dict:
                 "points": 0,
             })
 
-        if confirmed:
-            score += CONFIRMED_FRAUD_BOOST
-            evidence.append({
-                "source": "Confirmed fraud",
-                "detail": "Marked confirmed_fraud in the Review Queue",
-                "points": CONFIRMED_FRAUD_BOOST,
-            })
-        if oig:  # only reachable when confirmed_fraud
-            score += OIG_BOOST
-            evidence.append({
-                "source": "OIG LEIE exclusion",
-                "detail": "On the federal exclusion list while present in "
-                          "Medicaid billing data",
-                "points": OIG_BOOST,
-            })
         if deact_date:
             # NO score boost. NPPES "deactivation" is NOT provable fraud: NPIs get
             # reactivated/replaced without the file tracking it, and ~70% of
@@ -500,8 +488,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
             "total_paid": round(total_paid, 2),
             "risk_score": round(risk, 1),
             "flag_count": flag_count,
-            "oig_excluded": oig,
-            "confirmed_fraud": confirmed,
+            "oig_excluded": oig,  # always False here (OIG providers filtered above)
             "deactivated_npi": bool(deact_date),
             "size_dampened": dampened,
             "corroborating_sources": len(corr_sources),
@@ -511,6 +498,16 @@ def compute_top_frauds(limit: int = 10) -> dict:
 
     scored.sort(key=lambda x: (-x["brain_score"], -x["total_paid"]))
 
+    # ── One-way read: attach case-ledger status as a READ-ONLY display badge ───
+    # The candidate engine reads queue_status here purely to annotate results
+    # (so the UI can show "under review" / "tip filed" / "dismissed" and
+    # optionally de-prioritise already-actioned providers). This never wrote,
+    # and never fed, the score above — scoring finished before this line.
+    from core.review_store import get_queue_statuses
+    _ledger = get_queue_statuses([e["npi"] for e in scored])
+    for e in scored:
+        e["queue_status"] = _ledger.get(e["npi"])  # None => not in the review queue
+
     return {
         "top": scored[:limit],
         "providers_evaluated": len(scored),
@@ -518,10 +515,13 @@ def compute_top_frauds(limit: int = 10) -> dict:
         "supervised_model_used": sup_active,
         "corroborated_providers": len(corroboration),
         "weights": {
+            # Pure signal weights — the Brain score is a function of these only.
+            # Review-queue disposition (confirmed / tip_filed / …) is intentionally
+            # NOT a scoring input, so no confirmed-fraud or case-driven boost
+            # appears here anymore.
             "rule_signals": W_RULE_SIGNALS, "ml_anomaly": W_ML_ANOMALY,
             "corroboration": W_CORROBORATION, "dollars_at_risk": W_DOLLARS,
             "flag_breadth": W_FLAG_BREADTH,
-            "confirmed_fraud_boost": CONFIRMED_FRAUD_BOOST, "oig_boost": OIG_BOOST,
         },
         "computed_in_ms": int((time.time() - t0) * 1000),
         "computed_at": time.time(),

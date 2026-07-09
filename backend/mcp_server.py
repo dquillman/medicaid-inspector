@@ -1,12 +1,14 @@
 """
 MCP (Model Context Protocol) stdio server for Medicaid Inspector (MFI).
 
-Exposes 9 tools over the existing FastAPI route/service functions so an
+Exposes 10 tools over the existing FastAPI route/service functions so an
 external app (HAL) can query provider risk, the Fraud Brain ranking,
 billing-code reference data, provider networks, OIG/exclusion status, billing
 timelines, and drafted OIG-tip narratives without going through HTTP. Eight are
-read-only; the ninth (log_bug) is the sole writer and only ever appends to the
-project's MFIBugs.md log — never an arbitrary path.
+read-only; two write: log_bug appends only to the project's MFIBugs.md log, and
+update_queue_status records a case-ledger status change for an NPI already in
+the review queue (and REFUSES the human-gated tip_filed/confirmed transitions —
+those must come from a human via the UI, never from this AI-side tool).
 
 Run as a subprocess, stdio transport:
     G:/Python311/python.exe G:/Users/daveq/medicaid inspector/backend/mcp_server.py
@@ -467,6 +469,29 @@ TOOLS: list[Tool] = [
             "required": ["title"],
         },
     ),
+    Tool(
+        name="update_queue_status",
+        description=(
+            "Record a case-ledger status change for an NPI that is ALREADY in the review "
+            "queue (open / under_review / tip_filed / dismissed / confirmed / referred). This "
+            "is a DISTINCT, deliberately-separate action from draft_oig_tip: drafting a tip "
+            "generates text; it does NOT record that a tip was filed. Recording that is this "
+            "tool. IMPORTANT: the weighty transitions 'tip_filed' and 'confirmed' require a "
+            "human and are REFUSED here — a person must do those from the review UI, so an AI "
+            "cannot mark a tip filed or a case confirmed as a side effect. Does not add NPIs to "
+            "the queue (promotion is a separate human action) and never changes the risk score."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "npi": _NPI_SCHEMA,
+                "new_status": {"type": "string", "enum": sorted(
+                    ["open", "under_review", "tip_filed", "dismissed", "confirmed", "referred"])},
+                "note": {"type": "string", "description": "Optional reason/context recorded in the audit trail"},
+            },
+            "required": ["npi", "new_status"],
+        },
+    ),
 ]
 
 
@@ -588,6 +613,40 @@ async def _tool_log_bug(args: dict) -> dict:
             "note": note}
 
 
+# ── Tool 10: update_queue_status ──────────────────────────────────────────────
+
+async def _tool_update_queue_status(args: dict) -> dict:
+    """Record a case-ledger status change. AI/MCP callers act with
+    actor_type='ai', so the human-gated transitions (tip_filed / confirmed) are
+    refused by the store — this is the enforcement point for "no AI-recorded tip
+    filing / case confirmation." Never adds an NPI to the queue."""
+    from core.review_store import set_queue_status, QueueStatusError
+
+    npi = _require_npi(args["npi"])
+    new_status = str(args.get("new_status", "")).strip()
+    note = str(args.get("note", "")).strip()
+    try:
+        updated = set_queue_status(
+            npi, new_status, actor=_MCP_CLIENT_ID, actor_type="ai", note=note,
+        )
+    except QueueStatusError as e:
+        # Surface the refusal/validation message to the model verbatim.
+        raise ValueError(str(e)) from e
+    if updated is None:
+        raise ValueError(
+            f"NPI {npi} is not in the review queue. Promotion into the queue is a "
+            "separate human action; this tool only changes the status of NPIs "
+            "already promoted."
+        )
+    _log_phi("write", "case", npi, tool="update_queue_status", new_status=new_status)
+    return {
+        "npi": npi,
+        "queue_status": updated.get("queue_status"),
+        "updated_at": updated.get("queue_status_updated_at"),
+        "actor_type": "ai",
+    }
+
+
 _HANDLERS = {
     "get_provider": _tool_get_provider,
     "top_risky_providers": _tool_top_risky_providers,
@@ -598,6 +657,7 @@ _HANDLERS = {
     "draft_oig_tip": _tool_draft_oig_tip,
     "data_freshness": _tool_data_freshness,
     "log_bug": _tool_log_bug,
+    "update_queue_status": _tool_update_queue_status,
 }
 
 

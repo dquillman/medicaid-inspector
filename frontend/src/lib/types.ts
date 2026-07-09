@@ -156,6 +156,8 @@ export interface ReviewItem {
   total_paid: number
   total_claims: number
   status: 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
+  // Case-ledger status — human-gated, decoupled from the computed risk score.
+  queue_status?: 'open' | 'under_review' | 'tip_filed' | 'confirmed' | 'referred' | 'dismissed'
   notes: string
   assigned_to?: string | null
   added_at: number
@@ -1685,7 +1687,10 @@ export interface FraudBrainProvider {
   risk_score: number
   flag_count: number
   oig_excluded: boolean
-  confirmed_fraud?: boolean
+  // Read-only case-ledger badge (set by a human in the Review Queue). One-way:
+  // the Brain reads it for display, never writes it, and it never affects
+  // brain_score. null/undefined => the NPI is not in the review queue.
+  queue_status?: string | null
   deactivated_npi?: boolean
   size_dampened?: boolean
   corroborating_sources: number

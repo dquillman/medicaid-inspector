@@ -6,6 +6,7 @@ import type { ReviewItem, ReviewCounts, AuditEntry } from '../lib/types'
 import { fmt } from '../lib/format'
 import { threatColor, magnitudeGlyph } from '../lib/threat'
 import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
+import { QUEUE_STATUS_LABELS } from '../lib/queueStatus'
 import { ArrowDownTrayIcon } from '../components/icons'
 import EmptyState from '../components/EmptyState'
 import QuickTriagePanel from '../components/QuickTriagePanel'
@@ -187,6 +188,25 @@ function StatusDropdown({ item, onChange }: { item: ReviewItem; onChange: (statu
   )
 }
 
+// Case-ledger status — the human-gated disposition, distinct from the workflow
+// status above. Setting it here is an explicit human action (the analyst is
+// signed in), so tip_filed / confirmed are permitted. The Fraud Brain reads
+// this value one-way for badges; it never affects the computed score.
+function QueueStatusDropdown({ item, onChange }: { item: ReviewItem; onChange: (status: string) => void }) {
+  return (
+    <select
+      value={item.queue_status ?? 'open'}
+      onChange={e => onChange(e.target.value)}
+      title="Case-ledger status (audited). Distinct from drafting a tip; the Fraud Brain reads this read-only."
+      className="mt-1 bg-gray-800 text-[11px] rounded px-1.5 py-1 border border-gray-700 text-cyan-300 focus:outline-none focus:border-cyan-500 cursor-pointer"
+    >
+      {Object.entries(QUEUE_STATUS_LABELS).map(([key, label]) => (
+        <option key={key} value={key}>Case: {label}</option>
+      ))}
+    </select>
+  )
+}
+
 function ReviewRow({
   item,
   selected,
@@ -197,6 +217,7 @@ function ReviewRow({
   onToggleExpand,
   onToggleTriage,
   onStatusChange,
+  onQueueStatusChange,
   onNotesSave,
   onAssignedToSave,
 }: {
@@ -209,6 +230,7 @@ function ReviewRow({
   onToggleExpand: (npi: string) => void
   onToggleTriage: (npi: string) => void
   onStatusChange: (npi: string, status: string) => void
+  onQueueStatusChange: (npi: string, status: string) => void
   onNotesSave: (npi: string, notes: string) => void
   onAssignedToSave: (npi: string, assignedTo: string) => void
 }) {
@@ -254,7 +276,10 @@ function ReviewRow({
         </td>
         <td className="px-4 py-3 text-sm text-gray-400">{fmt(item.total_paid)}</td>
         <td className="px-4 py-3">
-          <StatusDropdown item={item} onChange={status => onStatusChange(item.npi, status)} />
+          <div className="flex flex-col items-start">
+            <StatusDropdown item={item} onChange={status => onStatusChange(item.npi, status)} />
+            <QueueStatusDropdown item={item} onChange={status => onQueueStatusChange(item.npi, status)} />
+          </div>
         </td>
         <td className="px-4 py-3">
           <AssignedToCell item={item} onSave={assignedTo => onAssignedToSave(item.npi, assignedTo)} />
@@ -444,6 +469,18 @@ export default function ReviewQueue() {
 
   const handleStatusChange = (npi: string, status: string) =>
     updateMutation.mutate({ npi, update: { status } })
+
+  const queueStatusMutation = useMutation({
+    mutationFn: ({ npi, newStatus }: { npi: string; newStatus: string }) =>
+      api.setQueueStatus(npi, newStatus),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['review-queue'] })
+      queryClient.invalidateQueries({ queryKey: ['review-history'] })
+    },
+  })
+
+  const handleQueueStatusChange = (npi: string, newStatus: string) =>
+    queueStatusMutation.mutate({ npi, newStatus })
 
   const handleNotesSave = (npi: string, notes: string) =>
     updateMutation.mutate({ npi, update: { notes } })
@@ -724,6 +761,7 @@ export default function ReviewQueue() {
                   onToggleExpand={handleToggleExpand}
                   onToggleTriage={handleToggleTriage}
                   onStatusChange={handleStatusChange}
+                  onQueueStatusChange={handleQueueStatusChange}
                   onNotesSave={handleNotesSave}
                   onAssignedToSave={handleAssignedToSave}
                 />

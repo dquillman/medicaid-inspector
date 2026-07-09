@@ -15,6 +15,10 @@ from core.review_store import (
     update_review_item,
     bulk_update_review_items,
     add_to_review_queue,
+    set_queue_status,
+    get_review_item,
+    QueueStatusError,
+    VALID_QUEUE_STATUSES,
 )
 from core.store import get_prescanned
 from core.config import settings
@@ -46,6 +50,11 @@ class AddReviewBody(BaseModel):
 class BulkUpdateBody(BaseModel):
     npis: list[str]
     status: str
+
+
+class QueueStatusBody(BaseModel):
+    new_status: str
+    note: str = ""
 
 
 def _enrich_items(items: list[dict]) -> list[dict]:
@@ -123,10 +132,15 @@ async def export_review_csv():
 
 
 @router.post("/add")
-async def add_single_review(body: AddReviewBody):
-    """Add a single provider to the review queue (e.g. from watchlist). Returns the created/existing item."""
-    from core.review_store import get_review_item
+async def add_single_review(body: AddReviewBody, user: dict = Depends(require_user)):
+    """Add a single provider to the review queue (e.g. from watchlist). Returns the created/existing item.
+
+    This is the explicit human promotion gate: an NPI enters the case ledger
+    (queue_status='open') only through a deliberate action like this, never by
+    merely appearing in the Fraud Brain ranking.
+    """
     from core.store import get_provider_by_npi
+    actor = user.get("username") or user.get("email") or "user"
 
     # If already in review queue, just update with the new info
     existing = get_review_item(body.npi)
@@ -147,7 +161,8 @@ async def add_single_review(body: AddReviewBody):
         return {"item": enriched[0], "already_existed": True}
 
     # Build a provider dict for add_to_review_queue
-    provider_data: dict = {"npi": body.npi, "risk_score": 0, "flags": [], "total_paid": 0, "total_claims": 0}
+    provider_data: dict = {"npi": body.npi, "risk_score": 0, "flags": [], "total_paid": 0, "total_claims": 0,
+                           "_promoted_by": actor}
     p = get_provider_by_npi(body.npi)
     if p:
         provider_data["risk_score"] = p.get("risk_score", 0)
@@ -182,6 +197,37 @@ async def bulk_update_review(body: BulkUpdateBody):
     except ValueError as e:
         raise HTTPException(400, str(e))
     return {"updated": count}
+
+
+@router.get("/queue-statuses")
+async def valid_queue_statuses():
+    """The allowed case-ledger states (for the frontend status picker)."""
+    return {"statuses": sorted(VALID_QUEUE_STATUSES)}
+
+
+@router.post("/{npi}/queue-status")
+async def set_case_queue_status(npi: str, body: QueueStatusBody, user: dict = Depends(require_user)):
+    """Explicit, human-initiated case-ledger status change (the ledger write path).
+
+    This is the deliberate counterpart to drafting a document: recording that a
+    tip was filed or a case confirmed is a separate, audited action from
+    generating the tip text. The authenticated user is recorded as the actor;
+    human-gated transitions (tip_filed / confirmed) are allowed here precisely
+    because a person performed them.
+    """
+    actor = user.get("username") or user.get("email") or "user"
+    try:
+        updated = set_queue_status(npi, body.new_status, actor=actor, actor_type="user", note=body.note)
+    except QueueStatusError as e:
+        raise HTTPException(400, str(e))
+    if updated is None:
+        raise HTTPException(
+            404,
+            f"NPI {npi} is not in the review queue. Promote it first (Add to review) "
+            "— the ledger status only applies to providers a human has taken on.",
+        )
+    enriched = _enrich_items([updated])
+    return {"item": enriched[0]}
 
 
 @router.get("/{npi}/history")

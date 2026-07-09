@@ -10,7 +10,25 @@ import ProviderFlags from '../components/ProviderFlags'
 import OigTipButton from '../components/OigTipButton'
 import { threatColor, threatBand, magnitudeGlyph } from '../lib/threat'
 import { gsap, useGSAP, EASE, DUR, prefersReducedMotion } from '../lib/motion'
+import { queueStatusLabel, QUEUE_STATUS_COLORS } from '../lib/queueStatus'
 import type { FraudBrainProvider } from '../lib/types'
+
+/**
+ * Read-only case-ledger badge shown next to a candidate in the Fraud Brain
+ * ranking. The Brain reads queue_status one-way — this display never writes it
+ * and it never affects the brain_score. Title spells out the separation.
+ */
+function QueueStatusBadge({ status }: { status: string }) {
+  const cls = QUEUE_STATUS_COLORS[status] ?? 'text-ink-secondary border-hairline bg-surface-2'
+  return (
+    <span
+      className={`text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] border ${cls}`}
+      title="Case-ledger status (set by a human in the Review Queue). Read-only here — it does not affect the Brain score."
+    >
+      {queueStatusLabel(status)}
+    </span>
+  )
+}
 
 const COMPONENT_LABELS: Record<string, string> = {
   rule_signals: '18 Fraud Signals',
@@ -135,11 +153,7 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
                 Prime Suspect
               </span>
             )}
-            {p.confirmed_fraud && (
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-threat-critical border border-threat-critical/60 bg-threat-critical/10">
-                Confirmed Fraud
-              </span>
-            )}
+            {p.queue_status && <QueueStatusBadge status={p.queue_status} />}
             {p.oig_excluded && (
               <span className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-threat-high border border-threat-high/50 bg-threat-high/10">
                 OIG Excluded

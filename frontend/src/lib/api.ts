@@ -395,6 +395,13 @@ export const api = {
   updateReview: (npi: string, data: { status?: string; notes?: string; assigned_to?: string | null }) =>
     mutate<ReviewItem>('PATCH', `/review/${npi}`, data),
 
+  // Case-ledger status change — the deliberate, human-initiated write path,
+  // distinct from drafting a tip. Records the authenticated user as the actor.
+  setQueueStatus: (npi: string, newStatus: string, note = '') =>
+    mutate<{ item: ReviewItem }>('POST', `/review/${npi}/queue-status`, { new_status: newStatus, note }),
+
+  queueStatuses: () => get<{ statuses: string[] }>('/review/queue-statuses'),
+
   getReviewHistory: (npi: string) =>
     get<{ npi: string; audit_trail: AuditEntry[] }>(`/review/${npi}/history`),
 
