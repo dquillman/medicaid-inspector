@@ -91,6 +91,7 @@ backend/supervised_model.json
 backend/ml_scores.json
 backend/npi_deactivations.json
 backend/oig_tips.json
+backend/hal_bugs.json
 backend/prescan_slim.json
 backend/dataset_config.json
 backend/phi_access_log.json

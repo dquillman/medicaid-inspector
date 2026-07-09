@@ -1,13 +1,14 @@
 """
 MCP (Model Context Protocol) stdio server for Medicaid Inspector (MFI).
 
-Exposes 10 tools over the existing FastAPI route/service functions so an
+Exposes 11 tools over the existing FastAPI route/service functions so an
 external app (HAL) can query provider risk, the Fraud Brain ranking,
 billing-code reference data, provider networks, OIG/exclusion status, billing
-timelines, and drafted OIG-tip narratives without going through HTTP. Eight are
-read-only; two write: log_bug appends only to the project's MFIBugs.md log, and
-update_queue_status records a case-ledger status change for an NPI already in
-the review queue (and REFUSES the human-gated tip_filed/confirmed transitions —
+timelines, and drafted OIG-tip narratives without going through HTTP. Read-only
+except: log_bug (records a bug to the durable, GCS-synced hal_bugs.json store
+plus the repo MFIBugs.md when local), list_bugs (reads that store back), and
+update_queue_status (records a case-ledger status change for an NPI already in
+the review queue, REFUSING the human-gated tip_filed/confirmed transitions —
 those must come from a human via the UI, never from this AI-side tool).
 
 Run as a subprocess, stdio transport:
@@ -35,6 +36,7 @@ expose.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import re
 import sys
@@ -470,6 +472,21 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="list_bugs",
+        description=(
+            "List the bugs recorded via log_bug, read from the durable GCS-synced store. "
+            "Use to show Dave the current bug backlog or confirm a report was saved. "
+            "Optional 'status' filter (e.g. OPEN) and 'limit'."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "Optional status filter, e.g. OPEN"},
+                "limit": {"type": "integer", "default": 50, "minimum": 1, "maximum": 200},
+            },
+        },
+    ),
+    Tool(
         name="update_queue_status",
         description=(
             "Record a case-ledger status change for an NPI that is ALREADY in the review "
@@ -518,19 +535,29 @@ async def _tool_data_freshness(args: dict) -> dict:
 
 # ── Tool 9: log_bug ───────────────────────────────────────────────────────────
 
-# MFIBugs.md lives at the repo root — one level up from backend/.
-_BUGLOG_PATH = _BACKEND_DIR.parent / "MFIBugs.md"
+# The DURABLE store lives inside backend/ (writable on Cloud Run, unlike the
+# read-only container root) and is GCS-synced like review_queue.json, so bugs
+# logged from the DEPLOYED HAL survive restarts and can be pulled back. The
+# repo-root MFIBugs.md is the human-readable, committable mirror — only writable
+# in a local checkout.
+_BUG_STORE_PATH = _BACKEND_DIR / "hal_bugs.json"
+_BUGLOG_MD_PATH = _BACKEND_DIR.parent / "MFIBugs.md"
+
+
+def _load_bug_store() -> list:
+    try:
+        if _BUG_STORE_PATH.exists():
+            return json.loads(_BUG_STORE_PATH.read_text(encoding="utf-8")) or []
+    except Exception:
+        pass
+    return []
 
 
 async def _tool_log_bug(args: dict) -> dict:
-    """Append a structured bug entry to MFIBugs.md.
-
-    This is the ONE write tool this server exposes. It only ever appends to a
-    single fixed project file (never an arbitrary path), and every field is
-    ASCII-sanitized before it touches the file — same reason the OIG tip is
-    sanitized: a bug title pasted from a chat may carry curly quotes/em-dashes,
-    and the log is a plain-text/markdown artifact meant to be committed.
-    """
+    """Record a bug. Persists durably to a GCS-synced JSON store (works on the
+    deployed instance) and also appends the human-readable entry to the repo's
+    MFIBugs.md when that file is writable (local checkout). Every field is
+    ASCII-sanitized. Never raises on a write failure."""
     from core.text_sanitize import to_ascii
     from datetime import datetime, timezone
 
@@ -543,74 +570,83 @@ async def _tool_log_bug(args: dict) -> dict:
         severity = "medium"
     npi = _require_npi(args["npi"]) if args.get("npi") else ""
     area = to_ascii((args.get("area") or "").strip())
-
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    lines = [
-        f"\n### {title}",
-        f"- **Logged:** {ts} (via HAL)",
-        f"- **Severity:** {severity}",
-    ]
+    record = {
+        "title": title, "severity": severity, "area": area, "npi": npi,
+        "detail": detail, "logged_at": ts, "source": "HAL", "status": "OPEN",
+    }
+
+    # 1) Durable JSON store in backend/ (+ GCS sync) — the source of truth that
+    #    persists on Cloud Run.
+    durable = False
+    try:
+        store = _load_bug_store()
+        store.append(record)
+        from core.safe_io import atomic_write_json
+        atomic_write_json(_BUG_STORE_PATH, store)
+        durable = True
+        try:  # mirror to GCS so it survives container restarts on Cloud Run
+            from core.gcs_sync import upload_file
+            upload_file("hal_bugs.json")
+        except Exception:
+            pass  # GCS unavailable locally — the local file is still durable
+    except Exception:  # noqa: BLE001 — never raise from a bug logger
+        logger.warning("log_bug: durable store write failed", exc_info=True)
+
+    # 2) Human-readable Markdown mirror in the repo (local checkout only).
+    md_lines = [f"\n### {title}", f"- **Logged:** {ts} (via HAL)", f"- **Severity:** {severity}"]
     if area:
-        lines.append(f"- **Area:** {area}")
+        md_lines.append(f"- **Area:** {area}")
     if npi:
-        lines.append(f"- **Repro NPI:** {npi}")
+        md_lines.append(f"- **Repro NPI:** {npi}")
     if detail:
-        lines.append(f"- **Detail:** {detail}")
-    lines.append(f"- **Status:** OPEN")
-    entry = "\n".join(lines) + "\n"
+        md_lines.append(f"- **Detail:** {detail}")
+    md_lines.append("- **Status:** OPEN")
+    md_entry = "\n".join(md_lines) + "\n"
+    md_written = False
+    try:
+        if not _BUGLOG_MD_PATH.exists():
+            _BUGLOG_MD_PATH.write_text(
+                "# MFI Bug Log\n\nBugs logged via HAL and manual entry. "
+                "Newest entries appended below.\n", encoding="utf-8")
+        with _BUGLOG_MD_PATH.open("a", encoding="utf-8") as f:
+            f.write(md_entry)
+        md_written = True
+    except OSError:
+        pass  # read-only repo root (Cloud Run) — the durable store already has it
 
-    _HEADER = ("# MFI Bug Log\n\nBugs logged via HAL and manual entry. "
-               "Newest entries appended below.\n")
+    _log_phi("write", "system", "hal_bugs.json", tool="log_bug",
+             title=title, severity=severity, persisted=durable)
 
-    def _try_append(path: Path) -> bool:
-        try:
-            if not path.exists():
-                path.write_text(_HEADER, encoding="utf-8")
-            with path.open("a", encoding="utf-8") as f:
-                f.write(entry)
-            return True
-        except OSError:
-            return False
+    if not durable and not md_written:
+        return {"logged": False, "persisted": False, "title": title,
+                "severity": severity, "entry": md_entry.strip(),
+                "note": "Could not persist the bug on this deployment. Relay the 'entry' text to Dave."}
 
-    # Best target first: the committable repo file. On Cloud Run that lives under
-    # a read-only root (/MFIBugs.md -> Errno 13), so fall back to a writable temp
-    # path — best-effort capture for the session. This tool must NEVER raise on a
-    # write failure (its whole contract is graceful degradation); if every target
-    # is unwritable we return logged=False and hand the formatted entry back so
-    # the caller can relay it to Dave for manual capture.
-    import tempfile
-
-    tmp_path = Path(tempfile.gettempdir()) / "MFIBugs.md"
-    targets = [_BUGLOG_PATH] + ([tmp_path] if tmp_path != _BUGLOG_PATH else [])
-    written_to = next((p for p in targets if _try_append(p)), None)
-
-    _log_phi("write", "system", "MFIBugs.md", tool="log_bug",
-             title=title, severity=severity, persisted=bool(written_to))
-
-    if written_to is None:
-        return {
-            "logged": False,
-            "persisted": False,
-            "title": title,
-            "severity": severity,
-            "entry": entry.strip(),
-            "note": ("Could not write MFIBugs.md on this deployment (read-only "
-                     "filesystem). Nothing was persisted. Relay the 'entry' text "
-                     "to Dave so it can be added to MFIBugs.md from a local session."),
-        }
-
-    persisted = written_to == _BUGLOG_PATH  # only the repo file is committable
     note = (
-        "Logged to MFIBugs.md in the local repo. Commit the file to keep the entry."
-        if persisted else
-        f"This deployment's repo path is read-only, so the entry was written to a "
-        f"temporary file ({written_to}) and will NOT survive a restart or reach the "
-        f"repo. Relay it to Dave to persist it from a local session."
+        "Logged to the durable store (hal_bugs.json, synced to GCS) and the repo MFIBugs.md."
+        if durable and md_written else
+        "Logged durably to hal_bugs.json (synced to GCS) — it will survive restarts and "
+        "can be pulled into MFIBugs.md from a local session."
+        if durable else
+        "Wrote MFIBugs.md locally but the durable store failed."
     )
-    return {"logged": True, "file": str(written_to), "title": title,
-            "severity": severity, "persisted": persisted, "entry": entry.strip(),
-            "note": note}
+    return {"logged": True, "persisted": durable, "title": title, "severity": severity,
+            "total_bugs": len(_load_bug_store()), "note": note}
+
+
+# ── Tool 11: list_bugs ────────────────────────────────────────────────────────
+
+async def _tool_list_bugs(args: dict) -> dict:
+    """Read back the bugs recorded via log_bug (from the durable GCS-synced
+    store). Lets HAL confirm what's been logged and show Dave the backlog."""
+    status = (args.get("status") or "").strip().upper()
+    limit = max(1, min(int(args.get("limit", 50)), 200))
+    bugs = _load_bug_store()
+    if status:
+        bugs = [b for b in bugs if (b.get("status") or "").upper() == status]
+    return {"count": len(bugs), "bugs": bugs[-limit:]}
 
 
 # ── Tool 10: update_queue_status ──────────────────────────────────────────────
@@ -657,6 +693,7 @@ _HANDLERS = {
     "draft_oig_tip": _tool_draft_oig_tip,
     "data_freshness": _tool_data_freshness,
     "log_bug": _tool_log_bug,
+    "list_bugs": _tool_list_bugs,
     "update_queue_status": _tool_update_queue_status,
 }
 

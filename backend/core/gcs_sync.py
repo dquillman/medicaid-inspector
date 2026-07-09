@@ -45,6 +45,7 @@ _SYNC_FILES = [
     "oig_tips.json",          # HHS-OIG Hotline tip log
     "evidence_metadata.json",
     "lineage.json",
+    "hal_bugs.json",          # bugs logged via HAL's log_bug tool (durable on Cloud Run)
 ]
 
 _client = None
