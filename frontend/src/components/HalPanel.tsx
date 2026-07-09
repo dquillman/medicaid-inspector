@@ -695,45 +695,43 @@ export default function HalPanel({
                   Send
                 </button>
               </div>
-              <div className="mt-1.5 flex items-center justify-between px-1">
-                <p className="text-[10px] text-ink-ghost">
-                  HAL can make mistakes — verify figures before acting.
-                </p>
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={togglePause}
-                    disabled={!speaking}
-                    className="text-[10px] uppercase tracking-wider text-ink-tertiary hover:text-ink-secondary transition-colors disabled:opacity-30 disabled:hover:text-ink-tertiary"
-                    title={paused ? 'Resume HAL’s speech' : 'Pause HAL’s speech'}
-                    aria-label={paused ? 'Resume speech' : 'Pause speech'}
-                  >
-                    {paused ? '► Resume' : '❚❚ Pause'}
-                  </button>
-                  <button
-                    onClick={() => {
-                      // Muting stops any in-flight speech immediately; unmuting
-                      // just re-enables it for the next reply.
-                      window.speechSynthesis?.cancel()
-                      userPausedRef.current = false
-                      setPaused(false)
-                      setSpeaking(false)
-                      setVoiceOn((v) => {
-                        localStorage.setItem(VOICE_KEY, v ? 'off' : 'on')
-                        return !v
-                      })
-                    }}
-                    className={`text-[10px] uppercase tracking-wider transition-colors ${
-                      voiceOn
-                        ? 'text-ink-tertiary hover:text-ink-secondary'
-                        : 'text-threat-critical hover:text-threat-critical/80'
-                    }`}
-                    title={voiceOn ? 'Mute HAL’s voice' : 'Unmute HAL’s voice'}
-                    aria-label={voiceOn ? 'Mute voice' : 'Unmute voice'}
-                  >
-                    {voiceOn ? '🔊 Mute' : '🔇 Muted'}
-                  </button>
-                </div>
+              <div className="mt-2 flex items-center gap-2">
+                <button
+                  onClick={togglePause}
+                  disabled={!speaking}
+                  className="flex-1 rounded-lg border border-hairline px-3 py-2 text-sm font-semibold uppercase tracking-wider text-ink-secondary transition-colors hover:border-threat-critical/50 hover:text-ink-primary disabled:opacity-30 disabled:hover:border-hairline disabled:hover:text-ink-secondary"
+                  title={paused ? 'Resume HAL’s speech' : 'Pause HAL’s speech'}
+                  aria-label={paused ? 'Resume speech' : 'Pause speech'}
+                >
+                  {paused ? '► Resume' : '❚❚ Pause'}
+                </button>
+                <button
+                  onClick={() => {
+                    // Muting stops any in-flight speech immediately; unmuting
+                    // just re-enables it for the next reply.
+                    window.speechSynthesis?.cancel()
+                    userPausedRef.current = false
+                    setPaused(false)
+                    setSpeaking(false)
+                    setVoiceOn((v) => {
+                      localStorage.setItem(VOICE_KEY, v ? 'off' : 'on')
+                      return !v
+                    })
+                  }}
+                  className={`flex-1 rounded-lg border px-3 py-2 text-sm font-semibold uppercase tracking-wider transition-colors ${
+                    voiceOn
+                      ? 'border-hairline text-ink-secondary hover:border-threat-critical/50 hover:text-ink-primary'
+                      : 'border-threat-critical text-threat-critical hover:text-threat-critical/80'
+                  }`}
+                  title={voiceOn ? 'Mute HAL’s voice' : 'Unmute HAL’s voice'}
+                  aria-label={voiceOn ? 'Mute voice' : 'Unmute voice'}
+                >
+                  {voiceOn ? '🔊 Mute' : '🔇 Muted'}
+                </button>
               </div>
+              <p className="mt-1.5 px-1 text-[10px] text-ink-ghost">
+                HAL can make mistakes — verify figures before acting.
+              </p>
             </div>
           </motion.aside>
         )}
