@@ -366,6 +366,73 @@ export default function ProviderDetail() {
     )
   }
 
+  // Out-of-subset provider on a remote-dataset deployment: no billing/risk, but
+  // NPPES identity + federal exclusion status are available. Render a focused
+  // partial view rather than the full page (which assumes billing/risk fields).
+  if (detail.partial) {
+    const pn = detail.nppes ?? {}
+    const pa = pn.address ?? {}
+    const pt = pn.taxonomy ?? {}
+    const checks = detail.exclusions?.checks ?? []
+    const anyExcluded = detail.exclusions?.any_excluded ?? false
+    return (
+      <div className="space-y-5">
+        <div className="flex items-center gap-2 text-sm text-gray-500">
+          <Link to="/providers" className="hover:text-gray-300">Providers</Link>
+          <span>/</span>
+          <span className="font-mono-data">{npi}</span>
+        </div>
+
+        <div className="card border-yellow-800/50 bg-yellow-950/10">
+          <div className="flex items-start gap-3">
+            <ExclamationTriangleIcon />
+            <div>
+              <h2 className="text-base font-semibold text-yellow-300">Outside the scanned subset</h2>
+              <p className="mt-1 text-xs text-gray-400 leading-relaxed">
+                {detail.note ?? 'Medicaid billing and risk data are not available for this provider on this deployment.'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="card">
+          <h2 className="text-base font-semibold text-gray-300 mb-3">Provider Identity (NPPES)</h2>
+          <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 text-sm">
+            <div><dt className="text-gray-500 text-xs uppercase tracking-wider">Name</dt><dd className="text-gray-200">{pn.name || '—'}</dd></div>
+            <div><dt className="text-gray-500 text-xs uppercase tracking-wider">NPI</dt><dd className="font-mono-data text-gray-200">{npi}</dd></div>
+            <div><dt className="text-gray-500 text-xs uppercase tracking-wider">Entity Type</dt><dd className="text-gray-200">{pn.entity_type === 'NPI-2' ? 'Organization' : pn.entity_type === 'NPI-1' ? 'Individual' : '—'}</dd></div>
+            <div><dt className="text-gray-500 text-xs uppercase tracking-wider">Specialty</dt><dd className="text-gray-200">{pt.description || detail.specialty || '—'}</dd></div>
+            <div className="sm:col-span-2"><dt className="text-gray-500 text-xs uppercase tracking-wider">Address</dt><dd className="text-gray-200">{[pa.line1, pa.city, pa.state, pa.zip].filter(Boolean).join(', ') || '—'}</dd></div>
+          </dl>
+        </div>
+
+        <div className={`card ${anyExcluded ? 'border-red-800 bg-red-950/10' : ''}`}>
+          <h2 className="text-base font-semibold text-gray-300 mb-3">Federal Exclusion Status</h2>
+          {checks.length === 0 ? (
+            <p className="text-xs text-gray-500">Exclusion status unavailable.</p>
+          ) : (
+            <ul className="space-y-2">
+              {checks.map((c) => (
+                <li key={c.source} className="flex items-center justify-between text-sm">
+                  <span className="text-gray-300">{c.source}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full border font-semibold ${
+                    c.status === 'excluded'
+                      ? 'bg-red-900 border-red-700 text-red-300'
+                      : c.status === 'clear'
+                        ? 'bg-green-950 border-green-800 text-green-400'
+                        : 'bg-gray-800 border-gray-700 text-gray-400'
+                  }`}>
+                    {c.status === 'excluded' ? 'EXCLUDED' : c.status === 'clear' ? 'CLEAR' : c.status.toUpperCase()}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    )
+  }
+
   const nppes = detail.nppes ?? {}
   const addr  = nppes.address ?? {}
   const tax   = nppes.taxonomy ?? {}

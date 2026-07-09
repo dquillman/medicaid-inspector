@@ -1125,15 +1125,61 @@ async def get_provider_detail(npi: str):
             "specialty": specialty,
         }
 
-    # Fallback: provider not in cache yet — query Parquet + NPPES in parallel
+    # Fallback: provider not in cache yet.
     if not parquet_is_local():
-        # Even a single-NPI WHERE clause is a full scan of the remote 2.94 GB
-        # parquet (30-100s) — fail fast rather than hang the detail page.
-        raise HTTPException(
-            404,
-            f"NPI {npi} is not in the scan cache, and on-demand dataset lookups "
-            "are unavailable on this deployment (remote dataset).",
-        )
+        # A single-NPI WHERE clause is still a full scan of the remote 2.94 GB
+        # parquet (30-100s) — too slow to run per-request here. But we don't have
+        # to dead-end: NPPES identity and OIG/SAM exclusion status both resolve
+        # on-demand on this deployment. Return those as a PARTIAL profile (flagged
+        # so the frontend shows an explanatory banner) instead of a bare 404 —
+        # for a fraud tool, "who is this NPI and are they excluded?" is exactly
+        # the useful answer for a provider outside the scanned subset.
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        nppes_data = {}
+        try:
+            nppes_data = await get_provider(npi)
+        except Exception:
+            _log.warning("NPPES lookup failed for out-of-cache NPI %s", npi, exc_info=True)
+        if not nppes_data:
+            raise HTTPException(
+                404,
+                f"NPI {npi} is not in the scan cache and was not found in the NPPES "
+                "registry. Medicaid billing lookups are unavailable on this deployment "
+                "(remote dataset).",
+            )
+        exclusions: dict = {}
+        try:
+            from core.exclusion_aggregator import check_all_exclusions
+            exclusions = await check_all_exclusions(npi, nppes_data.get("name", ""))
+        except Exception:
+            _log.warning("Exclusion check failed for out-of-cache NPI %s", npi, exc_info=True)
+        specialty = (nppes_data.get("taxonomy") or {}).get("description", "")
+        return {
+            "npi": npi,
+            "nppes": nppes_data,
+            "partial": True,
+            "in_scan_cache": False,
+            "specialty": specialty,
+            "risk_score": None,
+            "signal_results": [],
+            "flags": [],
+            "flag_count": 0,
+            "spending": {k: None for k in [
+                "npi", "total_paid", "total_claims", "total_beneficiaries",
+                "distinct_hcpcs", "active_months", "first_month", "last_month",
+                "revenue_per_beneficiary", "claims_per_beneficiary",
+            ]},
+            "exclusions": exclusions,
+            "oig_excluded": bool(exclusions.get("any_excluded")),
+            "note": (
+                "This provider is outside the scanned subset on this deployment, so "
+                "Medicaid billing totals and fraud risk scores are not available. "
+                "Identity (NPPES) and federal exclusion status (OIG LEIE / SAM.gov) "
+                "are shown below. Run a scan that includes this NPI, or use a "
+                "full-dataset deployment, for billing and fraud-signal analysis."
+            ),
+        }
     nppes_task = get_provider(npi)
     agg_sql = provider_aggregate_sql(
         where=f"BILLING_PROVIDER_NPI_NUM = '{npi}'",

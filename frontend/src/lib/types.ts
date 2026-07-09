@@ -60,6 +60,14 @@ export interface NppesData {
 export interface ProviderDetail extends ScoredProvider {
   nppes: NppesData
   spending: ProviderAggregate
+  specialty?: string
+  // Set when the provider is outside the scanned subset on a remote-dataset
+  // deployment: identity + exclusion status only, no billing/risk.
+  // ExclusionSummary is declared later in this file.
+  partial?: boolean
+  in_scan_cache?: boolean
+  note?: string
+  exclusions?: ExclusionSummary
 }
 
 export interface TimelineRow {
