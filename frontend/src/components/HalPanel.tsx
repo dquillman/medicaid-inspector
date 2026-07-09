@@ -180,16 +180,29 @@ const FACES: Record<
   },
 }
 
-// The lens — red radial eye by default, tinted per persona.
+// The eye — per persona: HAL's red radial lens, JARVIS's blue arc reactor
+// (same design as the qcode ops JARVIS console), assistant's neutral/tinted lens.
 function HalEye({
   size,
   state,
   tint,
+  face,
 }: {
   size: number
   state: 'idle' | 'thinking' | 'speaking'
   tint?: string
+  face?: Face
 }) {
+  if (face === 'jarvis') {
+    const inset = Math.max(2, Math.round(size * 0.09))
+    const core = Math.round(size * 0.46)
+    return (
+      <span className={`hal-reactor hal-${state}`} style={{ width: size, height: size }} aria-hidden="true">
+        <span className="hal-coils" style={{ inset }} />
+        <span className="hal-core" style={{ width: core, height: core }} />
+      </span>
+    )
+  }
   return (
     <span
       className={`hal-lens hal-${state}`}
@@ -488,6 +501,38 @@ export default function HalPanel({
           50% { filter: brightness(1.35);
             box-shadow: 0 0 20px 5px rgba(255,42,0,.85), 0 0 50px 12px rgba(255,42,0,.38); }
         }
+        /* JARVIS arc reactor — housing → rotating segmented coil ring → blue core. */
+        .hal-reactor {
+          position: relative; display: inline-flex; align-items: center; justify-content: center;
+          border-radius: 9999px; flex: none;
+          background: radial-gradient(circle, #0b1420 55%, #1a2836 72%, #0a0e14 100%);
+          box-shadow: 0 0 12px rgba(60,180,255,.3), inset 0 0 8px #000;
+        }
+        .hal-coils {
+          position: absolute; border-radius: 9999px;
+          background: repeating-conic-gradient(from 0deg,
+            rgba(120,220,255,.9) 0deg 12deg, rgba(10,20,30,.05) 12deg 36deg);
+          -webkit-mask: radial-gradient(circle, transparent 54%, #000 58%, #000 86%, transparent 90%);
+          mask: radial-gradient(circle, transparent 54%, #000 58%, #000 86%, transparent 90%);
+          animation: jvIdle 24s linear infinite; filter: drop-shadow(0 0 4px rgba(90,200,255,.6));
+        }
+        .hal-core {
+          border-radius: 9999px;
+          background: radial-gradient(circle at 50% 48%,
+            #fff 0%, #dff6ff 22%, #8fdcff 44%, #37a8e8 66%, #0c3a5e 86%, #051524 100%);
+          box-shadow: 0 0 12px 3px rgba(90,200,255,.6); animation: jvBreathe 4.5s ease-in-out infinite;
+        }
+        .hal-reactor.hal-thinking .hal-coils { animation: jvIdle 2.2s linear infinite; }
+        .hal-reactor.hal-speaking .hal-core { animation: jvSpeak .5s ease-in-out infinite; }
+        @keyframes jvIdle { to { transform: rotate(360deg); } }
+        @keyframes jvBreathe {
+          0%, 100% { filter: brightness(.9); }
+          50% { filter: brightness(1.15); }
+        }
+        @keyframes jvSpeak {
+          0%, 100% { filter: brightness(.95); box-shadow: 0 0 12px 3px rgba(90,200,255,.5); }
+          50% { filter: brightness(1.4); box-shadow: 0 0 22px 6px rgba(140,225,255,.9); }
+        }
       `}</style>
 
       {/* Floating toggle — the eye. */}
@@ -517,7 +562,7 @@ export default function HalPanel({
           >
             {/* Header — the eye, name, live status, face switcher */}
             <div className="flex items-center gap-3 border-b border-hairline px-4 py-3">
-              <HalEye size={34} state={eyeState} tint={FACES[face].tint} />
+              <HalEye size={34} state={eyeState} tint={FACES[face].tint} face={face} />
               <div className="flex-1">
                 <div className="text-sm font-bold uppercase tracking-[0.3em] text-ink-primary">
                   {FACES[face].name}
