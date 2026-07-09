@@ -187,11 +187,15 @@ function HalEye({
   state,
   tint,
   face,
+  bezel,
 }: {
   size: number
   state: 'idle' | 'thinking' | 'speaking'
   tint?: string
   face?: Face
+  // When true, the HAL/assistant lens is set in a metallic bezel ring (the qcode
+  // console plate look). Omit for the small floating toggle eye.
+  bezel?: boolean
 }) {
   if (face === 'jarvis') {
     const inset = Math.max(2, Math.round(size * 0.09))
@@ -203,13 +207,21 @@ function HalEye({
       </span>
     )
   }
-  return (
+  const lensSize = bezel ? Math.round(size * 0.61) : size
+  const lens = (
     <span
       className={`hal-lens hal-${state}`}
-      style={{ width: size, height: size, filter: tint }}
+      style={{ width: lensSize, height: lensSize, filter: tint }}
       aria-hidden="true"
     >
       <span className="hal-glint" />
+    </span>
+  )
+  if (!bezel) return lens
+  const pad = Math.max(3, Math.round(size * 0.08))
+  return (
+    <span className="hal-ring" style={{ width: size, height: size, padding: pad }} aria-hidden="true">
+      <span className="hal-bezel">{lens}</span>
     </span>
   )
 }
@@ -469,7 +481,9 @@ export default function HalPanel({
   )
 
   const eyeState: 'idle' | 'thinking' | 'speaking' = speaking ? 'speaking' : busy ? 'thinking' : 'idle'
-  const status = listening ? 'LISTENING' : speaking ? 'SPEAKING' : busy ? 'PROCESSING' : 'OPERATIONAL'
+  // Idle status word matches the qcode consoles per persona: JARVIS reads ONLINE.
+  const idleStatus = face === 'jarvis' ? 'ONLINE' : 'OPERATIONAL'
+  const status = listening ? 'LISTENING' : speaking ? 'SPEAKING' : busy ? 'PROCESSING' : idleStatus
 
   if (!configured) return null
 
@@ -486,6 +500,16 @@ export default function HalPanel({
         }
         .hal-lens.hal-thinking { animation: halBreathe 1.4s ease-in-out infinite; }
         .hal-lens.hal-speaking { animation: halSpeak .55s ease-in-out infinite; }
+        /* Metallic bezel ring for the plate eye (qcode console design). */
+        .hal-ring {
+          border-radius: 9999px; box-sizing: border-box;
+          background: linear-gradient(155deg, #ececec, #8f8f8f 30%, #3c3c3c 62%, #a8a8a8);
+          box-shadow: 0 0 14px rgba(0,0,0,.95), inset 0 0 6px rgba(0,0,0,.65);
+        }
+        .hal-bezel {
+          position: relative; width: 100%; height: 100%; border-radius: 9999px; background: #050505;
+          display: flex; align-items: center; justify-content: center; box-shadow: inset 0 0 12px #000;
+        }
         .hal-glint {
           position: absolute; width: 22%; height: 13%; border-radius: 9999px;
           top: 28%; left: 36%; background: rgba(255,255,255,.85);
@@ -533,6 +557,22 @@ export default function HalPanel({
           0%, 100% { filter: brightness(.95); box-shadow: 0 0 12px 3px rgba(90,200,255,.5); }
           50% { filter: brightness(1.4); box-shadow: 0 0 22px 6px rgba(140,225,255,.9); }
         }
+        /* Console plate + chrome — the qcode ops console design language. */
+        .hal-console { background: #05060a; color: #cfd6e4;
+          font-family: "Bahnschrift", "Arial Narrow", Arial, sans-serif; }
+        .hal-plate {
+          position: relative; display: flex; flex-direction: column; align-items: center; gap: 8px;
+          padding: 22px 12px 14px; border-bottom: 1px solid #16181d;
+        }
+        .hal-plate-actions { position: absolute; top: 10px; right: 12px; display: flex; gap: 14px; align-items: center; }
+        .hal-console-link {
+          background: none; border: none; cursor: pointer; padding: 0;
+          font: 11px "Bahnschrift", "Arial Narrow", Arial, sans-serif; letter-spacing: .12em;
+          text-transform: uppercase; color: #6b7480; line-height: 1;
+        }
+        .hal-console-link:hover { color: #ff6a4a; }
+        .hal-console-name { letter-spacing: .45em; font-size: 15px; padding-left: .45em; }
+        .hal-console-status { letter-spacing: .3em; font-size: 10px; color: #5a6578; text-transform: uppercase; }
       `}</style>
 
       {/* Floating toggle — the eye. */}
@@ -556,19 +596,44 @@ export default function HalPanel({
             animate={{ x: 0 }}
             exit={{ x: '100%' }}
             transition={{ type: 'tween', duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
-            className="no-print fixed top-12 right-0 z-40 flex h-[calc(100%-3rem)] w-full sm:max-w-md flex-col border-l border-hairline bg-surface-1 elev-3"
+            className="hal-console no-print fixed top-12 right-0 z-40 flex h-[calc(100%-3rem)] w-full sm:max-w-md flex-col border-l border-hairline elev-3"
             role="dialog"
             aria-label="HAL assistant"
           >
-            {/* Header — the eye, name, live status, face switcher */}
-            <div className="flex items-center gap-3 border-b border-hairline px-4 py-3">
-              <HalEye size={34} state={eyeState} tint={FACES[face].tint} face={face} />
-              <div className="flex-1">
-                <div className="text-sm font-bold uppercase tracking-[0.3em] text-ink-primary">
-                  {FACES[face].name}
-                </div>
-                <div className="text-[10px] uppercase tracking-[0.25em] text-ink-tertiary">{status}</div>
+            {/* Header — centered eye PLATE (qcode ops console design), with the
+                Report/Clear/Close actions floated top-right. */}
+            <div className="hal-plate">
+              <div className="hal-plate-actions">
+                {messages.some((m) => m.role === 'assistant') && (
+                  <button
+                    onClick={() => buildReportSlideshow(messages)}
+                    className="hal-console-link"
+                    title="Turn this conversation into a slideshow report"
+                  >
+                    Report
+                  </button>
+                )}
+                {messages.length > 0 && (
+                  <button
+                    onClick={() => setMessages([])}
+                    className="hal-console-link"
+                    title="Clear conversation"
+                  >
+                    Clear
+                  </button>
+                )}
+                <button onClick={() => setOpen(false)} className="hal-console-link" aria-label="Close HAL" title="Close">
+                  ✕
+                </button>
               </div>
+              <HalEye size={72} state={eyeState} tint={FACES[face].tint} face={face} bezel />
+              <div
+                className="hal-console-name"
+                style={{ color: face === 'jarvis' ? '#ffd47e' : '#9db4ff' }}
+              >
+                {FACES[face].name}
+              </div>
+              <div className="hal-console-status">{status}</div>
               {/* Face switcher — same transcript, same tools, different persona */}
               <div className="flex items-center gap-1.5" role="group" aria-label="Choose persona">
                 {(Object.keys(FACES) as Face[]).map((f) => (
@@ -591,33 +656,6 @@ export default function HalPanel({
                   </button>
                 ))}
               </div>
-              {messages.some((m) => m.role === 'assistant') && (
-                <button
-                  onClick={() => buildReportSlideshow(messages)}
-                  className="text-[10px] uppercase tracking-wider text-threat-critical hover:text-threat-high transition-colors"
-                  title="Turn this conversation into a slideshow report"
-                >
-                  Report
-                </button>
-              )}
-              {messages.length > 0 && (
-                <button
-                  onClick={() => setMessages([])}
-                  className="text-[10px] uppercase tracking-wider text-ink-tertiary hover:text-ink-secondary transition-colors"
-                  title="Clear conversation"
-                >
-                  Clear
-                </button>
-              )}
-              <button
-                onClick={() => setOpen(false)}
-                className="text-ink-tertiary hover:text-ink-primary transition-colors"
-                aria-label="Close HAL"
-              >
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
             </div>
 
             {/* Provider-context chip */}
