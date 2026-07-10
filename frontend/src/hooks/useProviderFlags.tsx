@@ -24,7 +24,10 @@ export function ProviderFlagsProvider({ children }: { children: ReactNode }) {
   })
   const { data: brain } = useQuery({
     queryKey: ['brain-membership'],
-    queryFn: () => api.fraudBrainMembership(100),
+    // 500 (the backend cap) rather than 100 — Brain-flag parity (#2): analysis
+    // pages like Claim Patterns / Billing Codes surface providers well past the
+    // top-100, and the BRAIN chip should appear for any provider on the board.
+    queryFn: () => api.fraudBrainMembership(500),
     staleTime: 5 * 60_000,
     retry: 1,
   })

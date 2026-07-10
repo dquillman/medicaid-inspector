@@ -79,8 +79,10 @@ interface DiagFlagsResult {
 /* ── Risk badge ─────────────────────────────────────────────────────────────── */
 
 function RiskBadge({ score }: { score: number }) {
+  // Thresholds aligned to lib/threat.ts threatBand (HIGH >= 60, MEDIUM >= 40)
+  // so "high risk" means the same score on every page (#2 Brain-flag parity).
   const color =
-    score >= 70
+    score >= 60
       ? 'bg-red-900/60 text-red-300 border-red-700'
       : score >= 40
         ? 'bg-yellow-900/40 text-yellow-300 border-yellow-700'

@@ -17,11 +17,31 @@ def _validate_npi(npi: str) -> str:
     return npi
 
 
+def _stamp_risk(patterns: list) -> list:
+    """Attach the provider's composite risk_score to each pattern row (Brain-flag
+    parity, #2): lets the Claim Patterns page show the same high-risk indicator
+    the other analysis pages use, at the same threatBand thresholds. Cache
+    lookup only — never recomputes anything."""
+    from core.store import get_provider_by_npi
+    for p in patterns:
+        if isinstance(p, dict) and p.get("npi") and "risk_score" not in p:
+            prov = get_provider_by_npi(p["npi"]) or {}
+            p["risk_score"] = round(float(prov.get("risk_score") or 0), 1)
+    return patterns
+
+
 @router.get("/all")
 async def claim_patterns_all(limit: int = Query(100, ge=1, le=500)):
     """Return all 5 pattern analyses in a single response."""
     from services.claim_patterns import _run_all_analyses
-    return await _run_all_analyses(limit=limit)
+    result = await _run_all_analyses(limit=limit)
+    # Stamp risk_score on each pattern list in the combined payload.
+    for key, val in result.items():
+        if isinstance(val, list):
+            _stamp_risk(val)
+        elif isinstance(val, dict) and isinstance(val.get("patterns"), list):
+            _stamp_risk(val["patterns"])
+    return result
 
 
 @router.get("/summary")
@@ -35,7 +55,7 @@ async def claim_patterns_summary():
 async def unbundling_patterns(limit: int = Query(100, ge=1, le=500)):
     """Providers with unbundling indicators — billing components instead of bundled codes."""
     from services.claim_patterns import detect_unbundling
-    results = await detect_unbundling(limit=limit)
+    results = _stamp_risk(await detect_unbundling(limit=limit))
     return {"patterns": results, "total": len(results)}
 
 
@@ -43,7 +63,7 @@ async def unbundling_patterns(limit: int = Query(100, ge=1, le=500)):
 async def duplicate_patterns(limit: int = Query(100, ge=1, le=500)):
     """Duplicate claim clusters — identical or near-identical claims."""
     from services.claim_patterns import detect_duplicates
-    results = await detect_duplicates(limit=limit)
+    results = _stamp_risk(await detect_duplicates(limit=limit))
     return {"patterns": results, "total": len(results)}
 
 
@@ -51,7 +71,7 @@ async def duplicate_patterns(limit: int = Query(100, ge=1, le=500)):
 async def pos_violation_patterns(limit: int = Query(100, ge=1, le=500)):
     """Place-of-service violations — procedure/setting mismatches."""
     from services.claim_patterns import detect_pos_violations
-    results = await detect_pos_violations(limit=limit)
+    results = _stamp_risk(await detect_pos_violations(limit=limit))
     return {"patterns": results, "total": len(results)}
 
 
@@ -59,7 +79,7 @@ async def pos_violation_patterns(limit: int = Query(100, ge=1, le=500)):
 async def modifier_abuse_patterns(limit: int = Query(100, ge=1, le=500)):
     """Modifier abuse cases — unusual modifier usage rates."""
     from services.claim_patterns import detect_modifier_abuse
-    results = await detect_modifier_abuse(limit=limit)
+    results = _stamp_risk(await detect_modifier_abuse(limit=limit))
     return {"patterns": results, "total": len(results)}
 
 
@@ -67,7 +87,7 @@ async def modifier_abuse_patterns(limit: int = Query(100, ge=1, le=500)):
 async def impossible_day_patterns(limit: int = Query(100, ge=1, le=500)):
     """Same-day impossible patterns — physically impossible billing volumes."""
     from services.claim_patterns import detect_impossible_days
-    results = await detect_impossible_days(limit=limit)
+    results = _stamp_risk(await detect_impossible_days(limit=limit))
     return {"patterns": results, "total": len(results)}
 
 

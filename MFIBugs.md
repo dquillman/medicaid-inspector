@@ -57,7 +57,7 @@ Handoff spec of 6 items reviewed and actioned.
 
 **#6 Stale-case alert for review queue — FIXED.** `core/review_store` adds `is_stale_case`/`case_stale_days`/`get_stale_cases` (active cases — open/under_review — untouched >14d by `queue_status_updated_at`); `/api/review` enriches list items with `stale`/`stale_days`, adds `GET /api/review/stale`, and counts.stale. `ReviewQueue` rows show a "STALE Nd" badge.
 
-**#2 Brain-flag parity — NO CHANGE NEEDED (verified).** `ProviderFlags` (BRAIN# chip) is already rendered on all four pages; the chip is membership-gated to the Brain top-100, so it only shows for NPIs actually in that set. A known high-risk NPI in the top-100 shows it on all four. Genuine follow-up options (widen membership / cross-signal row highlight) await Dave's call — see item below.
+**#2 Brain-flag parity — FIXED (v3.9.1).** Three changes, per Dave's go-ahead: (a) Brain-membership badge map widened from top-100 to top-500 (the backend cap) in `useProviderFlags`, so the BRAIN# chip actually appears for board providers surfaced on Claim Patterns / Billing Codes; (b) `routes/claim_patterns.py` now stamps each pattern row with the provider's composite `risk_score` (cache lookup), and `ClaimPatterns.tsx` renders a red `RISK n` chip at the shared threatBand threshold (HIGH ≥60) next to the NPI in all five tables; (c) `BillingCodeSearch`'s RiskBadge red threshold aligned from ≥70 to ≥60 so "high risk" means the same score on every page. Verified: all pattern rows carry risk_score; chip fires only at ≥60.
 
 ### Claim-level data ingestion pipeline
 - **Logged:** 2026-07-09 16:08 UTC (via HAL)
@@ -70,5 +70,5 @@ Handoff spec of 6 items reviewed and actioned.
 - **Logged:** 2026-07-09 16:08 UTC (via HAL)
 - **Severity:** medium
 - **Area:** Claim Patterns / Billing Codes
-- **Detail:** Requested: add the BRAIN# flag + a high-risk alert rule for consistency with Beneficiary Fraud / Pharmacy. Finding: ProviderFlags (BRAIN# chip) is ALREADY rendered on all four pages; ClaimPatterns shows SeverityBadge and BillingCodeSearch shows RiskBadge. The chip is membership-conditional (Brain top-100), so it rarely appears for these pages providers. Real options: widen Brain membership coverage or add an explicit cross-signal high-risk row highlight. Needs Dave to confirm intended behavior before building on the (inaccurate) missing-flag premise.
-- **Status:** OPEN
+- **Detail:** Requested: add the BRAIN# flag + a high-risk alert rule for consistency with Beneficiary Fraud / Pharmacy. Finding: ProviderFlags (BRAIN# chip) is ALREADY rendered on all four pages; ClaimPatterns shows SeverityBadge and BillingCodeSearch shows RiskBadge. The chip is membership-conditional (Brain top-100), so it rarely appears for these pages providers. Resolved by widening membership to top-500 + composite-risk chip on Claim Patterns + shared >= 60 threshold (see v3.9.1 entry above).
+- **Status:** FIXED (v3.9.1)
