@@ -134,7 +134,13 @@ export default function OwnershipTracePage() {
           </div>
 
           {/* KPI Grid */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            {chain.cluster_risk_score !== undefined && (
+              <KpiCard
+                label="Cluster Risk"
+                value={`${chain.cluster_risk_score}${chain.cluster_risk_band ? ` · ${chain.cluster_risk_band}` : ''}`}
+              />
+            )}
             <KpiCard label="Total Entities" value={String(chain.total_entities)} />
             <KpiCard label="Combined Billing" value={fmt(chain.total_combined_billing)} />
             <KpiCard label="Shared Addresses" value={String(chain.shared_addresses.length)} />

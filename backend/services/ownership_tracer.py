@@ -187,6 +187,7 @@ def trace_ownership_network(npi: str, target_nppes: dict | None = None) -> dict:
     ) + (provider.get("total_paid", 0))
 
     avg_risk = 0
+    risk_scores = []
     if all_connected:
         risk_scores = [
             (get_provider_by_npi(n) or {}).get("risk_score", 0) for n in all_connected
@@ -198,6 +199,21 @@ def trace_ownership_network(npi: str, target_nppes: dict | None = None) -> dict:
         network_risk = "HIGH"
     elif len(all_connected) >= 3 or avg_risk >= 30:
         network_risk = "MEDIUM"
+
+    # Cluster-level risk score (#4): score the cluster AS A WHOLE, not just per
+    # NPI. Leans on the worst actor (a single confirmed-bad NPI taints the ring),
+    # tempered by the mean, and escalated by cluster size — the corporate-shell
+    # pattern (many NPIs under one official/address) is itself a risk signal.
+    # Center + all connected members, capped at 100.
+    _member_risks = [float(provider.get("risk_score") or 0)] + [float(r or 0) for r in risk_scores]
+    _max_risk = max(_member_risks) if _member_risks else 0.0
+    _mean_risk = (sum(_member_risks) / len(_member_risks)) if _member_risks else 0.0
+    _size_bonus = min(len(all_connected) * 4, 30)  # up to +30 for large rings
+    cluster_risk_score = round(min(0.6 * _max_risk + 0.4 * _mean_risk + _size_bonus, 100.0), 1)
+    cluster_risk_band = (
+        "HIGH" if cluster_risk_score >= 60 else
+        "MEDIUM" if cluster_risk_score >= 35 else "LOW"
+    )
 
     result = {
         "npi": npi,
@@ -217,6 +233,8 @@ def trace_ownership_network(npi: str, target_nppes: dict | None = None) -> dict:
             "total_connected_entities": len(all_connected),
             "total_network_paid": round(total_network_paid, 2),
             "avg_connected_risk_score": round(avg_risk, 1),
+            "cluster_risk_score": cluster_risk_score,
+            "cluster_risk_band": cluster_risk_band,
             "network_risk": network_risk,
             "connected_npis": all_connected,
             # Coverage so "0 connections" is never confused with "no data to

@@ -166,6 +166,9 @@ export interface ReviewItem {
   // Enriched from prescan cache
   provider_name?: string
   state?: string
+  // Stale-case alert (#6): active case untouched past the threshold.
+  stale?: boolean
+  stale_days?: number | null
 }
 
 export interface OigStatus {
@@ -369,6 +372,8 @@ export interface OwnershipChain {
   total_entities: number
   total_combined_billing: number
   shared_addresses: { address: string; npis: string[] }[]
+  cluster_risk_score?: number
+  cluster_risk_band?: 'LOW' | 'MEDIUM' | 'HIGH'
 }
 
 export interface OwnershipNetworkEntry {
@@ -462,6 +467,20 @@ export interface ExclusionSummary {
   checks: ExclusionCheck[]
   any_excluded: boolean
   risk_level: 'clear' | 'warning' | 'excluded'
+}
+
+export interface ExclusionFreshnessSource {
+  key: string
+  label: string
+  record_count: number | null
+  last_updated_utc: string | null
+  data_as_of?: string | null
+  cadence: string
+  loaded: boolean
+}
+
+export interface ExclusionFreshness {
+  sources: ExclusionFreshnessSource[]
 }
 
 export interface ExcludedProvider {

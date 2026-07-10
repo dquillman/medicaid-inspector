@@ -30,6 +30,7 @@ import type {
   ROISummary,
   RecoveryRecord,
   ExclusionSummary,
+  ExclusionFreshness,
   BatchExclusionResults,
   BillingNetwork,
   DataSourcesResponse,
@@ -522,6 +523,8 @@ export const api = {
 
   // Exclusion Cross-Referencing
   exclusionSummary: (npi: string) => get<ExclusionSummary>(`/providers/${npi}/exclusion-summary`),
+
+  exclusionFreshness: () => get<ExclusionFreshness>('/providers/exclusion-freshness'),
 
   batchExclusionScan: () =>
     mutate<BatchExclusionResults>('POST', '/exclusions/scan-all'),

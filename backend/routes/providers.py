@@ -1078,6 +1078,50 @@ async def get_timelines_batch(
     return {"timelines": timelines}
 
 
+@router.get("/exclusion-freshness")
+async def exclusion_freshness():
+    """Freshness of the exclusion/identity sources (LEIE, SAM, NPPES) for the
+    'as of' badge shown next to a provider's exclusion status (#3). Static route —
+    declared before /{npi} so it isn't captured as an NPI."""
+    from core.oig_store import get_oig_stats
+    from core.sam_extract_store import status as sam_status, ensure_loaded
+    try:
+        await ensure_loaded()
+    except Exception:
+        pass
+    oig = get_oig_stats()
+    sam = sam_status()
+    return {
+        "sources": [
+            {
+                "key": "leie",
+                "label": "OIG LEIE",
+                "record_count": oig.get("record_count", 0),
+                "last_updated_utc": oig.get("last_updated_utc"),
+                "cadence": "monthly file",
+                "loaded": oig.get("loaded", False),
+            },
+            {
+                "key": "sam",
+                "label": "SAM.gov",
+                "record_count": sam.get("record_count", 0),
+                "last_updated_utc": sam.get("last_success_utc"),
+                "data_as_of": sam.get("data_as_of"),
+                "cadence": f"~every {sam.get('refresh_interval_days', 3)} days",
+                "loaded": sam.get("loaded", False),
+            },
+            {
+                "key": "nppes",
+                "label": "NPPES",
+                "record_count": None,
+                "last_updated_utc": None,
+                "cadence": "live registry lookup (always current)",
+                "loaded": True,
+            },
+        ],
+    }
+
+
 @router.get("/{npi}")
 async def get_provider_detail(npi: str):
     """Full provider profile: NPPES identity + spending summary + risk score."""
@@ -1653,6 +1697,41 @@ async def provider_signal_evidence(npi: str, signal: str):
             peer_mean, peer_std = 0.0, 0.0
 
     evidence: dict = {"signal": signal, "npi": npi}
+
+    # Peer-group transparency (#5): every outlier signal below compares this
+    # provider to a peer cohort. Expose HOW that cohort is defined so a reviewer
+    # can judge specialty mismatch (e.g. a lab vs a solo practitioner) instead of
+    # trusting an opaque "peer mean". The cohort is CODE-based (same primary
+    # HCPCS) — the closest available proxy for comparable service mix — and we
+    # say so plainly, including when we fell back to the all-provider pool.
+    try:
+        _peer_count = (
+            sum(1 for p in get_prescanned()
+                if p.get("npi") != npi and (p.get("top_hcpcs") or "") == top_code)
+            if top_code else 0
+        )
+    except Exception:
+        _peer_count = 0
+    # Named peer_group_definition (not peer_group) — some signal branches below
+    # already set evidence["peer_group"] to a short human-readable label; this is
+    # the structured, machine-readable definition that sits alongside it.
+    evidence["peer_group_definition"] = {
+        "definition": "Providers whose primary (highest-paid) HCPCS code matches this provider's",
+        "primary_hcpcs_code": top_code or None,
+        "basis": "same primary HCPCS code",
+        "peer_count": _peer_count,
+        "peer_mean_revenue_per_beneficiary": round(peer_mean, 2) if peer_mean else 0,
+        "peer_std": round(peer_std, 2) if peer_std else 0,
+        "geography": "national (not geography-filtered)",
+        "size_band": "not size-filtered",
+        "caveat": (
+            "Peer group is defined by billing code, not by specialty, geography, or "
+            "practice size. A same-code cohort is the closest proxy for comparable "
+            "service mix, but cross-specialty matches (e.g. a reference lab vs a solo "
+            "practitioner both billing a shared code) can distort the comparison — "
+            "verify the cohort is clinically comparable before relying on the z-score."
+        ),
+    }
 
     if signal == "billing_concentration":
         total = sum(r["total_paid"] for r in hcpcs_rows) or 1
@@ -2511,12 +2590,28 @@ async def get_ownership_chain(npi: str):
 
     total_billing = sum(c["total_paid"] for c in controlled)
 
+    # Cluster-level risk score (#4): score the shared-official cluster as a whole
+    # — worst-actor weighted, tempered by the mean, escalated by cluster size
+    # (many NPIs under one official is itself the corporate-shell signal). Capped
+    # at 100. Mirrors the ownership_tracer computation.
+    _risks = [float(c.get("risk_score") or 0) for c in controlled]
+    _max_risk = max(_risks) if _risks else 0.0
+    _mean_risk = (sum(_risks) / len(_risks)) if _risks else 0.0
+    _size_bonus = min(max(len(controlled) - 1, 0) * 4, 30)
+    cluster_risk_score = round(min(0.6 * _max_risk + 0.4 * _mean_risk + _size_bonus, 100.0), 1)
+    cluster_risk_band = (
+        "HIGH" if cluster_risk_score >= 60 else
+        "MEDIUM" if cluster_risk_score >= 35 else "LOW"
+    )
+
     return {
         "official": {"name": off_name, "title": off_title},
         "controlled_npis": controlled,
         "total_entities": len(controlled),
         "total_combined_billing": total_billing,
         "shared_addresses": shared_addresses,
+        "cluster_risk_score": cluster_risk_score,
+        "cluster_risk_band": cluster_risk_band,
     }
 
 

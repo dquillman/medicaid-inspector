@@ -19,6 +19,10 @@ from core.review_store import (
     get_review_item,
     QueueStatusError,
     VALID_QUEUE_STATUSES,
+    is_stale_case,
+    case_stale_days,
+    get_stale_cases,
+    STALE_CASE_DAYS,
 )
 from core.store import get_prescanned
 from core.config import settings
@@ -58,14 +62,18 @@ class QueueStatusBody(BaseModel):
 
 
 def _enrich_items(items: list[dict]) -> list[dict]:
-    """Attach provider_name and state from prescan cache."""
+    """Attach provider_name, state, and stale-case flags from prescan cache."""
     by_npi = {p["npi"]: p for p in get_prescanned()}
     enriched = []
     for item in items:
         p = by_npi.get(item["npi"], {})
         name  = p.get("provider_name") or (p.get("nppes") or {}).get("name") or ""
         state = p.get("state") or (p.get("nppes") or {}).get("address", {}).get("state") or ""
-        enriched.append({**item, "provider_name": name, "state": state})
+        enriched.append({
+            **item, "provider_name": name, "state": state,
+            "stale": is_stale_case(item),
+            "stale_days": case_stale_days(item),
+        })
     return enriched
 
 
@@ -88,6 +96,14 @@ async def list_review_queue(
 @router.get("/counts")
 async def review_counts():
     return get_review_counts()
+
+
+@router.get("/stale")
+async def stale_cases(days: int = STALE_CASE_DAYS):
+    """Active cases (open / under_review) untouched for >= `days` — the stale-case
+    alert. Oldest first, enriched with name/state and days-since-activity."""
+    items = _enrich_items(get_stale_cases(days))
+    return {"threshold_days": days, "count": len(items), "items": items}
 
 
 @router.post("/backfill")

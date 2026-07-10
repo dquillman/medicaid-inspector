@@ -45,12 +45,26 @@ Surfaced by HAL/JARVIS while investigating NPI `1720390115` (Dunlap) on the Clou
 **Was:** `services/medicare_lookup.py` called the retired CMS Socrata endpoint `data.cms.gov/resource/fs4p-t5eq.json`, which now returns HTTP 410. The Medicare Cross-Reference / discrepancy check was blind for ALL providers, not just Dunlap.
 **Fix:** Migrated to the current CMS data-api: `data.cms.gov/data-api/v1/dataset/92396110-2aed-4d63-a6a2-5d6207d46a29/data` (2024 release), with `filter[Rndrng_NPI]=`/`size=` paging and PascalCase column names (`Rndrng_NPI`, `HCPCS_Cd`, `Avg_Sbmtd_Chrg`, `Avg_Mdcr_Pymt_Amt`, `Tot_Srvcs`, `Tot_Benes`, `Rndrng_Prvdr_Type`, `HCPCS_Desc`). Verified live: real data returns; non-Medicare providers return `has_data:false` with no error. To bump to a future annual release, pull `data.cms.gov/data.json` and update the UUID.
 
+## 2026-07-09 — JARVIS backlog batch (v3.9.0)
+
+Handoff spec of 6 items reviewed and actioned.
+
+**#3 Data-freshness "as of" badge on exclusion checks — FIXED.** New user-accessible `GET /api/providers/exclusion-freshness` returns LEIE (record count + cache mtime), SAM (last-success + data-as-of), and NPPES (live) freshness; `core/oig_store.get_oig_stats` now includes `last_updated_utc`. `ProviderDetail` renders an `ExclusionFreshnessBadge` strip under the exclusion banners. Verified: LEIE 2026-06-18, SAM live date, NPPES "live".
+
+**#4 Cluster-level risk scoring for provider networks — FIXED.** `services/ownership_tracer.py` and the `/{npi}/ownership-chain` endpoint (the UI's source) now return `cluster_risk_score` + `cluster_risk_band` — worst-actor-weighted (0.6·max + 0.4·mean) plus a size escalation (+4/entity, cap 30) for the shell pattern, capped at 100. Also returned by the MCP `provider_network` tool. `OwnershipTracePage` shows a "Cluster Risk" KPI card.
+
+**#5 Peer-group definition transparency — FIXED.** `provider_signal_evidence` now attaches `peer_group_definition` (basis = same primary HCPCS code, peer_count, mean/std, geography=national, size_band=none, plus an explicit specialty-mismatch caveat) alongside the existing threshold/proof numbers. Named separately from the legacy `peer_group` string label to avoid collision.
+
+**#6 Stale-case alert for review queue — FIXED.** `core/review_store` adds `is_stale_case`/`case_stale_days`/`get_stale_cases` (active cases — open/under_review — untouched >14d by `queue_status_updated_at`); `/api/review` enriches list items with `stale`/`stale_days`, adds `GET /api/review/stale`, and counts.stale. `ReviewQueue` rows show a "STALE Nd" badge.
+
+**#2 Brain-flag parity — NO CHANGE NEEDED (verified).** `ProviderFlags` (BRAIN# chip) is already rendered on all four pages; the chip is membership-gated to the Brain top-100, so it only shows for NPIs actually in that set. A known high-risk NPI in the top-100 shows it on all four. Genuine follow-up options (widen membership / cross-signal row highlight) await Dave's call — see item below.
+
 ### Claim-level data ingestion pipeline
 - **Logged:** 2026-07-09 16:08 UTC (via HAL)
 - **Severity:** medium
 - **Area:** Fraud Brain / data
-- **Detail:** Brain reasons only over provider-summary and HCPCS-summary aggregates; no raw claim-line data exists in MFI. Build a pipeline to ingest claim-level detail to enable finer patterns (unbundling, duplicate billing, line-item upcoding). Large roadmap item - requires a claim-line data source MFI does not currently have.
-- **Status:** OPEN
+- **Detail:** Brain reasons only over provider-summary and HCPCS-summary aggregates; no raw claim-line data exists in MFI. Build a pipeline to ingest claim-level detail to enable finer patterns (unbundling, duplicate billing, line-item upcoding). Large roadmap item - requires a claim-line data source MFI does not currently have. Not buildable without a source extract.
+- **Status:** OPEN (roadmap — blocked on data source)
 
 ### Brain flag / high-risk parity on Claim Patterns + Billing Codes
 - **Logged:** 2026-07-09 16:08 UTC (via HAL)

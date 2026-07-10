@@ -207,6 +207,42 @@ function MedicareCrossReference({ data: medicareData }: { data: MedicareComparis
   )
 }
 
+// #3 — "as of" freshness strip for the exclusion/identity sources, shown next
+// to a provider's exclusion status so a reviewer knows how current LEIE/SAM/NPPES
+// are (LEIE is a monthly file; SAM refreshes every few days).
+function ExclusionFreshnessBadge() {
+  const { data } = useQuery({
+    queryKey: ['exclusion-freshness'],
+    queryFn: () => api.exclusionFreshness(),
+    staleTime: 10 * 60_000,
+    retry: 1,
+  })
+  if (!data?.sources?.length) return null
+  const fmtDate = (iso: string | null | undefined) =>
+    iso ? new Date(iso).toISOString().slice(0, 10) : '—'
+  return (
+    <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
+      <span className="uppercase tracking-wider text-gray-600">Exclusion data as of:</span>
+      {data.sources.map((s) => (
+        <span
+          key={s.key}
+          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-gray-800 bg-gray-900/60"
+          title={`${s.label}: ${s.cadence}${s.record_count != null ? ` · ${s.record_count.toLocaleString()} records` : ''}${s.data_as_of ? ` · data as of ${s.data_as_of}` : ''}`}
+        >
+          <span className={`w-1.5 h-1.5 rounded-full ${s.loaded ? 'bg-green-500' : 'bg-gray-600'}`} />
+          <span className="text-gray-300 font-medium">{s.label}</span>
+          <span className="text-gray-500">
+            {s.key === 'nppes' ? 'live' : fmtDate(s.last_updated_utc)}
+          </span>
+          {s.record_count != null && (
+            <span className="text-gray-600">· {s.record_count.toLocaleString()}</span>
+          )}
+        </span>
+      ))}
+    </div>
+  )
+}
+
 export default function ProviderDetail() {
   const { npi } = useParams<{ npi: string }>()
   const queryClient = useQueryClient()
@@ -486,6 +522,9 @@ export default function ProviderDetail() {
           </div>
         </div>
       )}
+
+      {/* #3 — data-freshness "as of" strip for exclusion sources */}
+      <ExclusionFreshnessBadge />
 
       {/* Header — tinted red for high-risk providers */}
       <div className={`card flex items-start justify-between gap-4 ${

@@ -319,7 +319,54 @@ def get_review_counts() -> dict:
         if s in counts:
             counts[s] += 1
     counts["total"] = len(items)
+    counts["stale"] = sum(1 for i in items if is_stale_case(i))
     return counts
+
+
+# ── stale-case detection (#6) ─────────────────────────────────────────────────
+# A case parked in an ACTIVE ledger state (open / under_review) with no
+# queue_status change for this many days is "stale" — it needs a nudge so cases
+# don't sit under review indefinitely. Resolved states (tip_filed / confirmed /
+# referred / dismissed) are terminal and never stale.
+STALE_CASE_DAYS = 14
+_STALE_ACTIVE_STATES = {"open", "under_review"}
+
+
+def _case_last_activity(item: dict) -> float:
+    """Best available 'last touched' timestamp for staleness: the last
+    queue_status change, else last update, else when it was added."""
+    return (
+        item.get("queue_status_updated_at")
+        or item.get("updated_at")
+        or item.get("added_at")
+        or 0.0
+    )
+
+
+def is_stale_case(item: dict, days: int = STALE_CASE_DAYS) -> bool:
+    if _queue_status_of(item) not in _STALE_ACTIVE_STATES:
+        return False
+    last = _case_last_activity(item)
+    return bool(last) and (time.time() - last) > days * 86400
+
+
+def case_stale_days(item: dict) -> Optional[int]:
+    """Whole days since last activity for an active case, else None."""
+    if _queue_status_of(item) not in _STALE_ACTIVE_STATES:
+        return None
+    last = _case_last_activity(item)
+    if not last:
+        return None
+    return int((time.time() - last) // 86400)
+
+
+def get_stale_cases(days: int = STALE_CASE_DAYS) -> list[dict]:
+    """Active cases (open / under_review) untouched for >= `days`, oldest first."""
+    with _review_lock:
+        items = list(_review_items.values())
+    stale = [dict(i) for i in items if is_stale_case(i, days)]
+    stale.sort(key=_case_last_activity)  # oldest activity first
+    return stale
 
 
 def get_review_history(npi: str) -> Optional[list]:

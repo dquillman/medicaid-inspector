@@ -94,4 +94,19 @@ def is_excluded(npi: str) -> tuple[bool, dict | None]:
 
 
 def get_oig_stats() -> dict:
-    return {"loaded": _loaded, "record_count": len(_exclusions)}
+    # The cached CSV->JSON file's mtime is when the LEIE was last refreshed —
+    # surfaced so the UI can show an "as of" date (LEIE is a monthly file).
+    last_updated = None
+    try:
+        if _OIG_CACHE.exists():
+            import datetime as _dt
+            last_updated = _dt.datetime.utcfromtimestamp(
+                _OIG_CACHE.stat().st_mtime).isoformat() + "Z"
+    except Exception:
+        pass
+    return {
+        "loaded": _loaded,
+        "record_count": len(_exclusions),
+        "last_updated_utc": last_updated,
+        "source_url": _OIG_CSV_URL,
+    }

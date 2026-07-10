@@ -262,6 +262,14 @@ function ReviewRow({
         <td className="px-4 py-3 text-sm text-gray-300 max-w-[180px] truncate" title={item.provider_name}>
           {item.provider_name || <span className="text-gray-600 italic">--</span>}
           <ProviderFlags npi={item.npi} className="ml-1.5" />
+          {item.stale && (
+            <span
+              className="ml-1.5 align-middle text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/40"
+              title={`No case activity for ${item.stale_days ?? '14+'} days — needs a nudge`}
+            >
+              STALE {item.stale_days != null ? `${item.stale_days}d` : ''}
+            </span>
+          )}
         </td>
         <td className="px-4 py-3 text-xs text-gray-500">{item.state || '--'}</td>
         <td className="px-4 py-3">
