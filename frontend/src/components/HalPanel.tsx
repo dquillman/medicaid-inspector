@@ -249,6 +249,8 @@ export default function HalPanel({
   const [speaking, setSpeaking] = useState(false)
   const [paused, setPaused] = useState(false)
   const [listening, setListening] = useState(false)
+  // LIVE (hands-free) conversation mode — see HAL_SPEC §3b.
+  const [live, setLive] = useState(false)
   const [voiceOn, setVoiceOn] = useState(() => localStorage.getItem(VOICE_KEY) !== 'off')
   const [face, setFace] = useState<Face>(() => {
     const f = localStorage.getItem(FACE_KEY)
@@ -285,6 +287,14 @@ export default function HalPanel({
   const recRef = useRef<Recognition | null>(null)
   const voiceOnRef = useRef(voiceOn)
   voiceOnRef.current = voiceOn
+  // Refs mirror state for the LIVE loop and speak()'s finish handler.
+  const liveRef = useRef(live)
+  liveRef.current = live
+  const busyRef = useRef(busy)
+  busyRef.current = busy
+  const listeningRef = useRef(listening)
+  listeningRef.current = listening
+  const listenRef = useRef<() => void>(() => {})
   // True while the USER has paused speech. The keep-alive interval below must
   // not fight this (its pause/resume would otherwise instantly un-pause us).
   const userPausedRef = useRef(false)
@@ -355,6 +365,12 @@ export default function HalPanel({
       userPausedRef.current = false
       setPaused(false)
       setSpeaking(false)
+      // LIVE (hands-free): re-open the ears ~700ms after HAL finishes.
+      if (liveRef.current)
+        setTimeout(() => {
+          if (liveRef.current && !busyRef.current && !window.speechSynthesis?.speaking && !listeningRef.current)
+            listenRef.current()
+        }, 700)
     }
     utt.onend = finish
     utt.onerror = finish
@@ -423,15 +439,32 @@ export default function HalPanel({
     rec.lang = 'en-US'
     rec.continuous = false
     rec.interimResults = false
+    let gotResult = false
     rec.onresult = (e) => {
       const t = e.results[0]?.[0]?.transcript ?? ''
-      if (t) void send(t)
+      if (t) {
+        gotResult = true
+        void send(t)
+      }
     }
-    rec.onend = () => setListening(false)
+    rec.onend = () => {
+      setListening(false)
+      recRef.current = null
+      // LIVE: keep the ears open after silence; a result re-arms via speak()→finish.
+      if (liveRef.current && !gotResult)
+        setTimeout(() => {
+          if (liveRef.current && !busyRef.current && !window.speechSynthesis?.speaking && !listeningRef.current)
+            listenRef.current()
+        }, 300)
+    }
     rec.onerror = (e) => {
       setListening(false)
-      const why = MIC_ERRORS[e?.error ?? '']
-      if (why) {
+      const code = e?.error ?? ''
+      // Permission/hardware failures are fatal to hands-free mode - leave LIVE.
+      if (code === 'not-allowed' || code === 'service-not-allowed' || code === 'audio-capture') setLive(false)
+      const why = MIC_ERRORS[code]
+      // Suppress the chatty "no-speech" notice while hands-free (onend re-arms).
+      if (why && !(liveRef.current && code === 'no-speech')) {
         setMessages((m) => [...m, { role: 'assistant', content: why, error: true }])
       }
     }
@@ -447,6 +480,32 @@ export default function HalPanel({
       ])
     }
   }, [canListen, listening, busy, send])
+  useEffect(() => {
+    listenRef.current = listen
+  }, [listen])
+
+  // MIC = barge-in: cut HAL off mid-sentence and listen now (or stop if listening).
+  const micClick = useCallback(() => {
+    window.speechSynthesis?.cancel()
+    userPausedRef.current = false
+    setPaused(false)
+    setSpeaking(false)
+    if (listeningRef.current) {
+      recRef.current?.stop()
+      return
+    }
+    listen()
+  }, [listen])
+
+  // LIVE = hands-free conversation loop (echo-safe: mic off while HAL speaks).
+  const toggleLive = useCallback(() => {
+    setLive((v) => {
+      const next = !v
+      if (next) setTimeout(() => listenRef.current(), 0)
+      else recRef.current?.stop()
+      return next
+    })
+  }, [])
 
   // ---- Pause / resume the current spoken reply ------------------------------
   const togglePause = useCallback(() => {
@@ -466,6 +525,8 @@ export default function HalPanel({
   // Stop audio when the panel closes or unmounts.
   useEffect(() => {
     if (!open) {
+      liveRef.current = false // stop the LIVE loop when the panel is closed
+      setLive(false)
       window.speechSynthesis?.cancel()
       recRef.current?.stop()
       userPausedRef.current = false
@@ -475,6 +536,7 @@ export default function HalPanel({
   }, [open])
   useEffect(
     () => () => {
+      liveRef.current = false // stop any pending LIVE re-arm after unmount
       window.speechSynthesis?.cancel()
       recRef.current?.stop()
     },
@@ -762,19 +824,32 @@ export default function HalPanel({
                   className="max-h-32 flex-1 resize-none bg-transparent px-1.5 py-1 text-sm text-ink-primary placeholder-ink-tertiary focus:outline-none"
                 />
                 {canListen && (
-                  <button
-                    onClick={listen}
-                    disabled={busy || listening}
-                    className={`mb-0.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors disabled:opacity-40 ${
-                      listening
-                        ? 'border-threat-critical text-threat-critical shadow-[0_0_12px_rgba(215,38,61,0.4)]'
-                        : 'border-hairline text-ink-tertiary hover:border-threat-critical/50 hover:text-ink-secondary'
-                    }`}
-                    title="Talk to HAL with your microphone"
-                    aria-label="Voice input"
-                  >
-                    {listening ? '● Mic' : 'Mic'}
-                  </button>
+                  <>
+                    <button
+                      onClick={micClick}
+                      className={`mb-0.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                        listening
+                          ? 'border-threat-critical text-threat-critical shadow-[0_0_12px_rgba(215,38,61,0.4)]'
+                          : 'border-hairline text-ink-tertiary hover:border-threat-critical/50 hover:text-ink-secondary'
+                      }`}
+                      title="Talk to HAL — tap to cut in mid-reply and speak"
+                      aria-label="Voice input"
+                    >
+                      {listening ? '● Mic' : 'Mic'}
+                    </button>
+                    <button
+                      onClick={toggleLive}
+                      className={`mb-0.5 rounded-lg border px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                        live
+                          ? 'border-threat-critical text-threat-critical shadow-[0_0_12px_rgba(215,38,61,0.4)]'
+                          : 'border-hairline text-ink-tertiary hover:border-threat-critical/50 hover:text-ink-secondary'
+                      }`}
+                      title="Hands-free conversation — HAL listens, replies, then listens again. Tap Mic to cut in."
+                      aria-label="Hands-free conversation mode"
+                    >
+                      {live ? '◉ Live' : 'Live'}
+                    </button>
+                  </>
                 )}
                 <button
                   onClick={() => send(input)}
