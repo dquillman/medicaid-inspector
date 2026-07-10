@@ -259,17 +259,24 @@ function ReviewRow({
             {item.npi}
           </Link>
         </td>
-        <td className="px-4 py-3 text-sm text-gray-300 max-w-[180px] truncate" title={item.provider_name}>
-          {item.provider_name || <span className="text-gray-600 italic">--</span>}
-          <ProviderFlags npi={item.npi} className="ml-1.5" />
-          {item.stale && (
-            <span
-              className="ml-1.5 align-middle text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/40"
-              title={`No case activity for ${item.stale_days ?? '14+'} days — needs a nudge`}
-            >
-              STALE {item.stale_days != null ? `${item.stale_days}d` : ''}
+        <td className="px-4 py-3 text-sm text-gray-300 max-w-[220px]" title={item.provider_name}>
+          {/* Only the name truncates (min-w-0 lets it shrink inside the flex
+              row); badges have shrink-0 so they always render in FULL — never
+              clipped mid-badge by the name's overflow-hidden ellipsis. */}
+          <div className="flex items-center min-w-0">
+            <span className="truncate min-w-0">
+              {item.provider_name || <span className="text-gray-600 italic">--</span>}
             </span>
-          )}
+            <ProviderFlags npi={item.npi} className="ml-1.5 shrink-0" />
+            {item.stale && (
+              <span
+                className="ml-1.5 shrink-0 align-middle text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/40"
+                title={`No case activity for ${item.stale_days ?? '14+'} days — needs a nudge`}
+              >
+                STALE {item.stale_days != null ? `${item.stale_days}d` : ''}
+              </span>
+            )}
+          </div>
         </td>
         <td className="px-4 py-3 text-xs text-gray-500">{item.state || '--'}</td>
         <td className="px-4 py-3">

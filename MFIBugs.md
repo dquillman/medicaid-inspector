@@ -59,6 +59,10 @@ Handoff spec of 6 items reviewed and actioned.
 
 **#2 Brain-flag parity — FIXED (v3.9.1).** Three changes, per Dave's go-ahead: (a) Brain-membership badge map widened from top-100 to top-500 (the backend cap) in `useProviderFlags`, so the BRAIN# chip actually appears for board providers surfaced on Claim Patterns / Billing Codes; (b) `routes/claim_patterns.py` now stamps each pattern row with the provider's composite `risk_score` (cache lookup), and `ClaimPatterns.tsx` renders a red `RISK n` chip at the shared threatBand threshold (HIGH ≥60) next to the NPI in all five tables; (c) `BillingCodeSearch`'s RiskBadge red threshold aligned from ≥70 to ≥60 so "high risk" means the same score on every page. Verified: all pattern rows carry risk_score; chip fires only at ≥60.
 
+### 10. STALE badge clipped mid-render in Review Queue — FIXED (v3.9.3)
+**Was:** Reported by Dave from a screenshot: the provider-name cell truncates with `overflow:hidden` (`max-w-[180px] truncate`), and the STALE badge (added in the #6 fix) lived inside that same truncated container. For a long provider name (e.g. "HOMEBRIDGE INC"), the name's ellipsis-clip sliced straight through the badge — leaving only a dark curved fragment of its border visible, no legible text. Looked like a broken/blocked UI element.
+**Fix:** `ReviewQueue.tsx` — only the name text truncates now (wrapped in its own `truncate min-w-0` span); `ProviderFlags` and the STALE badge sit outside it with `shrink-0`, so they always render in full regardless of name length. Verified live: reproduced the exact clipped state on NPI `1790954691` (HOMEBRIDGE INC, CA), confirmed the fix renders the full "STALE 50d" badge (67px, unclipped) after the change.
+
 ### Claim-level data ingestion pipeline
 - **Logged:** 2026-07-09 16:08 UTC (via HAL)
 - **Severity:** medium
