@@ -11,18 +11,37 @@ import { ArrowDownTrayIcon } from '../components/icons'
 import EmptyState from '../components/EmptyState'
 import QuickTriagePanel from '../components/QuickTriagePanel'
 import ProviderFlags from '../components/ProviderFlags'
+import { useProviderFlags } from '../hooks/useProviderFlags'
 
 type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
 
-function RiskBadge({ score }: { score: number }) {
+// The Fraud Brain is the queue's authority, so its fused meta-score is the
+// primary number. The raw 18-signal risk (one of the Brain's five inputs) is
+// kept as a small secondary line so the analyst can still see it.
+function BrainCell({ npi, risk }: { npi: string; risk: number }) {
+  const { brainRank, brainScore } = useProviderFlags()
+  const rank = brainRank(npi)
+  const bscore = brainScore(npi)
   return (
-    <span
-      className="inline-flex items-center gap-1 font-mono tabular-nums text-xs font-semibold"
-      style={{ color: threatColor(score) }}
-      title={`Risk ${score.toFixed(1)}/100`}
-    >
-      <span aria-hidden="true">{magnitudeGlyph(score)}</span>{score.toFixed(1)}
-    </span>
+    <div className="flex flex-col gap-0.5 leading-none">
+      {bscore != null ? (
+        <span
+          className="inline-flex items-center gap-1 font-mono tabular-nums text-sm font-bold"
+          style={{ color: threatColor(bscore) }}
+          title={`Brain score ${bscore.toFixed(1)}/100${rank ? ` — Brain #${rank}` : ''} (fused across all sources)`}
+        >
+          <span aria-hidden="true">{magnitudeGlyph(bscore)}</span>{bscore.toFixed(1)}
+        </span>
+      ) : (
+        <span className="text-gray-600 text-xs" title="Not on the current Brain board">--</span>
+      )}
+      <span
+        className="font-mono tabular-nums text-[10px] text-gray-500"
+        title={`Raw rule-signal risk ${risk.toFixed(1)}/100`}
+      >
+        risk {risk.toFixed(1)}
+      </span>
+    </div>
   )
 }
 
@@ -280,7 +299,7 @@ function ReviewRow({
         </td>
         <td className="px-4 py-3 text-xs text-gray-500">{item.state || '--'}</td>
         <td className="px-4 py-3">
-          <RiskBadge score={item.risk_score} />
+          <BrainCell npi={item.npi} risk={item.risk_score} />
         </td>
         <td className="px-4 py-3 text-sm text-gray-300">
           {item.flags.length > 0 ? (
@@ -385,7 +404,7 @@ function StatusTab({
   )
 }
 
-type SortField = 'npi' | 'provider_name' | 'state' | 'risk_score' | 'flags' | 'total_paid' | 'status' | 'updated_at'
+type SortField = 'npi' | 'provider_name' | 'state' | 'brain' | 'risk_score' | 'flags' | 'total_paid' | 'status' | 'updated_at'
 type SortDir = 'asc' | 'desc'
 
 function SortHeader({ label, field, sortField, sortDir, onSort }: {
@@ -421,8 +440,11 @@ export default function ReviewQueue() {
   const [page, setPage] = useState(1)
   const [selectedNpis, setSelectedNpis] = useState<Set<string>>(new Set())
   const [npiSearch, setNpiSearch] = useState('')
-  const [sortField, setSortField] = useState<SortField>('risk_score')
-  const [sortDir, setSortDir] = useState<SortDir>('desc')
+  // The Fraud Brain is the boss: default the queue to Brain rank ascending
+  // (#1 at the top) so the board's own ordering is what analysts see.
+  const [sortField, setSortField] = useState<SortField>('brain')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
+  const { brainRank } = useProviderFlags()
   const LIMIT = 50
 
   const handleSort = (field: SortField) => {
@@ -585,6 +607,14 @@ export default function ReviewQueue() {
       case 'npi':           cmp = a.npi.localeCompare(b.npi); break
       case 'provider_name': cmp = (a.provider_name || '').localeCompare(b.provider_name || ''); break
       case 'state':         cmp = (a.state || '').localeCompare(b.state || ''); break
+      // Brain rank asc = board order (#1 first). Off-board cases (human-actioned
+      // but no longer on the top-N) have no rank → sort last, ties broken by risk.
+      case 'brain': {
+        const ra = brainRank(a.npi) ?? Number.POSITIVE_INFINITY
+        const rb = brainRank(b.npi) ?? Number.POSITIVE_INFINITY
+        cmp = ra !== rb ? ra - rb : b.risk_score - a.risk_score
+        break
+      }
       case 'risk_score':    cmp = a.risk_score - b.risk_score; break
       case 'flags':         cmp = a.flags.length - b.flags.length; break
       case 'total_paid':    cmp = a.total_paid - b.total_paid; break
@@ -753,7 +783,7 @@ export default function ReviewQueue() {
                 <SortHeader label="NPI" field="npi" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortHeader label="Name" field="provider_name" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortHeader label="St" field="state" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
-                <SortHeader label="Risk" field="risk_score" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
+                <SortHeader label="Brain" field="brain" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortHeader label="Signals" field="flags" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortHeader label="Total Paid" field="total_paid" sortField={sortField} sortDir={sortDir} onSort={handleSort} />
                 <SortHeader label="Status" field="status" sortField={sortField} sortDir={sortDir} onSort={handleSort} />

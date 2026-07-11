@@ -1794,6 +1794,7 @@ export interface OigTipResponse {
 // Fraud Brain membership (for cross-page "in the brain list" badges)
 export interface FraudBrainMembership {
   members: Record<string, number>  // npi -> rank
+  scores?: Record<string, number>  // npi -> fused Brain score (0-100)
   limit: number
 }
 
