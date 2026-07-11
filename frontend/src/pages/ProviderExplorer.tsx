@@ -14,6 +14,19 @@ import Sparkline from '../components/Sparkline'
 import EmptyState from '../components/EmptyState'
 import { useClickOutside } from '../hooks/useClickOutside'
 import { SkeletonTable } from '../components/Skeleton'
+import { useProviderFlags } from '../hooks/useProviderFlags'
+import { useToast } from '../lib/toast'
+
+// Only-Brain-Top-10 rule: new Review Queue additions must be a provider
+// currently on the Fraud Brain's visible top-10 board. brainRank comes from
+// the shared top-500 membership fetch (useProviderFlags) — top-10 is just the
+// front slice of that same ranked list, so this needs no extra network call.
+// The backend re-checks this live at write time; this is the UI-side mirror
+// so the button reflects reality before the click, not just after a 400.
+const BRAIN_GATE_LIMIT = 10
+function isOnBrainBoard(rank: number | undefined): boolean {
+  return rank !== undefined && rank <= BRAIN_GATE_LIMIT
+}
 
 type SortDir = 'asc' | 'desc'
 
@@ -394,6 +407,12 @@ const ProviderRow = memo(function ProviderRow({
   const isHighRisk = p.risk_score >= 50
   const topOdd = topFraudOdds(p.flags, 1)[0]
   const reviewStatus = p.review_status as string | undefined
+  // Only-Brain-Top-10 rule: a provider already in the queue (grandfathered)
+  // can still be re-added/updated regardless of rank; a NEW addition requires
+  // top-10 board membership.
+  const { brainRank } = useProviderFlags()
+  const alreadyQueued = !!reviewStatus
+  const canAddToReview = alreadyQueued || isOnBrainBoard(brainRank(p.npi))
   return (
     <tr
       className={`cursor-pointer transition-colors group relative ${
@@ -481,9 +500,14 @@ const ProviderRow = memo(function ProviderRow({
             </svg>
           </button>
           <button
-            onClick={e => { e.stopPropagation(); onAddToReview(p.npi) }}
-            className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-yellow-400"
-            title="Add to review queue"
+            onClick={e => { e.stopPropagation(); if (canAddToReview) onAddToReview(p.npi) }}
+            disabled={!canAddToReview}
+            className={`p-1 rounded ${
+              canAddToReview
+                ? 'hover:bg-gray-700 text-gray-400 hover:text-yellow-400'
+                : 'text-gray-700 cursor-not-allowed'
+            }`}
+            title={canAddToReview ? 'Add to review queue' : `Only Fraud Brain top-${BRAIN_GATE_LIMIT} providers can be added to the review queue — this provider is not currently on the board`}
             aria-label={`Flag provider ${p.npi}`}
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -502,6 +526,8 @@ const LIMIT = 50
 
 export default function ProviderExplorer() {
   const navigate = useNavigate()
+  const { brainRank } = useProviderFlags()
+  const toast = useToast()
   // Stable callback so the memoized ProviderRow doesn't see a new prop each render.
   const goToProvider = useCallback((npi: string) => navigate(`/providers/${npi}`), [navigate])
   const [searchParams, setSearchParams] = useSearchParams()
@@ -723,17 +749,46 @@ export default function ProviderExplorer() {
   }, [])
 
   const handleBulkAddToReview = useCallback(async () => {
-    await Promise.all(
-      Array.from(selectedNpis).map(npi =>
-        mutate<{ ok: boolean }>('POST', '/review/add', { npi, status: 'pending' }).catch(() => {})
+    // Only-Brain-Top-10 rule: filter to providers that are either already
+    // queued (grandfathered — the backend treats these as an update, not a
+    // new add) or currently on the Brain's top-10 board. Everything else is
+    // skipped client-side so we don't fire doomed requests, and the user gets
+    // a clear count of what happened instead of a silent partial no-op.
+    const byNpi = new Map(providers.map(p => [p.npi, p]))
+    const selected = Array.from(selectedNpis)
+    const eligible = selected.filter(npi => {
+      const p = byNpi.get(npi)
+      return !!p?.review_status || isOnBrainBoard(brainRank(npi))
+    })
+    const skipped = selected.length - eligible.length
+
+    const results = await Promise.all(
+      eligible.map(npi =>
+        mutate<{ ok: boolean }>('POST', '/review/add', { npi, status: 'pending' })
+          .then(() => true)
+          .catch(() => false)
       )
     )
+    const added = results.filter(Boolean).length
+    const failed = eligible.length - added
+
+    if (added > 0) toast.success(`Added ${added} to the review queue.`)
+    if (skipped > 0) toast.warning(`Skipped ${skipped} — not on the Fraud Brain top ${BRAIN_GATE_LIMIT}.`)
+    if (failed > 0) toast.error(`${failed} failed to add — try again.`)
+    if (added === 0 && skipped === 0 && failed === 0) toast.info('Nothing selected.')
+
     setSelectedNpis(new Set())
-  }, [selectedNpis])
+  }, [selectedNpis, providers, brainRank, toast])
 
   const handleAddSingleToReview = useCallback(async (npi: string) => {
-    await mutate<{ ok: boolean }>('POST', '/review/add', { npi, status: 'pending' }).catch(() => {})
-  }, [])
+    try {
+      await mutate<{ ok: boolean }>('POST', '/review/add', { npi, status: 'pending' })
+    } catch (e) {
+      // The button is already disabled for ineligible providers; this catches
+      // the race where the Brain re-ranked between page load and the click.
+      toast.error(e instanceof Error ? e.message : `Could not add NPI ${npi} to the review queue.`)
+    }
+  }, [toast])
 
   // ── CSV export ────────────────────────────────────────────────────────────
   const handleExportCSV = () => {

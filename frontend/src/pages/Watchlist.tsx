@@ -166,18 +166,6 @@ export default function Watchlist() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['watchlist'] }),
   })
 
-  const sendToReviewMutation = useMutation({
-    mutationFn: async (entry: WatchlistEntry) => {
-      await api.addToReview({ npi: entry.npi, notes: entry.notes || undefined })
-      await api.updateWatchlist(entry.npi, { reviewing: true })
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['watchlist'] })
-      queryClient.invalidateQueries({ queryKey: ['review-queue'] })
-      queryClient.invalidateQueries({ queryKey: ['review-counts'] })
-    },
-  })
-
   const items = data?.items ?? []
   const filtered = items.filter(item => {
     if (filter === 'active') return item.active
@@ -325,21 +313,12 @@ export default function Watchlist() {
                     {new Date(entry.added_date * 1000).toLocaleDateString()}
                   </td>
                   <td className="px-4 py-3 text-right">
+                    {/* Watchlist is pure tracking now — no "add to review queue"
+                        action here. Promotion into the queue happens from
+                        Provider Explorer (gated to the Fraud Brain top-10);
+                        entry.reviewing above still reflects legacy/other-path
+                        state as a read-only badge. */}
                     <div className="flex items-center justify-end gap-1">
-                      {entry.reviewing ? (
-                        <span className="px-2 py-1 text-xs text-purple-400 bg-purple-900/30 rounded" title="Already in review queue">
-                          In Review
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => sendToReviewMutation.mutate(entry)}
-                          disabled={sendToReviewMutation.isPending}
-                          className="px-2 py-1 text-xs text-purple-400 hover:text-purple-300 bg-gray-800 hover:bg-purple-900/30 rounded transition-colors disabled:opacity-50"
-                          title="Add to review queue"
-                        >
-                          Review
-                        </button>
-                      )}
                       <button
                         onClick={() => toggleActiveMutation.mutate({ npi: entry.npi, active: !entry.active })}
                         className="px-2 py-1 text-xs text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 rounded transition-colors"

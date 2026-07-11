@@ -25,8 +25,22 @@ from core.review_store import (
     STALE_CASE_DAYS,
 )
 from core.store import get_prescanned
-from core.config import settings
 from routes.auth import require_user
+
+# Only-Brain-Top-10 rule: new additions to the review queue must be a provider
+# CURRENTLY on the Fraud Brain's visible top-10 board (the exact cards shown on
+# /fraud-brain — api.fraudBrainTop(10) — not the wider top-500 badge cutoff).
+# Applies to NEW additions only; existing queue items are grandfathered and
+# this never removes or re-checks them. Ranks shift as the Brain recomputes, so
+# this is checked live at write time, not cached.
+BRAIN_GATE_LIMIT = 10
+
+
+async def _brain_top_npis(limit: int = BRAIN_GATE_LIMIT) -> set[str]:
+    import asyncio
+    from services.fraud_brain import get_top_frauds
+    result = await asyncio.to_thread(get_top_frauds, limit, False)
+    return {p["npi"] for p in result.get("top", [])}
 
 router = APIRouter(prefix="/api/review", tags=["review"], dependencies=[Depends(require_user)])
 
@@ -108,11 +122,19 @@ async def stale_cases(days: int = STALE_CASE_DAYS):
 
 @router.post("/backfill")
 async def backfill_review_queue():
-    """Populate review queue from existing prescan cache. Safe to call multiple times — no duplicates added."""
+    """Populate review queue from the current Fraud Brain top-10. Safe to call
+    multiple times — no duplicates added.
+
+    Scoped to the Brain top-10 (not the old RISK_THRESHOLD>10 population) to
+    honor the Only-Brain-Top-10 rule even from this bulk path. Note: this
+    endpoint isn't currently wired to any frontend button — it exists for
+    admin/API use."""
+    top_npis = await _brain_top_npis()
     prescanned = get_prescanned()
-    flagged = [p for p in prescanned if p.get("risk_score", 0) > settings.RISK_THRESHOLD]
+    flagged = [p for p in prescanned if p.get("npi") in top_npis]
     added = add_to_review_queue(flagged)
-    return {"scanned": len(prescanned), "flagged": len(flagged), "added": added, "threshold": settings.RISK_THRESHOLD}
+    return {"scanned": len(prescanned), "flagged": len(flagged), "added": added,
+            "brain_gate_limit": BRAIN_GATE_LIMIT}
 
 
 @router.get("/export/csv")
@@ -175,6 +197,17 @@ async def add_single_review(body: AddReviewBody, user: dict = Depends(require_us
                 return {"item": enriched[0], "already_existed": True}
         enriched = _enrich_items([existing])
         return {"item": enriched[0], "already_existed": True}
+
+    # Only-Brain-Top-10 rule (new additions only — existing items above already
+    # returned). Checked live so a rank that shifted since the page loaded is
+    # caught here, not just in the (best-effort) frontend disabled state.
+    top_npis = await _brain_top_npis()
+    if body.npi not in top_npis:
+        raise HTTPException(
+            400,
+            f"NPI {body.npi} is not currently in the Fraud Brain top {BRAIN_GATE_LIMIT}. "
+            "Only providers on the Brain board can be added to the Review Queue.",
+        )
 
     # Build a provider dict for add_to_review_queue
     provider_data: dict = {"npi": body.npi, "risk_score": 0, "flags": [], "total_paid": 0, "total_claims": 0,
