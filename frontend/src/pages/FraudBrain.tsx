@@ -235,7 +235,10 @@ export default function FraudBrain() {
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['fraud-brain'],
     queryFn: () => api.fraudBrainTop(10),
-    staleTime: 5 * 60_000,
+    // Kept short + refetch-on-focus so this board and the Review Queue's Brain
+    // scores (via useProviderFlags) converge on the same snapshot.
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
   })
 
   // The reveal: cards seat in sequence, score bars sweep up the threat ramp,

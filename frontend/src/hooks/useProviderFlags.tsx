@@ -29,7 +29,11 @@ export function ProviderFlagsProvider({ children }: { children: ReactNode }) {
     // pages like Claim Patterns / Billing Codes surface providers well past the
     // top-100, and the BRAIN chip should appear for any provider on the board.
     queryFn: () => api.fraudBrainMembership(500),
-    staleTime: 5 * 60_000,
+    // Short stale window + refetch on focus so the Review Queue's Brain scores
+    // stay in lockstep with the Fraud Brain page's board — otherwise a snapshot
+    // cached right after a backend deploy (cold start) lingers and disagrees.
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
     retry: 1,
   })
   const { data: tips } = useQuery({
