@@ -91,6 +91,45 @@ def _enrich_items(items: list[dict]) -> list[dict]:
     return enriched
 
 
+async def _brain_queue_npis() -> set[str]:
+    """The set of NPIs that should be VISIBLE in the Review Queue: the Fraud
+    Brain's current top-N board, plus any case a human has already actioned
+    (queue_status advanced past 'open'). Also FORCES the brain providers in —
+    any board NPI missing from the store is added (auto-promotion, actor
+    'system:brain-sync'). Providers not in this set stay in the DB (nothing is
+    deleted) but are filtered out of the queue view. The Brain is the boss: the
+    queue mirrors its board rather than a bulk backfill."""
+    from core.review_store import get_review_item
+    from core.store import get_provider_by_npi
+
+    top = await _brain_top_npis()
+    # Guard against non-provider artifacts (e.g. an all-zeros NPI on the board).
+    top = {n for n in top if n and len(n) == 10 and n.isdigit() and n != "0000000000"}
+
+    missing = [n for n in top if not get_review_item(n)]
+    if missing:
+        provs = []
+        for n in missing:
+            p = get_provider_by_npi(n) or {}
+            provs.append({
+                "npi": n,
+                "risk_score": p.get("risk_score", 0),
+                "flags": p.get("flags", []),
+                "total_paid": p.get("total_paid", 0),
+                "total_claims": p.get("total_claims", 0),
+                "_promoted_by": "system:brain-sync",
+            })
+        add_to_review_queue(provs)
+
+    # Keep any case a human has moved off the default 'open' state visible even
+    # if it later drops off the board, so in-progress work is never hidden.
+    actioned = {
+        i["npi"] for i in get_review_queue()
+        if (i.get("queue_status") or "open") != "open"
+    }
+    return top | actioned
+
+
 @router.get("")
 async def list_review_queue(
     status: Optional[str] = None,
@@ -98,8 +137,13 @@ async def list_review_queue(
     limit: int = 50,
 ):
     from core.oig_store import is_excluded
-    # OIG-excluded providers live on the Excluded page, not the worklist
-    all_items = [i for i in get_review_queue(status_filter=status) if not is_excluded(i.get("npi", ""))[0]]
+    visible = await _brain_queue_npis()
+    # Queue view = Brain board (+ actioned cases). Off-board items remain in the
+    # DB but are hidden here. OIG-excluded providers live on the Excluded page.
+    all_items = [
+        i for i in get_review_queue(status_filter=status)
+        if i.get("npi") in visible and not is_excluded(i.get("npi", ""))[0]
+    ]
     enriched  = _enrich_items(all_items)
     total     = len(enriched)
     start     = (page - 1) * limit
@@ -109,14 +153,25 @@ async def list_review_queue(
 
 @router.get("/counts")
 async def review_counts():
-    return get_review_counts()
+    # Counts reflect the VISIBLE queue (Brain board + actioned), not the full
+    # store of grandfathered-but-hidden items.
+    visible = await _brain_queue_npis()
+    items = [i for i in get_review_queue() if i.get("npi") in visible]
+    counts: dict = {}
+    for i in items:
+        s = i.get("status", "pending")
+        counts[s] = counts.get(s, 0) + 1
+    counts["total"] = len(items)
+    counts["stale"] = sum(1 for i in items if is_stale_case(i))
+    return counts
 
 
 @router.get("/stale")
 async def stale_cases(days: int = STALE_CASE_DAYS):
     """Active cases (open / under_review) untouched for >= `days` — the stale-case
-    alert. Oldest first, enriched with name/state and days-since-activity."""
-    items = _enrich_items(get_stale_cases(days))
+    alert. Scoped to the visible queue (Brain board + actioned)."""
+    visible = await _brain_queue_npis()
+    items = _enrich_items([i for i in get_stale_cases(days) if i.get("npi") in visible])
     return {"threshold_days": days, "count": len(items), "items": items}
 
 

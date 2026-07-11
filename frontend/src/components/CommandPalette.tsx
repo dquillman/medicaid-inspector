@@ -14,7 +14,6 @@ const ALL_NAV: NavItem[] = [
   { to: '/anomalies',  label: 'Anomalies',         category: 'Main' },
   { to: '/network',    label: 'Network',           category: 'Main' },
   { to: '/review',     label: 'Review Queue',      category: 'Main' },
-  { to: '/watchlist',  label: 'Watchlist',         category: 'Main' },
   { to: '/geographic', label: 'Geographic',        category: 'Main' },
   { to: '/rings',              label: 'Fraud Rings',       category: 'Analytics' },
   { to: '/hotspots',           label: 'Fraud Hotspots',    category: 'Analytics' },

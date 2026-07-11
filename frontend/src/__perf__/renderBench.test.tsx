@@ -207,7 +207,6 @@ const PAGES: Array<[string, () => Promise<{ default: any }>]> = [
   ['TrendDivergence', () => import('../pages/TrendDivergence')],
   ['UserManagement', () => import('../pages/UserManagement')],
   ['UtilizationAnalysis', () => import('../pages/UtilizationAnalysis')],
-  ['Watchlist', () => import('../pages/Watchlist')],
 ]
 
 describe('every page render budget', () => {

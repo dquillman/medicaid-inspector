@@ -6,7 +6,6 @@ const LABELS: Record<string, string> = {
   'anomalies': 'Anomalies',
   'network': 'Network',
   'review': 'Review Queue',
-  'watchlist': 'Watchlist',
   'geographic': 'Geographic',
   'rings': 'Fraud Rings',
   'hotspots': 'Fraud Hotspots',

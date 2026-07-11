@@ -31,7 +31,6 @@ const BeneficiaryDensity = lazy(() => import('./pages/BeneficiaryDensity'))
 const UtilizationAnalysis = lazy(() => import('./pages/UtilizationAnalysis'))
 const PopulationRatio = lazy(() => import('./pages/PopulationRatio'))
 const TrendDivergence = lazy(() => import('./pages/TrendDivergence'))
-const Watchlist = lazy(() => import('./pages/Watchlist'))
 const FraudRings = lazy(() => import('./pages/FraudRings'))
 const FraudBrain = lazy(() => import('./pages/FraudBrain'))
 const Excluded = lazy(() => import('./pages/Excluded'))
@@ -196,7 +195,6 @@ function AnimatedRoutes() {
           <Route path="/anomalies"         element={<AnomalyDashboard />} />
           <Route path="/network"           element={<NetworkGraph />} />
           <Route path="/review"            element={<ReviewQueue />} />
-          <Route path="/watchlist"         element={<Watchlist />} />
           <Route path="/geographic"        element={<GeographicAnalysis />} />
           <Route path="/admin/scan"        element={<AdminScan />} />
           <Route path="/alerts"            element={<AlertRules />} />
