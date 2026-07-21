@@ -294,28 +294,39 @@ def cmd_deploy_frontend(args: argparse.Namespace) -> int:
     if rc != 0:
         return _err(f"firebase deploy failed with exit code {rc}")
 
-    # Verify deployed bundle
-    hosting_url = os.environ.get("MFI_HOSTING_URL", "https://medicaid-inspector.web.app")
-    _log(f"verifying deployed bundle at {hosting_url} …")
-    status, body = _http_get(hosting_url + "/", timeout=10.0)
-    if status != 200:
-        _log(f"WARNING: hosting returned status {status} (body: {body[:120]})")
-        return 0  # Deploy itself succeeded; verification couldn't run
-    # Extract bundle asset hash from index.html
+    # Verify deployed bundle. Firebase/CDN propagation lags the deploy by a few
+    # seconds, so an instant single check gives false "not found" negatives.
+    # Retry, RE-FETCHING index.html each attempt (its bundle hash changes as the
+    # new version propagates) with a cache-busting query so we don't read a
+    # stale edge-cached copy. Only fail after all attempts miss.
     import re
-    m = re.search(r'assets/(index-[A-Za-z0-9_-]+\.js)', body)
-    if not m:
-        _log("WARNING: could not locate bundle asset name in index.html")
-        return 0
-    asset_path = m.group(0)
-    status2, bundle = _http_get(f"{hosting_url}/{asset_path}", timeout=15.0)
-    if status2 != 200:
-        _log(f"WARNING: bundle fetch returned {status2}")
-        return 0
-    if declared_version and f'"{declared_version}"' in bundle:
-        _log(f"verified: bundle contains v{declared_version}")
-        return 0
-    _log(f"WARNING: declared version {declared_version!r} not found in deployed bundle")
+    hosting_url = os.environ.get("MFI_HOSTING_URL", "https://medicaid-inspector.web.app")
+    attempts, backoff = 5, 6.0
+    _log(f"verifying deployed bundle at {hosting_url} … (up to {attempts} attempts)")
+    last_reason = "verification did not run"
+    for attempt in range(1, attempts + 1):
+        cb = f"?_cb={int(time.time())}"  # cache-bust CDN edges
+        status, body = _http_get(hosting_url + "/" + cb, timeout=10.0)
+        if status != 200:
+            last_reason = f"hosting returned status {status}"
+        else:
+            m = re.search(r'assets/(index-[A-Za-z0-9_-]+\.js)', body)
+            if not m:
+                last_reason = "could not locate bundle asset name in index.html"
+            else:
+                asset_path = m.group(0)
+                status2, bundle = _http_get(f"{hosting_url}/{asset_path}{cb}", timeout=15.0)
+                if status2 != 200:
+                    last_reason = f"bundle fetch returned {status2}"
+                elif declared_version and f'"{declared_version}"' in bundle:
+                    _log(f"verified: bundle contains v{declared_version} (attempt {attempt})")
+                    return 0
+                else:
+                    last_reason = f"declared version {declared_version!r} not found in deployed bundle"
+        if attempt < attempts:
+            _log(f"  not confirmed yet ({last_reason}); retrying in {backoff:.0f}s…")
+            time.sleep(backoff)
+    _log(f"WARNING: {last_reason} after {attempts} attempts")
     return 1
 
 
