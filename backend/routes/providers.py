@@ -1135,6 +1135,21 @@ async def get_provider_detail(npi: str):
         # Use cached NPPES if already enriched, else fetch now
         if cached.get("nppes"):
             nppes_data = cached["nppes"]
+            # Slim-cache rows are frequently nameless (they store an nppes dict
+            # with address/taxonomy but no `name`), which makes the provider page
+            # header fall back to "NPI <number>". Backfill identity from live
+            # NPPES (cached, so cheap) so every provider shows a real name.
+            if not (nppes_data.get("name") or "").strip():
+                try:
+                    fresh = await get_provider(npi)
+                    if fresh:
+                        # Fill gaps from NPPES; keep any non-empty cached values.
+                        nppes_data = {
+                            **fresh,
+                            **{k: v for k, v in nppes_data.items() if v},
+                        }
+                except Exception:
+                    pass
         else:
             nppes_data = await get_provider(npi)
 
