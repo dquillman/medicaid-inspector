@@ -1,15 +1,18 @@
 """
 MCP (Model Context Protocol) stdio server for Medicaid Inspector (MFI).
 
-Exposes 11 tools over the existing FastAPI route/service functions so an
+Exposes 13 tools over the existing FastAPI route/service functions so an
 external app (HAL) can query provider risk, the Fraud Brain ranking,
 billing-code reference data, provider networks, OIG/exclusion status, billing
 timelines, and drafted OIG-tip narratives without going through HTTP. Read-only
 except: log_bug (records a bug to the durable, GCS-synced hal_bugs.json store
-plus the repo MFIBugs.md when local), list_bugs (reads that store back), and
-update_queue_status (records a case-ledger status change for an NPI already in
-the review queue, REFUSING the human-gated tip_filed/confirmed transitions —
-those must come from a human via the UI, never from this AI-side tool).
+plus the repo MFIBugs.md when local), list_bugs (reads that store back),
+update_bug_status (moves a logged bug through its lifecycle; closing statuses
+require a recorded reason), add_case_note (appends an AI-authored note to a
+case's append-only log), and update_queue_status (records a case-ledger status
+change for an NPI already in the review queue, REFUSING the human-gated
+tip_filed/confirmed transitions — those must come from a human via the UI,
+never from this AI-side tool).
 
 Run as a subprocess, stdio transport:
     G:/Python311/python.exe G:/Users/daveq/medicaid inspector/backend/mcp_server.py
@@ -510,6 +513,28 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="update_bug_status",
+        description=(
+            "Change the status of a bug previously recorded via log_bug (OPEN / "
+            "IN_PROGRESS / FIXED / WONT_FIX / DUPLICATE). Identify the bug by its "
+            "title (exact match preferred; a unique substring also works). Closing "
+            "transitions (FIXED / WONT_FIX / DUPLICATE) REQUIRE a non-empty 'reason' "
+            "that says what actually happened (e.g. 'fixed in v3.14.0, commit "
+            "d0a0f57') — never close a bug without evidence the fix shipped or a "
+            "deliberate decision from Dave. Every change is appended to the bug's "
+            "permanent history with actor and timestamp; nothing is deleted."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Title of the bug as recorded (or a unique substring)"},
+                "new_status": {"type": "string", "enum": ["OPEN", "IN_PROGRESS", "FIXED", "WONT_FIX", "DUPLICATE"]},
+                "reason": {"type": "string", "description": "Why — REQUIRED for FIXED / WONT_FIX / DUPLICATE"},
+            },
+            "required": ["title", "new_status"],
+        },
+    ),
+    Tool(
         name="add_case_note",
         description=(
             "Append a note to the case-note log of an NPI ALREADY in the review queue. "
@@ -703,6 +728,83 @@ async def _tool_update_queue_status(args: dict) -> dict:
     }
 
 
+# ── Tool 12: update_bug_status ────────────────────────────────────────────────
+
+_VALID_BUG_STATUSES = {"OPEN", "IN_PROGRESS", "FIXED", "WONT_FIX", "DUPLICATE"}
+_CLOSING_BUG_STATUSES = {"FIXED", "WONT_FIX", "DUPLICATE"}
+
+
+async def _tool_update_bug_status(args: dict) -> dict:
+    """Move a logged bug through its lifecycle. Closing transitions require a
+    recorded reason (the supervision mechanism here — unlike the review queue,
+    bugs have no human UI, so a hard human-gate would dead-end the store; the
+    mandatory evidence trail is the compromise). History is append-only."""
+    from datetime import datetime, timezone
+    from core.text_sanitize import to_ascii
+    from core.safe_io import atomic_write_json
+
+    title_q = to_ascii((args.get("title") or "").strip())
+    new_status = (args.get("new_status") or "").strip().upper()
+    reason = to_ascii((args.get("reason") or "").strip())
+    if not title_q:
+        raise ValueError("update_bug_status: 'title' is required")
+    if new_status not in _VALID_BUG_STATUSES:
+        raise ValueError(
+            f"Invalid status {new_status!r}. Must be one of {sorted(_VALID_BUG_STATUSES)}")
+    if new_status in _CLOSING_BUG_STATUSES and not reason:
+        raise ValueError(
+            f"Closing a bug as {new_status} requires a 'reason' recording what "
+            "actually happened (e.g. 'fixed in v3.14.0'). Refusing to close "
+            "without one.")
+
+    store = _load_bug_store()
+    ql = title_q.lower()
+    exact = [b for b in store if (b.get("title") or "").lower() == ql]
+    matches = exact or [b for b in store if ql in (b.get("title") or "").lower()]
+    if not matches:
+        raise ValueError(f"No logged bug matches title {title_q!r}. Use list_bugs to see titles.")
+    if len(matches) > 1 and not exact:
+        titles = ", ".join(repr(b.get("title", "?")) for b in matches[:5])
+        raise ValueError(
+            f"{len(matches)} bugs match {title_q!r} ({titles}…). Be more specific.")
+    bug = matches[-1]  # newest among exact-title duplicates
+
+    previous = bug.get("status", "OPEN")
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    bug["status"] = new_status
+    bug.setdefault("history", []).append({
+        "from": previous, "to": new_status, "reason": reason,
+        "actor": _MCP_CLIENT_ID, "actor_type": "ai", "at": ts,
+    })
+    atomic_write_json(_BUG_STORE_PATH, store)
+    try:
+        from core.gcs_sync import upload_file
+        upload_file("hal_bugs.json")
+    except Exception:
+        pass  # GCS unavailable locally — the local file is still durable
+
+    # Append-only status line in the human-readable MD mirror (local checkout).
+    try:
+        if _BUGLOG_MD_PATH.exists():
+            with _BUGLOG_MD_PATH.open("a", encoding="utf-8") as f:
+                line = f"\n> Status: \"{bug.get('title', '?')}\" {previous} -> {new_status}"
+                if reason:
+                    line += f" — {reason}"
+                f.write(line + f" ({ts}, via HAL)\n")
+    except OSError:
+        pass  # read-only repo root (Cloud Run) — durable store has the history
+
+    _log_phi("write", "system", "hal_bugs.json", tool="update_bug_status",
+             title=bug.get("title", ""), new_status=new_status)
+    return {
+        "title": bug.get("title", ""),
+        "previous_status": previous,
+        "status": new_status,
+        "reason": reason,
+        "actor_type": "ai",
+    }
+
+
 # ── Tool 11: add_case_note ────────────────────────────────────────────────────
 
 async def _tool_add_case_note(args: dict) -> dict:
@@ -745,6 +847,7 @@ _HANDLERS = {
     "list_bugs": _tool_list_bugs,
     "update_queue_status": _tool_update_queue_status,
     "add_case_note": _tool_add_case_note,
+    "update_bug_status": _tool_update_bug_status,
 }
 
 
