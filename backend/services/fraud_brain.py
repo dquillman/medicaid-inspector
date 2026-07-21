@@ -28,6 +28,38 @@ log = logging.getLogger(__name__)
 
 CACHE_TTL_SEC = 15 * 60
 
+# ── Data-recency awareness ────────────────────────────────────────────────────
+# Recency is the fastest proxy for "is this outlier still happening" — a
+# provider whose last claim was years ago is a recovery lead, not an active
+# scheme. It is surfaced as SEPARATE, transparent fields (last_active_month /
+# data_age_months / recency badge) and NEVER folded into brain_score: the
+# fraud-signal score stays auditable and unchanged.
+#
+# The fresh/aging/stale badge is relative to the NEWEST claim month on the
+# board (dataset max), not the wall clock — a T-MSIS extract always trails
+# today by months, and calendar-relative thresholds would mark the entire
+# dataset stale. data_age_months IS calendar-relative (months since today) so
+# callers still get the absolute number.
+RECENCY_FRESH_MONTHS = 6    # within 6 months of the dataset's newest claim
+RECENCY_AGING_MONTHS = 24   # within 24 months; older than that = stale
+
+
+def _ym_index(ym: str | None) -> int | None:
+    """'YYYY-MM' -> absolute month index (year*12+month), else None."""
+    s = str(ym or "").strip()
+    if len(s) < 7 or not (s[:4].isdigit() and s[5:7].isdigit()):
+        return None
+    return int(s[:4]) * 12 + int(s[5:7])
+
+
+def months_since(ym: str | None, now: float | None = None) -> int | None:
+    """Whole months between 'YYYY-MM' and today (calendar). None if unparseable."""
+    idx = _ym_index(ym)
+    if idx is None:
+        return None
+    t = time.localtime(now if now is not None else time.time())
+    return max(0, (t.tm_year * 12 + t.tm_mon) - idx)
+
 # Component weights — must sum to 1.0 (boosts apply on top, capped at 100)
 W_RULE_SIGNALS = 0.35   # composite risk_score from the 18 signals
 W_ML_ANOMALY   = 0.25   # Isolation Forest score
@@ -489,6 +521,13 @@ def compute_top_frauds(limit: int = 10) -> dict:
             "risk_score": round(risk, 1),
             "flag_count": flag_count,
             "oig_excluded": oig,  # always False here (OIG providers filtered above)
+            # Data recency — from the scan-time SQL aggregate on the cached row.
+            # Deliberately NOT a scoring input (see module note): brain_score is
+            # unchanged; these ride alongside so triage can see at a glance
+            # whether the outlier is still active without a per-NPI timeline pull.
+            "first_active_month": p.get("first_month") or None,
+            "last_active_month": p.get("last_month") or None,
+            "data_age_months": months_since(p.get("last_month")),
             "deactivated_npi": bool(deact_date),
             "size_dampened": dampened,
             "corroborating_sources": len(corr_sources),
@@ -497,6 +536,23 @@ def compute_top_frauds(limit: int = 10) -> dict:
         })
 
     scored.sort(key=lambda x: (-x["brain_score"], -x["total_paid"]))
+
+    # Recency badge, relative to the newest claim month on the board (dataset
+    # max) — see the module note on why not wall-clock. Pure annotation; never
+    # affects brain_score or ordering.
+    dataset_max = max(
+        (i for i in (_ym_index(e["last_active_month"]) for e in scored) if i is not None),
+        default=None,
+    )
+    for e in scored:
+        idx = _ym_index(e["last_active_month"])
+        if dataset_max is None or idx is None:
+            e["recency"] = None  # no claim months to judge against
+        else:
+            behind = dataset_max - idx
+            e["recency"] = ("fresh" if behind <= RECENCY_FRESH_MONTHS
+                            else "aging" if behind <= RECENCY_AGING_MONTHS
+                            else "stale")
 
     # ── One-way read: attach case-ledger status as a READ-ONLY display badge ───
     # The candidate engine reads queue_status here purely to annotate results

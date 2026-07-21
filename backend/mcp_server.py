@@ -156,17 +156,20 @@ async def _tool_top_risky_providers(args: dict) -> dict:
     limit = max(1, min(limit, 200))
     state = (args.get("state") or "").strip().upper() or None
     signal = (args.get("signal") or "").strip() or None
+    max_age = args.get("max_data_age_months")
+    max_age = max(0, int(max_age)) if max_age is not None else None
     force_refresh = bool(args.get("force_refresh", False))
 
-    # No state/signal filter support in get_top_frauds itself — over-pull, then
-    # filter/truncate here in Python (per spec: 5x limit, 100 floor).
-    pull_limit = max(limit * 5, 100) if (state or signal) else limit
+    # No state/signal/recency filter support in get_top_frauds itself — over-
+    # pull, then filter/truncate here in Python (per spec: 5x limit, 100 floor).
+    pull_limit = max(limit * 5, 100) if (state or signal or max_age is not None) else limit
 
     result = await asyncio.to_thread(get_top_frauds, pull_limit, force_refresh)
 
     _log_phi(
         "read", "provider", "batch:top_frauds",
         tool="top_risky_providers", limit=limit, state=state, signal=signal,
+        max_data_age_months=max_age,
     )
 
     top = result.get("top", [])
@@ -196,6 +199,12 @@ async def _tool_top_risky_providers(args: dict) -> dict:
                 "call get_provider with that NPI and signal=<key> instead."
             )
         top = [e for e in top if e.get("oig_excluded")]
+    if max_age is not None:
+        # "Restrict to recent activity" — a provider with no parseable claim
+        # months can't demonstrate recency, so it's excluded (conservative).
+        top = [e for e in top
+               if e.get("data_age_months") is not None
+               and e["data_age_months"] <= max_age]
 
     top = top[:limit]
 
@@ -222,7 +231,9 @@ async def _tool_top_risky_providers(args: dict) -> dict:
 
     await asyncio.gather(*(_fill(e) for e in top), return_exceptions=True)
 
-    return {**result, "top": top, "filters": {"state": state, "signal": signal}}
+    return {**result, "top": top,
+            "filters": {"state": state, "signal": signal,
+                        "max_data_age_months": max_age}}
 
 
 # ── Tool 3: search_billing_code ───────────────────────────────────────────────
@@ -378,13 +389,22 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="top_risky_providers",
-        description='Get the ranked list of highest-risk providers (the "Fraud Brain"), optionally filtered by state or fraud signal.',
+        description=(
+            'Get the ranked list of highest-risk providers (the "Fraud Brain"), optionally '
+            "filtered by state or fraud signal. Every row carries data-recency fields — "
+            "last_active_month / first_active_month (YYYY-MM), data_age_months (whole months "
+            "since the last claim, calendar-relative), and a recency badge (fresh/aging/stale, "
+            "relative to the newest claim month in the dataset) — so you can judge whether an "
+            "outlier is still active without pulling provider_timeline per NPI. Recency never "
+            "alters the brain score; it is a separate, transparent dimension."
+        ),
         inputSchema={
             "type": "object",
             "properties": {
                 "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 200, "description": "Number of results to return after filtering"},
                 "state": {"type": "string", "description": "Optional 2-letter state code to filter results (e.g. 'NY')"},
                 "signal": {"type": "string", "description": "Optional: only 'oig_excluded' is supported (filters to OIG-excluded providers). Any other value raises an error — for evidence on other fraud signals, call get_provider with signal=<key> instead."},
+                "max_data_age_months": {"type": "integer", "minimum": 0, "description": "Optional: only return providers whose last claim is at most this many months old (calendar-relative). Providers with no parseable claim months are excluded when this filter is set."},
                 "force_refresh": {"type": "boolean", "default": False, "description": "Bypass the 15-minute cache and recompute"},
             },
             "required": [],
