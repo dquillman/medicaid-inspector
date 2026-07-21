@@ -19,6 +19,9 @@ type Msg = {
   actions?: HalAction[]
   providers?: HalProvider[]
   error?: boolean
+  // External link rendered under the message text (e.g. the YouTube tab HAL
+  // just opened — kept clickable in case the popup was blocked or closed).
+  href?: { url: string; label: string }
 }
 
 // Render assistant text, turning any known provider name into a link to its
@@ -126,10 +129,37 @@ function halFindRoute(text: string): { path: string; label: string } | null {
   return hit ? { path: hit.path, label: hit.label } : null
 }
 
+// DJ mode: parse a play-music command ("play music", "play some 70s music",
+// "put on 80s tunes") and resolve it to a YouTube target. Client-side for the
+// same reason as halFindRoute — the backend can't open a browser tab. The
+// default (no decade/genre given) is a verified 70s greatest-hits compilation
+// with YouTube's radio list chained after it so the music keeps going; any
+// explicit qualifier falls back to a YouTube search for that era/genre.
+const MUSIC_70S_URL =
+  'https://www.youtube.com/watch?v=WanZkMp31xw&list=RDWanZkMp31xw&start_radio=1'
+const MUSIC_DECADES: Record<string, string> = {
+  fifties: '50s', sixties: '60s', seventies: '70s', eighties: '80s', nineties: '90s',
+}
+function halFindMusic(text: string): { url: string; label: string } | null {
+  const t = text.toLowerCase().trim().replace(/[.!?]+$/, '')
+  const m = t.match(
+    /^(?:(?:hal|jarvis|assistant)[,:\s]+|please\s+)*(?:play|put on|spin up|spin)\s+(?:me\s+)?(?:some\s+|a little\s+|the\s+)?(.*?)\s*(?:music|tunes|songs|hits)(?:\s+please)?$/,
+  )
+  if (!m) return null
+  let q = (m[1] || '').replace(/\s+/g, ' ').trim()
+  q = MUSIC_DECADES[q] || q
+  if (!q || q === '70s') return { url: MUSIC_70S_URL, label: '70s greatest hits' }
+  return {
+    url: `https://www.youtube.com/results?search_query=${encodeURIComponent(`${q} greatest hits playlist`)}`,
+    label: `${q} music`,
+  }
+}
+
 const SUGGESTIONS = [
   'Who are the 5 riskiest providers right now, and why?',
   'What CPT code is hemodialysis?',
   'Explain the OIG-exclusion signal.',
+  'Play some 70s music.',
 ]
 
 const VOICE_KEY = 'mfi-hal-voice' // persisted VOICE ON/OFF preference
@@ -401,6 +431,31 @@ export default function HalPanel({
         setMessages([...next, { role: 'assistant', content: line }])
         speak(line)
         navigate(route.path)
+        return
+      }
+      // DJ mode: "play music" (default: 70s greatest hits), "play 80s music",
+      // etc. Opens YouTube in a new tab. Must run before any await so the
+      // window.open still carries the user gesture (popup blockers). Voice-
+      // initiated sends may lack that gesture — the chat link is the fallback.
+      const music = halFindMusic(trimmed)
+      if (music) {
+        const who = FACES[faceRef.current].name
+        const line =
+          who === 'J.A.R.V.I.S.'
+            ? `With pleasure, sir — ${music.label}, on YouTube.`
+            : who === 'HAL 9000'
+              ? `Certainly, Dave. ${music.label}. I know how much you enjoy this era.`
+              : `Playing ${music.label} on YouTube.`
+        const win = window.open(music.url, '_blank', 'noopener')
+        setMessages([
+          ...next,
+          {
+            role: 'assistant',
+            content: win ? line : `${line} Your browser blocked the new tab — use the link below.`,
+            href: { url: music.url, label: `▶ ${music.label} on YouTube` },
+          },
+        ])
+        speak(line)
         return
       }
       setBusy(true)
@@ -775,6 +830,16 @@ export default function HalPanel({
                         <LinkifiedText text={m.content} providers={m.providers} />
                       ) : (
                         <p className="whitespace-pre-wrap leading-relaxed">{m.content}</p>
+                      )}
+                      {m.href && (
+                        <a
+                          href={m.href.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-1.5 inline-block rounded border border-hairline bg-surface-0/60 px-2 py-1 text-xs font-medium text-brand-400 hover:text-brand-300 hover:border-brand-400/40 transition-colors"
+                        >
+                          {m.href.label}
+                        </a>
                       )}
                     </div>
                     {m.actions && m.actions.length > 0 && (
