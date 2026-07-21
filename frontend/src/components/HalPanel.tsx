@@ -447,6 +447,7 @@ export default function HalPanel({
               ? `Certainly, Dave. ${music.label}. I know how much you enjoy this era.`
               : `Playing ${music.label} on YouTube.`
         const win = window.open(music.url, '_blank', 'noopener')
+        window.focus() // return focus to this tab — the new tab shouldn't steal it
         setMessages([
           ...next,
           {
