@@ -8,6 +8,7 @@ import Reticle from '../components/Reticle'
 import RedactionField from '../components/RedactionField'
 import ProviderFlags from '../components/ProviderFlags'
 import OigTipButton from '../components/OigTipButton'
+import RecencyBadge from '../components/RecencyBadge'
 import { threatColor, threatBand, magnitudeGlyph } from '../lib/threat'
 import { gsap, useGSAP, EASE, DUR, prefersReducedMotion } from '../lib/motion'
 import { queueStatusLabel, QUEUE_STATUS_COLORS } from '../lib/queueStatus'
@@ -166,22 +167,7 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
             )}
             {/* Data-recency badge — annotation only, never a scoring input.
                 Stale = recovery lead (FCA reaches back 6 years), not innocent. */}
-            {p.recency === 'stale' && (
-              <span
-                className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-amber-400 border border-amber-500/50 bg-amber-500/10"
-                title={`Last claim ${p.last_active_month ?? '?'} (${p.data_age_months ?? '?'} months ago) — recovery lead, not an active scheme`}
-              >
-                Stale
-              </span>
-            )}
-            {p.recency === 'aging' && (
-              <span
-                className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-ink-tertiary border border-hairline bg-surface-2"
-                title={`Last claim ${p.last_active_month ?? '?'} (${p.data_age_months ?? '?'} months ago)`}
-              >
-                Aging
-              </span>
-            )}
+            <RecencyBadge recency={p.recency} lastActiveMonth={p.last_active_month} dataAgeMonths={p.data_age_months} />
             <div className="ml-auto">
               <OigTipButton npi={p.npi} providerName={p.provider_name} state={p.state} riskScore={p.brain_score} />
             </div>

@@ -80,17 +80,27 @@ class QueueStatusBody(BaseModel):
 
 
 def _enrich_items(items: list[dict]) -> list[dict]:
-    """Attach provider_name, state, and stale-case flags from prescan cache."""
+    """Attach provider_name, state, data-recency, and stale-case flags from the
+    prescan cache. NOTE two distinct 'stale' notions here, deliberately kept
+    separate: `stale`/`stale_days` = the CASE going untouched (a workflow nudge);
+    `recency` = the DATA age (last claim vs. newest data — is the scheme still
+    active). A fresh case can sit on stale data and vice-versa."""
+    from services.fraud_brain import months_since, recency_badge, dataset_newest_month_index
     by_npi = {p["npi"]: p for p in get_prescanned()}
+    newest = dataset_newest_month_index()  # computed once for the batch
     enriched = []
     for item in items:
         p = by_npi.get(item["npi"], {})
         name  = p.get("provider_name") or (p.get("nppes") or {}).get("name") or ""
         state = p.get("state") or (p.get("nppes") or {}).get("address", {}).get("state") or ""
+        last_month = p.get("last_month")
         enriched.append({
             **item, "provider_name": name, "state": state,
             "stale": is_stale_case(item),
             "stale_days": case_stale_days(item),
+            "last_active_month": last_month or None,
+            "data_age_months": months_since(last_month),
+            "recency": recency_badge(last_month, newest),
         })
     return enriched
 

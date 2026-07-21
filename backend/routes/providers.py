@@ -1175,6 +1175,11 @@ async def get_provider_detail(npi: str):
         if not specialty and nppes_data:
             specialty = (nppes_data.get("taxonomy") or {}).get("description", "")
 
+        # Data recency — same dataset-relative badge as the Fraud Brain board
+        # and Review Queue, so "stale" means one thing everywhere.
+        from services.fraud_brain import months_since, recency_badge
+        last_month = cached.get("last_month")
+
         return {
             **cached,
             "nppes": nppes_data,
@@ -1182,6 +1187,9 @@ async def get_provider_detail(npi: str):
             "signal_results": signal_results,
             "flag_count": flag_count,
             "specialty": specialty,
+            "last_active_month": last_month or None,
+            "data_age_months": months_since(last_month),
+            "recency": recency_badge(last_month),
         }
 
     # Fallback: provider not in cache yet.

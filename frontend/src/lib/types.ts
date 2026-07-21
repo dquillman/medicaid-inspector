@@ -68,6 +68,10 @@ export interface ProviderDetail extends ScoredProvider {
   in_scan_cache?: boolean
   note?: string
   exclusions?: ExclusionSummary
+  // Data recency — annotation only, shared with the Fraud Brain board.
+  last_active_month?: string | null
+  data_age_months?: number | null
+  recency?: 'fresh' | 'aging' | 'stale' | null
 }
 
 export interface TimelineRow {
@@ -181,9 +185,14 @@ export interface ReviewItem {
   // Enriched from prescan cache
   provider_name?: string
   state?: string
-  // Stale-case alert (#6): active case untouched past the threshold.
+  // Stale-case alert (#6): active case untouched past the threshold. NOTE this
+  // is CASE staleness (workflow), distinct from `recency` below (DATA staleness).
   stale?: boolean
   stale_days?: number | null
+  // Data recency — annotation only, shared with the Fraud Brain board.
+  last_active_month?: string | null
+  data_age_months?: number | null
+  recency?: 'fresh' | 'aging' | 'stale' | null
 }
 
 export interface OigStatus {

@@ -60,6 +60,43 @@ def months_since(ym: str | None, now: float | None = None) -> int | None:
     t = time.localtime(now if now is not None else time.time())
     return max(0, (t.tm_year * 12 + t.tm_mon) - idx)
 
+
+_newest_month_cache: dict = {"idx": None, "at": 0.0}
+
+
+def dataset_newest_month_index() -> int | None:
+    """Max claim-month index across the prescan cache — the 'now' the recency
+    badge is measured against (see the module note: dataset-relative, not wall
+    clock). Cached for CACHE_TTL_SEC; only changes on a rescan. So the badge
+    means the same thing on the Fraud Brain board, the Review Queue, and the
+    provider detail page."""
+    now = time.time()
+    if _newest_month_cache["idx"] is not None and (now - _newest_month_cache["at"]) < CACHE_TTL_SEC:
+        return _newest_month_cache["idx"]
+    from core.store import get_prescanned
+    newest = max(
+        (i for i in (_ym_index(p.get("last_month")) for p in get_prescanned()) if i is not None),
+        default=None,
+    )
+    _newest_month_cache["idx"] = newest
+    _newest_month_cache["at"] = now
+    return newest
+
+
+def recency_badge(last_month: str | None, newest_idx: int | None = None) -> str | None:
+    """'fresh' / 'aging' / 'stale' for a last-claim month, relative to the
+    dataset's newest claim month. None if either is unknown. Pass newest_idx
+    to avoid recomputing it per-row in a batch."""
+    if newest_idx is None:
+        newest_idx = dataset_newest_month_index()
+    idx = _ym_index(last_month)
+    if newest_idx is None or idx is None:
+        return None
+    behind = newest_idx - idx
+    return ("fresh" if behind <= RECENCY_FRESH_MONTHS
+            else "aging" if behind <= RECENCY_AGING_MONTHS
+            else "stale")
+
 # Component weights — must sum to 1.0 (boosts apply on top, capped at 100)
 W_RULE_SIGNALS = 0.35   # composite risk_score from the 18 signals
 W_ML_ANOMALY   = 0.25   # Isolation Forest score
@@ -545,14 +582,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
         default=None,
     )
     for e in scored:
-        idx = _ym_index(e["last_active_month"])
-        if dataset_max is None or idx is None:
-            e["recency"] = None  # no claim months to judge against
-        else:
-            behind = dataset_max - idx
-            e["recency"] = ("fresh" if behind <= RECENCY_FRESH_MONTHS
-                            else "aging" if behind <= RECENCY_AGING_MONTHS
-                            else "stale")
+        e["recency"] = recency_badge(e["last_active_month"], dataset_max)
 
     # ── One-way read: attach case-ledger status as a READ-ONLY display badge ───
     # The candidate engine reads queue_status here purely to annotate results

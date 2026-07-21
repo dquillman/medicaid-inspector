@@ -12,6 +12,7 @@ import {
 } from '../components/icons'
 import RiskScoreBadge from '../components/RiskScoreBadge'
 import ProviderFlags from '../components/ProviderFlags'
+import RecencyBadge from '../components/RecencyBadge'
 import SpendingTimeline from '../components/SpendingTimeline'
 import HcpcsBreakdown from '../components/HcpcsBreakdown'
 import DiagnosisMixCard from '../components/DiagnosisMixCard'
@@ -547,11 +548,18 @@ export default function ProviderDetail() {
                 SAM.gov CLEAR
               </span>
             )}
+            <RecencyBadge recency={detail.recency} lastActiveMonth={detail.last_active_month} dataAgeMonths={detail.data_age_months} />
           </div>
           <div className="flex items-center gap-4 mt-2 text-sm text-gray-400 flex-wrap">
             <span className="font-mono-data text-blue-400">{npi}</span>
             {addr.city && <span>{addr.city}, {addr.state} {addr.zip}</span>}
             {tax.description && <span className="text-purple-400">{tax.description}</span>}
+            {detail.last_active_month && (
+              <span title="Most recent claim month in the dataset">
+                Last active <span className="text-gray-300 font-mono-data">{detail.last_active_month}</span>
+                {detail.data_age_months != null && <span className="text-gray-500"> · {detail.data_age_months}mo ago</span>}
+              </span>
+            )}
           </div>
           {nppes.authorized_official?.name && (
             <p className="text-xs text-gray-500 mt-1">

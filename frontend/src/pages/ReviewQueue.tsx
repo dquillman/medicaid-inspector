@@ -11,6 +11,7 @@ import { ArrowDownTrayIcon } from '../components/icons'
 import EmptyState from '../components/EmptyState'
 import QuickTriagePanel from '../components/QuickTriagePanel'
 import ProviderFlags from '../components/ProviderFlags'
+import RecencyBadge from '../components/RecencyBadge'
 import { useProviderFlags } from '../hooks/useProviderFlags'
 
 type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
@@ -407,9 +408,14 @@ function ReviewRow({
                 className="ml-1.5 shrink-0 align-middle text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/40"
                 title={`No case activity for ${item.stale_days ?? '14+'} days — needs a nudge`}
               >
-                STALE {item.stale_days != null ? `${item.stale_days}d` : ''}
+                CASE STALE {item.stale_days != null ? `${item.stale_days}d` : ''}
               </span>
             )}
+            {/* DATA recency (distinct from CASE staleness above): is the scheme
+                still active, or is this a recovery lead? */}
+            <span className="ml-1.5 shrink-0">
+              <RecencyBadge recency={item.recency} lastActiveMonth={item.last_active_month} dataAgeMonths={item.data_age_months} />
+            </span>
           </div>
         </td>
         <td className="px-4 py-3 text-xs text-gray-500">{item.state || '--'}</td>
