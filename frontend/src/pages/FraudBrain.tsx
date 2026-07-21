@@ -164,6 +164,24 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
                 Deactivated NPI
               </span>
             )}
+            {/* Data-recency badge — annotation only, never a scoring input.
+                Stale = recovery lead (FCA reaches back 6 years), not innocent. */}
+            {p.recency === 'stale' && (
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-amber-400 border border-amber-500/50 bg-amber-500/10"
+                title={`Last claim ${p.last_active_month ?? '?'} (${p.data_age_months ?? '?'} months ago) — recovery lead, not an active scheme`}
+              >
+                Stale
+              </span>
+            )}
+            {p.recency === 'aging' && (
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-ink-tertiary border border-hairline bg-surface-2"
+                title={`Last claim ${p.last_active_month ?? '?'} (${p.data_age_months ?? '?'} months ago)`}
+              >
+                Aging
+              </span>
+            )}
             <div className="ml-auto">
               <OigTipButton npi={p.npi} providerName={p.provider_name} state={p.state} riskScore={p.brain_score} />
             </div>
@@ -178,6 +196,7 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
             <Stat label="Total Paid" value={fmt(p.total_paid)} />
             <Stat label="Signals Fired" value={String(p.flag_count)} />
             <Stat label="Corroborating" value={String(p.corroborating_sources)} />
+            {p.last_active_month && <Stat label="Last Active" value={p.last_active_month} />}
           </div>
 
           {/* Component contribution bars */}
@@ -232,6 +251,11 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 export default function FraudBrain() {
   const boardRef = useRef<HTMLDivElement>(null)
+  // Active/All view toggle — a VIEW filter only, defaulting to All. Stale
+  // providers stay on the board (they're recovery leads — FCA reaches back
+  // 6 years; going quiet is itself a bust-out signal) and keep their original
+  // rank numbers; this just hides them when you want active schemes only.
+  const [activeOnly, setActiveOnly] = useState(false)
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['fraud-brain'],
     queryFn: () => api.fraudBrainTop(10),
@@ -240,6 +264,11 @@ export default function FraudBrain() {
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   })
+  // Original board rank rides along so hiding stale rows never promotes #4 to
+  // #1 — rank is identity on this board, not a display index.
+  const ranked = (data?.top ?? []).map((p, i) => ({ p, rank: i + 1 }))
+  const shown = activeOnly ? ranked.filter(({ p }) => p.recency !== 'stale') : ranked
+  const staleCount = ranked.length - ranked.filter(({ p }) => p.recency !== 'stale').length
 
   // The reveal: cards seat in sequence, score bars sweep up the threat ramp,
   // brain scores count up, #1 locks. Re-runs on Recompute (data identity changes).
@@ -276,7 +305,7 @@ export default function FraudBrain() {
         }
       })
     },
-    { dependencies: [data?.top], scope: boardRef },
+    { dependencies: [data?.top, activeOnly], scope: boardRef },
   )
 
   return (
@@ -332,8 +361,38 @@ export default function FraudBrain() {
       )}
       {data?.note && <div className="card"><p className="text-sm text-ink-tertiary">{data.note}</p></div>}
 
+      {/* Active/All view toggle — hides stale (recovery-lead) rows on demand;
+          never removes them from the ranking or renumbers the board. */}
+      {ranked.length > 0 && staleCount > 0 && (
+        <div className="flex items-center gap-2">
+          <div className="inline-flex rounded border border-hairline overflow-hidden">
+            <button
+              onClick={() => setActiveOnly(false)}
+              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider transition-colors ${
+                !activeOnly ? 'bg-surface-2 text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'
+              }`}
+            >
+              All
+            </button>
+            <button
+              onClick={() => setActiveOnly(true)}
+              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider transition-colors border-l border-hairline ${
+                activeOnly ? 'bg-surface-2 text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'
+              }`}
+            >
+              Active only
+            </button>
+          </div>
+          <span className="text-[11px] text-ink-tertiary font-mono">
+            {activeOnly
+              ? `${staleCount} stale (recovery-lead) provider${staleCount === 1 ? '' : 's'} hidden — ranks unchanged`
+              : `${staleCount} of ${ranked.length} stale — last claim >24 months behind the newest data`}
+          </span>
+        </div>
+      )}
+
       <div ref={boardRef} className="space-y-4">
-        {data?.top.map((p, i) => <RankCard key={p.npi} rank={i + 1} p={p} />)}
+        {shown.map(({ p, rank }) => <RankCard key={p.npi} rank={rank} p={p} />)}
       </div>
     </div>
   )

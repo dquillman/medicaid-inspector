@@ -1721,6 +1721,12 @@ export interface FraudBrainProvider {
   risk_score: number
   flag_count: number
   oig_excluded: boolean
+  // Data recency — annotation only, never a scoring input. Badge is relative
+  // to the newest claim month in the dataset (not the wall clock).
+  first_active_month?: string | null
+  last_active_month?: string | null
+  data_age_months?: number | null
+  recency?: 'fresh' | 'aging' | 'stale' | null
   // Read-only case-ledger badge (set by a human in the Review Queue). One-way:
   // the Brain reads it for display, never writes it, and it never affects
   // brain_score. null/undefined => the NPI is not in the review queue.
