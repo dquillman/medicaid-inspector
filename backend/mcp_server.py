@@ -509,6 +509,26 @@ TOOLS: list[Tool] = [
             "required": ["npi", "new_status"],
         },
     ),
+    Tool(
+        name="add_case_note",
+        description=(
+            "Append a note to the case-note log of an NPI ALREADY in the review queue. "
+            "The log is append-only, timestamped, and authored — notes from this tool are "
+            "permanently tagged as AI-authored (actor_type='ai'), distinct from the human "
+            "investigator's notes. Use for on-the-record observations that support the case "
+            "(e.g. 'network trace found no ring', 'E/M upcoding 14x specialty median'), NOT "
+            "for speculation. Notes cannot be edited or deleted (admin redact only, from the "
+            "UI). Does not add NPIs to the queue and never changes status or risk score."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "npi": _NPI_SCHEMA,
+                "text": {"type": "string", "description": "The note text (max 4000 chars). Factual, on-the-record."},
+            },
+            "required": ["npi", "text"],
+        },
+    ),
 ]
 
 
@@ -683,6 +703,35 @@ async def _tool_update_queue_status(args: dict) -> dict:
     }
 
 
+# ── Tool 11: add_case_note ────────────────────────────────────────────────────
+
+async def _tool_add_case_note(args: dict) -> dict:
+    """Append an AI-authored note to a case's append-only log. actor_type='ai'
+    is stamped permanently so the human/AI provenance of every line in the case
+    narrative survives into referral packets. No edit/delete — redaction is an
+    admin-only human action in the UI."""
+    from core.review_store import add_case_note, CaseNoteError
+
+    npi = _require_npi(args["npi"])
+    text = str(args.get("text", ""))
+    try:
+        entry = add_case_note(npi, text, actor=_MCP_CLIENT_ID, actor_type="ai")
+    except CaseNoteError as e:
+        raise ValueError(str(e)) from e
+    if entry is None:
+        raise ValueError(
+            f"NPI {npi} is not in the review queue. Promotion into the queue is a "
+            "separate human action; case notes attach only to promoted cases."
+        )
+    _log_phi("write", "case", npi, tool="add_case_note", note_id=entry["id"])
+    return {
+        "npi": npi,
+        "note_id": entry["id"],
+        "created_at": entry["created_at"],
+        "actor_type": "ai",
+    }
+
+
 _HANDLERS = {
     "get_provider": _tool_get_provider,
     "top_risky_providers": _tool_top_risky_providers,
@@ -695,6 +744,7 @@ _HANDLERS = {
     "log_bug": _tool_log_bug,
     "list_bugs": _tool_list_bugs,
     "update_queue_status": _tool_update_queue_status,
+    "add_case_note": _tool_add_case_note,
 }
 
 

@@ -19,13 +19,17 @@ from core.review_store import (
     get_review_item,
     QueueStatusError,
     VALID_QUEUE_STATUSES,
+    add_case_note,
+    redact_case_note,
+    get_case_notes,
+    CaseNoteError,
     is_stale_case,
     case_stale_days,
     get_stale_cases,
     STALE_CASE_DAYS,
 )
 from core.store import get_prescanned
-from routes.auth import require_user
+from routes.auth import require_user, require_admin
 
 # Only-Brain-Top-10 rule: new additions to the review queue must be a provider
 # CURRENTLY on the Fraud Brain's visible top-10 board (the exact cards shown on
@@ -332,6 +336,53 @@ async def set_case_queue_status(npi: str, body: QueueStatusBody, user: dict = De
         )
     enriched = _enrich_items([updated])
     return {"item": enriched[0]}
+
+
+class CaseNoteBody(BaseModel):
+    text: str
+
+
+@router.get("/{npi}/case-notes")
+async def list_case_notes(npi: str):
+    """The append-only case-note log for an NPI (oldest first)."""
+    notes = get_case_notes(npi)
+    if notes is None:
+        raise HTTPException(404, f"Review item not found: {npi}")
+    return {"npi": npi, "case_notes": notes}
+
+
+@router.post("/{npi}/case-notes")
+async def append_case_note(npi: str, body: CaseNoteBody, user: dict = Depends(require_user)):
+    """Append a note to the case log. Append-only by design — corrections are
+    new notes, and only an admin redact (tombstoned) can remove text. The
+    authenticated user is recorded as the author."""
+    actor = user.get("username") or user.get("email") or "user"
+    try:
+        entry = add_case_note(npi, body.text, actor=actor, actor_type="user")
+    except CaseNoteError as e:
+        raise HTTPException(400, str(e))
+    if entry is None:
+        raise HTTPException(
+            404,
+            f"NPI {npi} is not in the review queue. Promote it first (Add to review) "
+            "— case notes attach to cases a human has taken on.",
+        )
+    return {"npi": npi, "note": entry}
+
+
+@router.post("/{npi}/case-notes/{note_id}/redact")
+async def redact_note(npi: str, note_id: str, user: dict = Depends(require_admin)):
+    """Admin-only: blank a note's text, leaving a tombstone in the log and an
+    audit-trail entry. The escape hatch for wrong-provider pastes — never a
+    silent delete."""
+    actor = user.get("username") or user.get("email") or "admin"
+    try:
+        entry = redact_case_note(npi, note_id, actor=actor)
+    except CaseNoteError as e:
+        raise HTTPException(400, str(e))
+    if entry is None:
+        raise HTTPException(404, f"Review item not found: {npi}")
+    return {"npi": npi, "note": entry}
 
 
 @router.get("/{npi}/history")

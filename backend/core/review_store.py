@@ -277,6 +277,108 @@ def set_queue_status(
     return result
 
 
+# ── case notes (append-only log) ──────────────────────────────────────────────
+# The case-note log is the investigator's on-the-record narrative: append-only,
+# timestamped, authored (human vs AI tagged). It deliberately CANNOT be edited —
+# corrections are new notes. The single editable `notes` string above remains
+# the case SUMMARY (current thinking); this log is the permanent record. The
+# only mutation besides append is an admin redact, which blanks the text but
+# leaves a tombstone + audit entry so the record never silently shrinks.
+
+MAX_CASE_NOTE_CHARS = 4000
+
+
+class CaseNoteError(Exception):
+    """Raised when a case-note operation is rejected (bad input, missing note)."""
+
+
+def add_case_note(npi: str, text: str, *, actor: str, actor_type: str = "user") -> Optional[dict]:
+    """Append a note to an NPI's case log. Returns the new note entry, or None
+    if the NPI isn't in the queue (no auto-create — same rule as set_queue_status)."""
+    if actor_type not in VALID_ACTOR_TYPES:
+        raise CaseNoteError(
+            f"Invalid actor_type {actor_type!r}. Must be one of {sorted(VALID_ACTOR_TYPES)}"
+        )
+    text = (text or "").strip()
+    if not text:
+        raise CaseNoteError("Note text is empty.")
+    if len(text) > MAX_CASE_NOTE_CHARS:
+        raise CaseNoteError(f"Note exceeds {MAX_CASE_NOTE_CHARS} characters.")
+
+    import uuid
+    now = time.time()
+    entry = {
+        "id": uuid.uuid4().hex[:12],
+        "text": text,
+        "actor": actor or "unknown",
+        "actor_type": actor_type,
+        "created_at": now,
+        "redacted": False,
+    }
+    with _review_lock:
+        item = _review_items.get(npi)
+        if item is None:
+            return None
+        item.setdefault("case_notes", []).append(entry)
+        if "audit_trail" not in item:
+            item["audit_trail"] = []
+        item["audit_trail"].append({
+            "action": "case_note_added",
+            "note_id": entry["id"],
+            "actor": entry["actor"],
+            "actor_type": actor_type,
+            "timestamp": now,
+            "note": text[:80],
+        })
+        item["updated_at"] = now
+        result = dict(entry)
+    save_review_to_disk()
+    return result
+
+
+def redact_case_note(npi: str, note_id: str, *, actor: str) -> Optional[dict]:
+    """Admin-only (enforced at the route layer): blank a note's text, leaving a
+    tombstone. Returns the tombstoned entry, None if the NPI isn't in the queue.
+    Raises CaseNoteError if the note id doesn't exist or is already redacted."""
+    now = time.time()
+    with _review_lock:
+        item = _review_items.get(npi)
+        if item is None:
+            return None
+        note = next((n for n in item.get("case_notes", []) if n.get("id") == note_id), None)
+        if note is None:
+            raise CaseNoteError(f"No case note {note_id!r} on NPI {npi}.")
+        if note.get("redacted"):
+            raise CaseNoteError(f"Case note {note_id!r} is already redacted.")
+        note["text"] = ""
+        note["redacted"] = True
+        note["redacted_by"] = actor or "unknown"
+        note["redacted_at"] = now
+        if "audit_trail" not in item:
+            item["audit_trail"] = []
+        item["audit_trail"].append({
+            "action": "case_note_redacted",
+            "note_id": note_id,
+            "actor": actor or "unknown",
+            "actor_type": "user",
+            "timestamp": now,
+            "note": "Note redacted (tombstone retained)",
+        })
+        item["updated_at"] = now
+        result = dict(note)
+    save_review_to_disk()
+    return result
+
+
+def get_case_notes(npi: str) -> Optional[list[dict]]:
+    """The case-note log for an NPI (oldest first), or None if not in the queue."""
+    with _review_lock:
+        item = _review_items.get(npi)
+        if item is None:
+            return None
+        return [dict(n) for n in item.get("case_notes", [])]
+
+
 def get_queue_status(npi: str) -> Optional[str]:
     """Case-ledger status for an NPI, or None if it's not in the queue."""
     with _review_lock:

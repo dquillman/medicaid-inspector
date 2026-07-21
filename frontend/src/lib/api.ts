@@ -105,6 +105,7 @@ import type {
   SupervisedModelStatus,
   SupervisedFeatureImportance,
   SupervisedPredictionsResponse,
+  CaseNote,
 } from './types'
 
 // Re-export types that consumers import from api.ts (backwards compat)
@@ -405,6 +406,17 @@ export const api = {
 
   getReviewHistory: (npi: string) =>
     get<{ npi: string; audit_trail: AuditEntry[] }>(`/review/${npi}/history`),
+
+  // Append-only case-note log — `notes` (the summary box) stays editable;
+  // these entries are permanent, timestamped, and authored (human vs HAL).
+  getCaseNotes: (npi: string) =>
+    get<{ npi: string; case_notes: CaseNote[] }>(`/review/${npi}/case-notes`),
+
+  addCaseNote: (npi: string, text: string) =>
+    mutate<{ npi: string; note: CaseNote }>('POST', `/review/${npi}/case-notes`, { text }),
+
+  redactCaseNote: (npi: string, noteId: string) =>
+    mutate<{ npi: string; note: CaseNote }>('POST', `/review/${npi}/case-notes/${noteId}/redact`),
 
   bulkUpdateReview: (data: { npis: string[]; status: string }) =>
     mutate<{ updated: number }>('POST', '/review/bulk-update', data),

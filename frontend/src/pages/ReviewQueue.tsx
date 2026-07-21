@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { ReviewItem, ReviewCounts, AuditEntry } from '../lib/types'
+import type { ReviewItem, ReviewCounts, AuditEntry, CaseNote } from '../lib/types'
 import { fmt } from '../lib/format'
 import { threatColor, magnitudeGlyph } from '../lib/threat'
 import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
@@ -173,7 +173,13 @@ function AuditTrailPanel({ npi }: { npi: string }) {
               className="border-b border-gray-800/50"
             >
               <td className="py-1 pr-3 text-gray-500 whitespace-nowrap">{formatTimestamp(entry.timestamp)}</td>
-              <td className="py-1 pr-3 text-gray-400">{entry.action === 'status_change' ? 'Status' : 'Assignment'}</td>
+              <td className="py-1 pr-3 text-gray-400">{({
+                status_change: 'Status',
+                assignment_change: 'Assignment',
+                queue_status_change: 'Case',
+                case_note_added: 'Note',
+                case_note_redacted: 'Redaction',
+              } as Record<string, string>)[entry.action] ?? entry.action}</td>
               <td className="py-1 pr-3">
                 <span className={`px-1.5 py-0.5 rounded ${STATUS_COLORS[entry.previous_status] ?? 'text-gray-500'}`}>
                   {STATUS_LABELS[entry.previous_status] ?? entry.previous_status}
@@ -189,6 +195,115 @@ function AuditTrailPanel({ npi }: { npi: string }) {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+// Append-only case-note log — the on-the-record counterpart to the editable
+// summary box (NotesCell). Entries are permanent and authored (human vs HAL);
+// the only mutation is an admin redact, which leaves a tombstone.
+function CaseNotesPanel({ npi }: { npi: string }) {
+  const queryClient = useQueryClient()
+  const [draft, setDraft] = useState('')
+  const [error, setError] = useState('')
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['case-notes', npi],
+    queryFn: () => api.getCaseNotes(npi),
+  })
+
+  const addMutation = useMutation({
+    mutationFn: (text: string) => api.addCaseNote(npi, text),
+    onSuccess: () => {
+      setDraft('')
+      setError('')
+      queryClient.invalidateQueries({ queryKey: ['case-notes', npi] })
+      queryClient.invalidateQueries({ queryKey: ['review-history', npi] })
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const redactMutation = useMutation({
+    mutationFn: (noteId: string) => api.redactCaseNote(npi, noteId),
+    onSuccess: () => {
+      setError('')
+      queryClient.invalidateQueries({ queryKey: ['case-notes', npi] })
+      queryClient.invalidateQueries({ queryKey: ['review-history', npi] })
+    },
+    onError: (e: Error) => setError(e.message),
+  })
+
+  const submit = () => {
+    const text = draft.trim()
+    if (text && !addMutation.isPending) addMutation.mutate(text)
+  }
+
+  const notes: CaseNote[] = data?.case_notes ?? []
+
+  return (
+    <div className="px-4 py-3 border-b border-gray-800">
+      <p className="text-[10px] uppercase tracking-widest text-gray-600 font-bold mb-2">
+        Case notes <span className="normal-case font-normal tracking-normal">— append-only, on the record</span>
+      </p>
+      {isLoading ? (
+        <div className="text-xs text-gray-500 py-1">Loading notes...</div>
+      ) : notes.length === 0 ? (
+        <div className="text-xs text-gray-600 italic py-1">No case notes yet — the first entry starts the record.</div>
+      ) : (
+        <ul className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+          {notes.map(n => (
+            <li key={n.id} className="flex items-start gap-2 text-xs group">
+              <span className="text-gray-600 whitespace-nowrap pt-px">{formatTimestamp(n.created_at)}</span>
+              <span
+                className={`px-1 rounded text-[10px] font-bold uppercase pt-px ${
+                  n.actor_type === 'ai' ? 'bg-purple-950 text-purple-400' : 'bg-cyan-950 text-cyan-400'
+                }`}
+                title={`Authored by ${n.actor} (${n.actor_type})`}
+              >
+                {n.actor_type === 'ai' ? 'HAL' : n.actor}
+              </span>
+              {n.redacted ? (
+                <span className="text-gray-600 italic" title={`Redacted by ${n.redacted_by}`}>
+                  [redacted by {n.redacted_by}]
+                </span>
+              ) : (
+                <>
+                  <span className="text-gray-300 whitespace-pre-wrap break-words flex-1">{n.text}</span>
+                  <button
+                    onClick={() => {
+                      if (window.confirm('Redact this note? The text is blanked but a tombstone stays in the log. Admin only.')) {
+                        redactMutation.mutate(n.id)
+                      }
+                    }}
+                    title="Admin only: blank this note, leaving a tombstone"
+                    className="opacity-0 group-hover:opacity-100 text-[10px] text-gray-600 hover:text-red-400 transition-opacity shrink-0"
+                  >
+                    redact
+                  </button>
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="flex gap-2 mt-2">
+        <input
+          value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); submit() } }}
+          placeholder="Add a note to the record… (permanent)"
+          maxLength={4000}
+          className="flex-1 bg-gray-800 text-gray-200 text-xs rounded px-2 py-1.5 border border-gray-700 focus:outline-none focus:border-cyan-600 placeholder:text-gray-600"
+        />
+        <button
+          onClick={submit}
+          disabled={!draft.trim() || addMutation.isPending}
+          className="px-3 py-1.5 text-xs rounded bg-cyan-900 hover:bg-cyan-800 text-cyan-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+        >
+          {addMutation.isPending ? 'Adding…' : 'Append'}
+        </button>
+      </div>
+      {error && <p className="text-xs text-red-400 mt-1">{error}</p>}
     </div>
   )
 }
@@ -357,6 +472,7 @@ function ReviewRow({
       {expanded && (
         <tr className="bg-gray-900/50">
           <td colSpan={12} className="p-0">
+            <CaseNotesPanel npi={item.npi} />
             <AuditTrailPanel npi={item.npi} />
           </td>
         </tr>

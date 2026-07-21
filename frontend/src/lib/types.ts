@@ -148,6 +148,19 @@ export interface AuditEntry {
   note?: string
 }
 
+// One entry in the append-only case-note log. Immutable once written; an
+// admin redact blanks `text` and sets the tombstone fields.
+export interface CaseNote {
+  id: string
+  text: string
+  actor: string
+  actor_type: 'user' | 'ai' | 'system'
+  created_at: number
+  redacted: boolean
+  redacted_by?: string
+  redacted_at?: number
+}
+
 export interface ReviewItem {
   npi: string
   risk_score: number
@@ -163,6 +176,8 @@ export interface ReviewItem {
   added_at: number
   updated_at: number
   audit_trail?: AuditEntry[]
+  // Append-only case-note log (see CaseNote). `notes` above stays the editable summary.
+  case_notes?: CaseNote[]
   // Enriched from prescan cache
   provider_name?: string
   state?: string
