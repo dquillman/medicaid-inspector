@@ -318,7 +318,12 @@ def cmd_deploy_frontend(args: argparse.Namespace) -> int:
                 status2, bundle = _http_get(f"{hosting_url}/{asset_path}{cb}", timeout=15.0)
                 if status2 != 200:
                     last_reason = f"bundle fetch returned {status2}"
-                elif declared_version and f'"{declared_version}"' in bundle:
+                elif declared_version and declared_version in bundle:
+                    # Unquoted substring match: the minifier emits the injected
+                    # __APP_VERSION__ as a template-literal fragment (`3.16.1`,
+                    # backticks), so the old '"X.Y.Z"' double-quoted check could
+                    # NEVER match — that, not CDN lag, was the recurring false
+                    # "not found in deployed bundle" warning on every release.
                     _log(f"verified: bundle contains v{declared_version} (attempt {attempt})")
                     return 0
                 else:
