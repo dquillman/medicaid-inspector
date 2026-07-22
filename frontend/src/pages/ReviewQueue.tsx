@@ -408,7 +408,7 @@ function ReviewRow({
                 className="ml-1.5 shrink-0 align-middle text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/40"
                 title={`No case activity for ${item.stale_days ?? '14+'} days — needs a nudge`}
               >
-                CASE STALE {item.stale_days != null ? `${item.stale_days}d` : ''}
+                IDLE {item.stale_days != null ? `${item.stale_days}d` : ''}
               </span>
             )}
             {/* DATA recency (distinct from CASE staleness above): is the scheme
