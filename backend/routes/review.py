@@ -41,10 +41,22 @@ BRAIN_GATE_LIMIT = 10
 
 
 async def _brain_top_npis(limit: int = BRAIN_GATE_LIMIT) -> set[str]:
+    """The top `limit` ACTIONABLE Brain providers that gate the Review Queue.
+
+    EXPIRED providers (last claim past the ~6yr FCA recovery window — you can
+    neither stop nor recover them) are dropped and their slots backfilled with
+    the next actionable providers, so the work queue isn't crowded by cases you
+    can't pursue. They are NOT removed from the Brain board itself (that stays a
+    complete, auditable ranking — they're still visible there with an EXPIRED
+    badge, and remain available as network/ring evidence). Recovery-lead 'stale'
+    providers are KEPT — those are still actionable within the FCA window.
+
+    Over-pull well past `limit` so the backfill has candidates."""
     import asyncio
     from services.fraud_brain import get_top_frauds
-    result = await asyncio.to_thread(get_top_frauds, limit, False)
-    return {p["npi"] for p in result.get("top", [])}
+    result = await asyncio.to_thread(get_top_frauds, max(limit * 3, 30), False)
+    actionable = [p["npi"] for p in result.get("top", []) if p.get("recency") != "expired"]
+    return set(actionable[:limit])
 
 router = APIRouter(prefix="/api/review", tags=["review"], dependencies=[Depends(require_user)])
 
