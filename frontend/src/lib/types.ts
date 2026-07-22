@@ -71,7 +71,7 @@ export interface ProviderDetail extends ScoredProvider {
   // Data recency — annotation only, shared with the Fraud Brain board.
   last_active_month?: string | null
   data_age_months?: number | null
-  recency?: 'fresh' | 'aging' | 'stale' | null
+  recency?: 'fresh' | 'aging' | 'stale' | 'expired' | null
 }
 
 export interface TimelineRow {
@@ -192,7 +192,7 @@ export interface ReviewItem {
   // Data recency — annotation only, shared with the Fraud Brain board.
   last_active_month?: string | null
   data_age_months?: number | null
-  recency?: 'fresh' | 'aging' | 'stale' | null
+  recency?: 'fresh' | 'aging' | 'stale' | 'expired' | null
 }
 
 export interface OigStatus {
@@ -1735,7 +1735,7 @@ export interface FraudBrainProvider {
   first_active_month?: string | null
   last_active_month?: string | null
   data_age_months?: number | null
-  recency?: 'fresh' | 'aging' | 'stale' | null
+  recency?: 'fresh' | 'aging' | 'stale' | 'expired' | null
   // Read-only case-ledger badge (set by a human in the Review Queue). One-way:
   // the Brain reads it for display, never writes it, and it never affects
   // brain_score. null/undefined => the NPI is not in the review queue.

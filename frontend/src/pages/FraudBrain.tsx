@@ -250,11 +250,14 @@ export default function FraudBrain() {
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   })
-  // Original board rank rides along so hiding stale rows never promotes #4 to
-  // #1 — rank is identity on this board, not a display index.
+  // Original board rank rides along so hiding inactive rows never promotes #4
+  // to #1 — rank is identity on this board, not a display index. "Inactive" =
+  // stale (recovery lead) OR expired (past the recovery window) — both are
+  // non-active; only fresh/aging are still billing.
   const ranked = (data?.top ?? []).map((p, i) => ({ p, rank: i + 1 }))
-  const shown = activeOnly ? ranked.filter(({ p }) => p.recency !== 'stale') : ranked
-  const staleCount = ranked.length - ranked.filter(({ p }) => p.recency !== 'stale').length
+  const isInactive = (r?: string | null) => r === 'stale' || r === 'expired'
+  const shown = activeOnly ? ranked.filter(({ p }) => !isInactive(p.recency)) : ranked
+  const staleCount = ranked.filter(({ p }) => isInactive(p.recency)).length
 
   // The reveal: cards seat in sequence, score bars sweep up the threat ramp,
   // brain scores count up, #1 locks. Re-runs on Recompute (data identity changes).
@@ -371,8 +374,8 @@ export default function FraudBrain() {
           </div>
           <span className="text-[11px] text-ink-tertiary font-mono">
             {activeOnly
-              ? `${staleCount} stale (recovery-lead) provider${staleCount === 1 ? '' : 's'} hidden — ranks unchanged`
-              : `${staleCount} of ${ranked.length} stale — last claim >24 months behind the newest data`}
+              ? `${staleCount} inactive (stale/expired) provider${staleCount === 1 ? '' : 's'} hidden — ranks unchanged`
+              : `${staleCount} of ${ranked.length} no longer active — stale (recovery lead) or expired (past the ~6yr recovery window)`}
           </span>
         </div>
       )}

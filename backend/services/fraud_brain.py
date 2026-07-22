@@ -43,6 +43,17 @@ CACHE_TTL_SEC = 15 * 60
 RECENCY_FRESH_MONTHS = 6    # within 6 months of the dataset's newest claim
 RECENCY_AGING_MONTHS = 24   # within 24 months; older than that = stale
 
+# Beyond this CALENDAR age, a stale case is likely past the recovery window too:
+# the False Claims Act statute of limitations is 6 years from the violation
+# (stretchable to a 10-year hard cap only under the govt-didn't-know tolling
+# exception, which needs a specific legal determination — not a default). So a
+# provider whose last claim is >6 years old is neither an active scheme nor a
+# clean recovery: it gets its own "expired" tier so it visually separates from
+# the recoverable stale cases instead of crowding them under one badge. This is
+# CALENDAR-based (real statute clock), unlike the dataset-relative tiers above;
+# it always implies stale, so it slots in as the deepest tier.
+FCA_RECOVERY_WINDOW_MONTHS = 72  # 6 years
+
 
 def _ym_index(ym: str | None) -> int | None:
     """'YYYY-MM' -> absolute month index (year*12+month), else None."""
@@ -84,13 +95,22 @@ def dataset_newest_month_index() -> int | None:
 
 
 def recency_badge(last_month: str | None, newest_idx: int | None = None) -> str | None:
-    """'fresh' / 'aging' / 'stale' for a last-claim month, relative to the
-    dataset's newest claim month. None if either is unknown. Pass newest_idx
-    to avoid recomputing it per-row in a batch."""
+    """'fresh' / 'aging' / 'stale' / 'expired' for a last-claim month. None if
+    unknown. 'expired' is CALENDAR-based (last claim > the FCA recovery window,
+    ~6 years) and takes precedence — it's the deepest tier, separating likely-
+    unrecoverable providers from recoverable 'stale' ones. The other three are
+    dataset-relative (vs the newest claim month); pass newest_idx to avoid
+    recomputing it per-row in a batch."""
+    idx = _ym_index(last_month)
+    if idx is None:
+        return None
+    # Past the recovery window entirely? (calendar age, real statute clock)
+    age = months_since(last_month)
+    if age is not None and age > FCA_RECOVERY_WINDOW_MONTHS:
+        return "expired"
     if newest_idx is None:
         newest_idx = dataset_newest_month_index()
-    idx = _ym_index(last_month)
-    if newest_idx is None or idx is None:
+    if newest_idx is None:
         return None
     behind = newest_idx - idx
     return ("fresh" if behind <= RECENCY_FRESH_MONTHS
