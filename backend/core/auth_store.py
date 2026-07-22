@@ -359,10 +359,22 @@ def check_permission(username: str, action: str) -> bool:
 # ── Session management ────────────────────────────────────────────────────────
 
 def save_sessions_to_disk() -> None:
-    """Persist active sessions to disk."""
+    """Persist active sessions to disk AND to GCS.
+
+    The GCS upload is essential on Cloud Run: a container's local disk is
+    ephemeral, so a session created here (e.g. at login) is lost the moment the
+    instance restarts/redeploys — the classic "log in, immediately logged out"
+    bounce, since the next request hits a fresh instance whose in-memory
+    sessions were loaded from GCS at ITS startup and never saw the new token.
+    Mirrors _save_users(); non-blocking, never raises."""
     try:
         data = {token: sess for token, sess in _sessions.items()}
         atomic_write_json(_SESSIONS_FILE, data, indent=2)
+        try:
+            from core.gcs_sync import upload_file
+            upload_file("sessions.json")
+        except Exception:
+            pass  # GCS unavailable locally — the local file is still written
     except Exception as e:
         print(f"[auth_store] Could not save sessions: {e}")
 

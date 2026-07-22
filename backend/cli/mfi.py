@@ -230,6 +230,14 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
         "--allow-unauthenticated",
         "--set-env-vars", f"PYTHONUNBUFFERED=1,APP_VERSION={app_version}",
         "--update-secrets", f"ADMIN_PASSWORD={secret_name}:latest",
+        # Pin to a SINGLE instance. Sessions live in per-instance memory (see
+        # auth_store), so >1 instance means a login on instance A is unknown to
+        # instance B — the next request bounces to a fresh instance and 401s,
+        # i.e. "log in, immediately logged out". One instance + concurrency 80
+        # is ample for this tool and removes the split-brain entirely. (Session
+        # durability across restarts is handled separately by GCS-syncing
+        # sessions.json on save.)
+        "--max-instances", "1",
         "--quiet",
     ]
     _log(f"deploying backend v{app_version} to {_DEFAULT_GCLOUD_SERVICE} …")
