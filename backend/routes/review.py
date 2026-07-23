@@ -372,6 +372,19 @@ async def set_case_queue_status(npi: str, body: QueueStatusBody, user: dict = De
             f"NPI {npi} is not in the review queue. Promote it first (Add to review) "
             "— the ledger status only applies to providers a human has taken on.",
         )
+
+    # Auto-retrain: labels (Confirmed/Reported = fraud, Dismissed = not fraud)
+    # are the supervised model's training data, so any transition that ENTERS
+    # or LEAVES a label state changes the training set. Debounced + background,
+    # so a bulk labeling session coalesces into one retrain and this request
+    # returns instantly.
+    _LABEL_STATUSES = {"confirmed", "referred", "tip_filed", "dismissed"}
+    trail = updated.get("audit_trail") or []
+    previous = (trail[-1].get("previous_queue_status") or "") if trail else ""
+    if body.new_status in _LABEL_STATUSES or previous in _LABEL_STATUSES:
+        from services.supervised_scorer import schedule_retrain
+        schedule_retrain()
+
     enriched = _enrich_items([updated])
     return {"item": enriched[0]}
 

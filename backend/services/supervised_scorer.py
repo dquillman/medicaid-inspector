@@ -30,6 +30,42 @@ _predictions: dict[str, dict] = {}  # NPI -> prediction dict
 _PERSIST_PATH = pathlib.Path(__file__).parent.parent / "supervised_model.json"
 _load_attempted = False
 
+# ── Auto-retrain on new labels ────────────────────────────────────────────────
+# Every human label (Confirmed / Reported / Dismissed) is training signal, so
+# the model retrains itself instead of waiting for a manual ML-page click. The
+# retrain is DEBOUNCED: a labeling session (e.g. bulk-dismissing five cases)
+# coalesces into one retrain ~AUTO_RETRAIN_DEBOUNCE_SEC after the last label,
+# run in a daemon thread so the status-change request returns instantly.
+# train_model() itself handles the <10-labels case gracefully (returns an
+# error dict, no exception), so scheduling early is harmless.
+AUTO_RETRAIN_DEBOUNCE_SEC = 45.0
+_retrain_timer: Optional[threading.Timer] = None
+_retrain_lock = threading.Lock()
+
+
+def _run_auto_retrain() -> None:
+    try:
+        result = train_model()
+        if result.get("error"):
+            log.info("[auto-retrain] skipped: %s", result["error"])
+        else:
+            log.info("[auto-retrain] model retrained: %s labeled, accuracy=%s",
+                     result.get("total_labeled"), result.get("accuracy"))
+    except Exception:  # noqa: BLE001 — never let a background retrain crash anything
+        log.warning("[auto-retrain] failed", exc_info=True)
+
+
+def schedule_retrain() -> None:
+    """Debounced background retrain — call after any label-relevant
+    queue_status change. Safe to call repeatedly; the timer resets."""
+    global _retrain_timer
+    with _retrain_lock:
+        if _retrain_timer is not None:
+            _retrain_timer.cancel()
+        _retrain_timer = threading.Timer(AUTO_RETRAIN_DEBOUNCE_SEC, _run_auto_retrain)
+        _retrain_timer.daemon = True
+        _retrain_timer.start()
+
 
 def _persist_state(metrics: dict, feature_names: list[str], predictions: dict[str, dict]) -> None:
     try:
