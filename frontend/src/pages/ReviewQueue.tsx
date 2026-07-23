@@ -6,7 +6,7 @@ import type { ReviewItem, AuditEntry, CaseNote } from '../lib/types'
 import { fmt } from '../lib/format'
 import { threatColor, magnitudeGlyph } from '../lib/threat'
 import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
-import { QUEUE_STATUS_LABELS } from '../lib/queueStatus'
+import { CASE_STAGES } from '../lib/queueStatus'
 import { ArrowDownTrayIcon } from '../components/icons'
 import EmptyState from '../components/EmptyState'
 import QuickTriagePanel from '../components/QuickTriagePanel'
@@ -14,10 +14,9 @@ import ProviderFlags from '../components/ProviderFlags'
 import RecencyBadge from '../components/RecencyBadge'
 import { useProviderFlags } from '../hooks/useProviderFlags'
 
-// The queue now speaks ONE status model: the case-ledger (queue_status). The
-// legacy workflow `status` (pending/assigned/investigating) was a redundant
-// second axis and has been retired from the UI.
-type StatusFilter = 'all' | 'open' | 'under_review' | 'tip_filed' | 'confirmed' | 'referred' | 'dismissed'
+// The queue speaks ONE status model: the case-ledger pipeline (see queueStatus).
+// Filter keys are the 5 stage values plus 'all'.
+type StatusFilter = 'all' | 'open' | 'under_review' | 'confirmed' | 'referred' | 'dismissed'
 
 // The Fraud Brain is the queue's authority, so its fused meta-score is the
 // primary number. The raw 18-signal risk (one of the Brain's five inputs) is
@@ -319,13 +318,15 @@ function CaseNotesPanel({ npi }: { npi: string }) {
 function QueueStatusDropdown({ item, onChange }: { item: ReviewItem; onChange: (status: string) => void }) {
   return (
     <select
-      value={item.queue_status ?? 'open'}
+      // Legacy 'tip_filed' has no stage of its own (it now means "Reported" =
+      // 'referred'), so show it as 'referred' in the picker.
+      value={item.queue_status === 'tip_filed' ? 'referred' : (item.queue_status ?? 'open')}
       onChange={e => onChange(e.target.value)}
       title="Case status (audited). The Fraud Brain reads this read-only."
       className="bg-gray-800 text-xs rounded px-1.5 py-1 border border-gray-700 text-cyan-300 focus:outline-none focus:border-cyan-500 cursor-pointer"
     >
-      {Object.entries(QUEUE_STATUS_LABELS).map(([key, label]) => (
-        <option key={key} value={key}>{label}</option>
+      {CASE_STAGES.map(s => (
+        <option key={s.value} value={s.value} title={s.blurb}>{s.label}</option>
       ))}
     </select>
   )
@@ -687,20 +688,22 @@ export default function ReviewQueue() {
   const rawItems   = data?.items ?? []
 
   // Case-ledger counts, computed client-side over the whole visible queue.
+  // 'referred' (Reported) folds in the legacy 'tip_filed' value.
   const qs = (i: ReviewItem) => i.queue_status ?? 'open'
+  const isReported = (i: ReviewItem) => qs(i) === 'referred' || qs(i) === 'tip_filed'
   const queueCounts = {
     total:        rawItems.length,
     open:         rawItems.filter(i => qs(i) === 'open').length,
     under_review: rawItems.filter(i => qs(i) === 'under_review').length,
-    tip_filed:    rawItems.filter(i => qs(i) === 'tip_filed').length,
     confirmed:    rawItems.filter(i => qs(i) === 'confirmed').length,
-    referred:     rawItems.filter(i => qs(i) === 'referred').length,
+    referred:     rawItems.filter(isReported).length,
     dismissed:    rawItems.filter(i => qs(i) === 'dismissed').length,
   }
 
-  // Filter by the selected ledger status (client-side), then NPI search.
-  const statusFiltered = statusFilter === 'all'
-    ? rawItems
+  // Filter by the selected stage (client-side), then NPI search.
+  const statusFiltered =
+    statusFilter === 'all'      ? rawItems
+    : statusFilter === 'referred' ? rawItems.filter(isReported)
     : rawItems.filter(i => qs(i) === statusFilter)
   const searchFiltered = npiSearch.trim()
     ? statusFiltered.filter(i => i.npi.includes(npiSearch.trim()))
@@ -734,14 +737,15 @@ export default function ReviewQueue() {
   const total      = searchFiltered.length
   const allOnPageSelected = items.length > 0 && items.every(i => selectedNpis.has(i.npi))
 
+  // Tabs follow the pipeline order: New → Investigating → Confirmed → Reported,
+  // with Dismissed (off-ramp) last.
   const tabs: { key: StatusFilter; label: string; count: number }[] = [
-    { key: 'all',          label: 'All',          count: queueCounts.total },
-    { key: 'open',         label: 'New',          count: queueCounts.open },
-    { key: 'under_review', label: 'Under Review', count: queueCounts.under_review },
-    { key: 'tip_filed',    label: 'Tip Filed',    count: queueCounts.tip_filed },
-    { key: 'confirmed',    label: 'Confirmed',    count: queueCounts.confirmed },
-    { key: 'referred',     label: 'Referred',     count: queueCounts.referred },
-    { key: 'dismissed',    label: 'Dismissed',    count: queueCounts.dismissed },
+    { key: 'all',          label: 'All',           count: queueCounts.total },
+    { key: 'open',         label: 'New',           count: queueCounts.open },
+    { key: 'under_review', label: 'Investigating', count: queueCounts.under_review },
+    { key: 'confirmed',    label: 'Confirmed',     count: queueCounts.confirmed },
+    { key: 'referred',     label: 'Reported',      count: queueCounts.referred },
+    { key: 'dismissed',    label: 'Dismissed',     count: queueCounts.dismissed },
   ]
 
   return (
@@ -753,11 +757,11 @@ export default function ReviewQueue() {
             Flagged Providers Requiring Human Review
           </p>
           <p className="text-xs text-gray-400 mt-2">
-            <span className="text-yellow-400 font-semibold">{queueCounts.open}</span> new
+            <span className="text-slate-300 font-semibold">{queueCounts.open}</span> new
             <span className="text-gray-600 mx-2">&middot;</span>
-            <span className="text-red-400 font-semibold">{queueCounts.confirmed}</span> confirmed
+            <span className="text-red-400 font-semibold">{queueCounts.confirmed}</span> confirmed fraud
             <span className="text-gray-600 mx-2">&middot;</span>
-            <span className="text-orange-400 font-semibold">{queueCounts.referred}</span> referred to law enforcement
+            <span className="text-emerald-400 font-semibold">{queueCounts.referred}</span> reported to authorities
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -825,32 +829,32 @@ export default function ReviewQueue() {
           </span>
           <div className="flex gap-2 ml-2">
             <button
+              onClick={() => handleBulkAction('under_review')}
+              disabled={bulkMutation.isPending}
+              className="px-4 py-1.5 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white font-medium transition-colors disabled:opacity-50"
+            >
+              Investigating
+            </button>
+            <button
               onClick={() => handleBulkAction('confirmed')}
               disabled={bulkMutation.isPending}
               className="px-4 py-1.5 text-xs rounded bg-red-700 hover:bg-red-600 text-white font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
             >
-              Confirm
+              Confirm Fraud
+            </button>
+            <button
+              onClick={() => handleBulkAction('referred')}
+              disabled={bulkMutation.isPending}
+              className="px-4 py-1.5 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+            >
+              Mark Reported
             </button>
             <button
               onClick={() => handleBulkAction('dismissed')}
               disabled={bulkMutation.isPending}
               className="px-4 py-1.5 text-xs rounded bg-gray-600 hover:bg-gray-500 text-white font-medium transition-colors disabled:opacity-50"
             >
-              Dismiss All
-            </button>
-            <button
-              onClick={() => handleBulkAction('under_review')}
-              disabled={bulkMutation.isPending}
-              className="px-4 py-1.5 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white font-medium transition-colors disabled:opacity-50"
-            >
-              Mark Under Review
-            </button>
-            <button
-              onClick={() => handleBulkAction('referred')}
-              disabled={bulkMutation.isPending}
-              className="px-4 py-1.5 text-xs rounded bg-orange-700 hover:bg-orange-600 text-white font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
-            >
-              Refer to MFCU
+              Dismiss
             </button>
           </div>
           <button

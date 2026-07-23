@@ -89,11 +89,13 @@ def get_roi_summary() -> dict:
     # Recovery totals
     total_recovered = sum(r["amount_recovered"] for r in _recoveries)
 
-    # Review queue stats
+    # Review queue stats — read the case-ledger status (queue_status), the one
+    # status model. The legacy workflow `status` field was retired from the UI,
+    # so it no longer advances. 'referred'/'tip_filed' both mean Reported.
     all_reviews = get_review_queue()
-    confirmed = [r for r in all_reviews if r.get("status") == "confirmed_fraud"]
-    referred = [r for r in all_reviews if r.get("status") == "referred"]
-    dismissed = [r for r in all_reviews if r.get("status") == "dismissed"]
+    confirmed = [r for r in all_reviews if r.get("queue_status") == "confirmed"]
+    referred = [r for r in all_reviews if r.get("queue_status") in ("referred", "tip_filed")]
+    dismissed = [r for r in all_reviews if r.get("queue_status") == "dismissed"]
 
     cases_confirmed = len(confirmed)
     cases_referred = len(referred)

@@ -512,21 +512,21 @@ TOOLS: list[Tool] = [
     Tool(
         name="update_queue_status",
         description=(
-            "Record a case-ledger status change for an NPI that is ALREADY in the review "
-            "queue (open / under_review / tip_filed / dismissed / confirmed / referred). This "
-            "is a DISTINCT, deliberately-separate action from draft_oig_tip: drafting a tip "
-            "generates text; it does NOT record that a tip was filed. Recording that is this "
-            "tool. IMPORTANT: the weighty transitions 'tip_filed' and 'confirmed' require a "
-            "human and are REFUSED here — a person must do those from the review UI, so an AI "
-            "cannot mark a tip filed or a case confirmed as a side effect. Does not add NPIs to "
-            "the queue (promotion is a separate human action) and never changes the risk score."
+            "Record a case-pipeline status change for an NPI ALREADY in the review queue. The "
+            "pipeline is: open (New) -> under_review (Investigating) -> confirmed (Confirmed "
+            "fraud) -> referred (Reported to OIG + MFCU); dismissed is the off-ramp (not "
+            "fraud). IMPORTANT: the weighty transitions 'confirmed' and 'referred' (and legacy "
+            "'tip_filed') require a HUMAN and are REFUSED here — an AI must not mark a case "
+            "confirmed or reported as a side effect; a person does those in the review UI. An "
+            "AI may set 'open', 'under_review', or 'dismissed'. Does not add NPIs to the queue "
+            "and never changes the risk score."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "npi": _NPI_SCHEMA,
                 "new_status": {"type": "string", "enum": sorted(
-                    ["open", "under_review", "tip_filed", "dismissed", "confirmed", "referred"])},
+                    ["open", "under_review", "confirmed", "referred", "tip_filed", "dismissed"])},
                 "note": {"type": "string", "description": "Optional reason/context recorded in the audit trail"},
             },
             "required": ["npi", "new_status"],

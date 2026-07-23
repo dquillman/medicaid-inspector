@@ -28,11 +28,12 @@ VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 # back into the computed risk score. One-way, read-only.
 VALID_QUEUE_STATUSES = {"open", "under_review", "tip_filed", "dismissed", "confirmed", "referred"}
 DEFAULT_QUEUE_STATUS = "open"
-# Transitions that carry real-world weight (a tip was actually filed with OIG; a
-# case was confirmed) must be a deliberate HUMAN action — never an automatic
-# side effect of an AI drafting a document or narrative. Enforced in
-# set_queue_status by requiring actor_type == "user" for these.
-HUMAN_GATED_QUEUE_STATUSES = {"tip_filed", "confirmed"}
+# Transitions that carry real-world weight — confirming fraud, and reporting it
+# to the authorities (OIG tip + MFCU referral) — must be a deliberate HUMAN
+# action, never an automatic side effect of an AI drafting a document. Enforced
+# in set_queue_status by requiring actor_type == "user". ('tip_filed' is the
+# legacy value for 'referred'/Reported; kept here so old flows stay gated.)
+HUMAN_GATED_QUEUE_STATUSES = {"confirmed", "referred", "tip_filed"}
 VALID_ACTOR_TYPES = {"user", "system", "ai"}
 
 

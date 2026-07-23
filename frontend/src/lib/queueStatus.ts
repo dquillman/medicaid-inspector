@@ -1,39 +1,58 @@
 /**
- * Case-ledger status (queue_status) — the human-gated disposition of an NPI in
- * the Review Queue, DISTINCT from the granular workflow `status` and from the
- * live-computed Fraud Brain score.
+ * Case-ledger status (queue_status) — where a provider sits in the investigation
+ * pipeline. Human-set, audited, decoupled from the Fraud Brain score (the Brain
+ * reads it ONE-WAY to badge/de-prioritise; it never writes it or feeds the score).
  *
- * The Fraud Brain reads this ONE-WAY, read-only, purely to badge / de-prioritise
- * already-actioned providers. It never writes it and it never feeds the score.
+ * The pipeline is one linear track with a single off-ramp:
+ *
+ *     New → Investigating → Confirmed → Reported
+ *                         └──────────────→ Dismissed (off-ramp: not fraud)
+ *
+ *   New           the case landed on the board; nobody has worked it yet
+ *   Investigating you're actively working it
+ *   Confirmed     you've verified it IS fraud
+ *   Reported      you've reported confirmed fraud to the authorities —
+ *                 OIG hotline tip AND MFCU referral (all fraud goes to both)
+ *   Dismissed     you've determined it is NOT fraud / not worth pursuing — closed
+ *
+ * `confirmed` precedes `reported` (you confirm fraud, THEN report it). The old
+ * split of "Tip Filed" vs "Referred" is collapsed into one "Reported" stage —
+ * confirmed fraud goes to both OIG and MFCU, so they're one step, not a choice.
+ * The backend value `tip_filed` is legacy and still displays as "Reported".
  */
-export const QUEUE_STATUS_ORDER = [
-  'open',
-  'under_review',
-  'tip_filed',
-  'confirmed',
-  'referred',
-  'dismissed',
+
+// The pipeline stages, in order. Each is a distinct backend queue_status value.
+// This drives the dropdown, the tabs, and the lifecycle order. `reported` maps
+// to the backend value `referred`.
+export const CASE_STAGES = [
+  { value: 'open',         label: 'New',           blurb: 'On the board, not yet worked' },
+  { value: 'under_review', label: 'Investigating', blurb: 'You are actively working it' },
+  { value: 'confirmed',    label: 'Confirmed',     blurb: 'Verified as fraud' },
+  { value: 'referred',     label: 'Reported',      blurb: 'Filed with OIG + referred to MFCU' },
+  { value: 'dismissed',    label: 'Dismissed',     blurb: 'Not fraud — closed' },
 ] as const
 
-export type QueueStatus = (typeof QUEUE_STATUS_ORDER)[number]
+export const QUEUE_STATUS_ORDER = CASE_STAGES.map(s => s.value)
 
+export type QueueStatus = 'open' | 'under_review' | 'confirmed' | 'referred' | 'tip_filed' | 'dismissed'
+
+// Display label for any backend value (incl. legacy `tip_filed` → "Reported").
 export const QUEUE_STATUS_LABELS: Record<string, string> = {
-  // 'open' = the default/untouched state. Labeled "New" (not "In Review") so it
-  // reads as clearly distinct from "Under Review" (actively being worked).
   open:         'New',
-  under_review: 'Under Review',
-  tip_filed:    'Tip Filed',
+  under_review: 'Investigating',
   confirmed:    'Confirmed',
-  referred:     'Referred',
+  referred:     'Reported',
+  tip_filed:    'Reported',   // legacy value — same meaning as referred now
   dismissed:    'Dismissed',
 }
 
+// Colours track the progression: neutral → active → fraud(red) → done(green) → closed(grey).
 export const QUEUE_STATUS_COLORS: Record<string, string> = {
-  open:         'text-cyan-400 border-cyan-400/50 bg-cyan-400/10',
-  under_review: 'text-purple-400 border-purple-400/50 bg-purple-400/10',
-  tip_filed:    'text-amber-400 border-amber-400/50 bg-amber-400/10',
+  open:         'text-slate-300 border-slate-400/40 bg-slate-400/10',
+  under_review: 'text-blue-400 border-blue-400/50 bg-blue-400/10',
   confirmed:    'text-red-400 border-red-400/60 bg-red-400/10',
-  referred:     'text-orange-400 border-orange-400/50 bg-orange-400/10',
+  referred:     'text-emerald-400 border-emerald-400/50 bg-emerald-400/10',
+  tip_filed:    'text-emerald-400 border-emerald-400/50 bg-emerald-400/10',
   dismissed:    'text-gray-500 border-gray-500/40 bg-gray-500/10',
 }
 
