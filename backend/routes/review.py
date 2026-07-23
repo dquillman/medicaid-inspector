@@ -40,22 +40,38 @@ from routes.auth import require_user, require_admin
 BRAIN_GATE_LIMIT = 10
 
 
+# Case-pipeline states where the work is DONE: reported to the authorities
+# (referred; legacy tip_filed) or dismissed as not-fraud. A terminal case no
+# longer needs a candidate slot — the whole point of the slot is "work this".
+TERMINAL_QUEUE_STATUSES = {"referred", "tip_filed", "dismissed"}
+
+
 async def _brain_top_npis(limit: int = BRAIN_GATE_LIMIT) -> set[str]:
     """The top `limit` ACTIONABLE Brain providers that gate the Review Queue.
 
-    EXPIRED providers (last claim past the ~6yr FCA recovery window — you can
-    neither stop nor recover them) are dropped and their slots backfilled with
-    the next actionable providers, so the work queue isn't crowded by cases you
-    can't pursue. They are NOT removed from the Brain board itself (that stays a
-    complete, auditable ranking — they're still visible there with an EXPIRED
-    badge, and remain available as network/ring evidence). Recovery-lead 'stale'
-    providers are KEPT — those are still actionable within the FCA window.
+    Two kinds of board entries are dropped, their slots backfilled with the
+    next actionable providers, so the work queue isn't crowded by cases that
+    need no work:
+      - EXPIRED providers (last claim past the ~6yr FCA recovery window — you
+        can neither stop nor recover them), and
+      - TERMINAL cases (Reported / Dismissed — resolved by explicit human
+        action; nothing left to do).
+    Neither is removed from the Brain board itself (that stays a complete,
+    auditable ranking — they're visible there with EXPIRED / Reported /
+    Dismissed badges). Terminal cases also remain fully visible in the queue
+    view under their own tabs via the 'actioned' union in _brain_queue_npis —
+    they just stop consuming candidate slots. 'stale' (recovery-lead) and
+    'confirmed' (still needs reporting) are KEPT — both are live work.
 
     Over-pull well past `limit` so the backfill has candidates."""
     import asyncio
     from services.fraud_brain import get_top_frauds
+    from core.review_store import get_queue_statuses
     result = await asyncio.to_thread(get_top_frauds, max(limit * 3, 30), False)
-    actionable = [p["npi"] for p in result.get("top", []) if p.get("recency") != "expired"]
+    board = [p for p in result.get("top", []) if p.get("recency") != "expired"]
+    statuses = get_queue_statuses([p["npi"] for p in board])
+    actionable = [p["npi"] for p in board
+                  if statuses.get(p["npi"]) not in TERMINAL_QUEUE_STATUSES]
     return set(actionable[:limit])
 
 router = APIRouter(prefix="/api/review", tags=["review"], dependencies=[Depends(require_user)])
