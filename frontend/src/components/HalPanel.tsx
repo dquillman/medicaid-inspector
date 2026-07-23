@@ -83,6 +83,16 @@ const MIC_ERRORS: Record<string, string> = {
   'no-speech': "I didn't catch anything — try again, a bit closer to the mic.",
 }
 
+// Chrome hard-blocks mic/speech on an insecure origin: only https://, or
+// localhost / 127.0.0.1, count as a "secure context". A LAN IP or machine
+// name over http:// can never be granted, so say so plainly rather than
+// pointing at Site settings (which won't help).
+const INSECURE_MIC_MSG =
+  'The microphone is blocked because this page is on an insecure origin ' +
+  `(${typeof window !== 'undefined' ? window.location.origin : ''}). ` +
+  'Chrome only allows mic access over https:// or via localhost / 127.0.0.1. ' +
+  'Open the app at http://localhost:<port> or the https:// deployed site, then try again.'
+
 // Derive the NPI the user is currently viewing from the URL. Matches
 // /providers/<npi> and its sub-routes (/investigate, /ownership, …).
 function useCurrentNpi(): string | null {
@@ -486,8 +496,16 @@ export default function HalPanel({
   )
 
   // ---- HAL's ears -----------------------------------------------------------
+  // Set once getUserMedia has granted the mic this session, so the hands-free
+  // re-arm loop skips the permission round-trip and starts instantly.
+  const micGrantedRef = useRef(false)
+
   const listen = useCallback(() => {
     if (!canListen || listening || busy) return
+
+    // Actually spin up SpeechRecognition. Only reached once the mic is known
+    // to be permitted (fast path) or freshly granted below.
+    const startRec = () => {
     window.speechSynthesis?.cancel() // don't listen to ourselves
     const w = window as unknown as Record<string, unknown>
     const Ctor = (w.SpeechRecognition ?? w.webkitSpeechRecognition) as new () => Recognition
@@ -535,6 +553,36 @@ export default function HalPanel({
         { role: 'assistant', content: 'The microphone could not be started in this window.', error: true },
       ])
     }
+    }
+
+    // Fast path: mic already granted this session — start immediately.
+    if (micGrantedRef.current) return startRec()
+
+    // Insecure origin: the browser will never grant the mic here. Say exactly
+    // why instead of failing with the generic "blocked" notice.
+    if (!window.isSecureContext) {
+      setLive(false)
+      setMessages((m) => [...m, { role: 'assistant', content: INSECURE_MIC_MSG, error: true }])
+      return
+    }
+
+    // Explicitly request the mic so Chrome shows the real Allow/Block prompt —
+    // SpeechRecognition alone stays silent when the permission is in "ask"
+    // limbo and just errors with not-allowed. Release the stream right away;
+    // recognition opens its own capture.
+    const md = navigator.mediaDevices
+    if (!md?.getUserMedia) return startRec() // ancient browser — let rec try
+    md.getUserMedia({ audio: true })
+      .then((stream) => {
+        stream.getTracks().forEach((t) => t.stop())
+        micGrantedRef.current = true
+        startRec()
+      })
+      .catch(() => {
+        setListening(false)
+        setLive(false)
+        setMessages((m) => [...m, { role: 'assistant', content: MIC_ERRORS['not-allowed'], error: true }])
+      })
   }, [canListen, listening, busy, send])
   useEffect(() => {
     listenRef.current = listen
