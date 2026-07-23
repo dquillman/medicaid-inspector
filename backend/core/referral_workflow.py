@@ -57,6 +57,13 @@ def _save_to_disk() -> None:
             json.dumps({"referrals": _referrals}, default=str),
             encoding="utf-8",
         )
+        # Sync to GCS — the container's local disk is ephemeral on Cloud Run,
+        # so without this every submit/update/delete is lost on restart.
+        try:
+            from core.gcs_sync import upload_file
+            upload_file("referrals.json")
+        except Exception:
+            pass  # GCS unavailable locally — the local write is still done
     except Exception as e:
         print(f"[referral_workflow] Could not save referrals: {e}")
 
@@ -171,6 +178,28 @@ def update_referral(
         _save_to_disk()
 
     return ref
+
+
+def delete_referral(referral_id: int) -> Optional[dict]:
+    """Remove a referral record (e.g. a mistaken or test entry). Returns the
+    deleted record, or None if not found. Referrals are normally append-only
+    history, so this is an admin-only correction path."""
+    with _lock:
+        for i, r in enumerate(_referrals):
+            if r["id"] == referral_id:
+                removed = _referrals.pop(i)
+                _save_to_disk()
+                return removed
+    return None
+
+
+def npi_has_active_referral(npi: str) -> bool:
+    """True if the provider has a referral in an active stage (submitted /
+    acknowledged / under_investigation). Used to keep the MFCU referral flow
+    and the case ledger consistent."""
+    active = {"submitted", "acknowledged", "under_investigation"}
+    with _lock:
+        return any(r["npi"] == npi and r.get("stage") in active for r in _referrals)
 
 
 # ── queries ───────────────────────────────────────────────────────────────────

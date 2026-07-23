@@ -389,6 +389,18 @@ async def set_case_queue_status(npi: str, body: QueueStatusBody, user: dict = De
         from services.supervised_scorer import schedule_retrain
         schedule_retrain()
 
+    # Single source of truth: "Reported: MFCU" (referred) and the MFCU Referral
+    # Tracker must agree. Marking the case referred from the dropdown creates a
+    # tracker record if none is active, so the tracker never lags the ledger.
+    if body.new_status == "referred":
+        try:
+            from core.referral_workflow import npi_has_active_referral, create_referral
+            if not npi_has_active_referral(npi):
+                create_referral(npi=npi, submitted_by=actor,
+                                notes="Marked Reported: MFCU from the Review Queue")
+        except Exception:
+            pass
+
     enriched = _enrich_items([updated])
     return {"item": enriched[0]}
 

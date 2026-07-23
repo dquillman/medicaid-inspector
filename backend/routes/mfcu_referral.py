@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from core.referral_workflow import (
     create_referral,
     update_referral,
+    delete_referral,
     get_referrals,
     get_referral_by_id,
     get_referral_by_npi,
@@ -20,7 +21,7 @@ from core.referral_workflow import (
 from core.store import get_provider_by_npi
 from core.audit_log import log_action
 from core.phi_logger import log_phi_access
-from routes.auth import require_user
+from routes.auth import require_user, require_admin
 
 router = APIRouter(prefix="/api/referrals", tags=["referrals"], dependencies=[Depends(require_user)])
 
@@ -61,6 +62,17 @@ async def submit_referral(
         case_number=body.case_number,
         notes=body.notes,
     )
+
+    # Single source of truth: filing an MFCU referral IS the case reaching
+    # "Reported: MFCU". Set the case-ledger status so the Review Queue and the
+    # referral tracker can never disagree. Best-effort — the provider may not
+    # be in the review queue (referrals can be filed from the provider page).
+    try:
+        from core.review_store import set_queue_status
+        set_queue_status(npi, "referred", actor=username, actor_type="user",
+                         note=f"MFCU referral {ref['referral_id']} submitted")
+    except Exception:
+        pass
 
     # Audit log
     log_action(
@@ -171,6 +183,29 @@ async def update_referral_endpoint(
     )
 
     return _enrich_referral(ref)
+
+
+@router.delete("/{referral_id:int}")
+async def delete_referral_endpoint(
+    referral_id: int,
+    request: Request,
+    user: dict = Depends(require_admin),
+):
+    """Remove a referral record (admin) — for mistaken or test entries.
+    Referrals are normally append-only history; this is the correction path."""
+    username = user.get("username", "unknown")
+    removed = delete_referral(referral_id)
+    if removed is None:
+        raise HTTPException(404, f"Referral {referral_id} not found")
+    log_action(
+        action_type="referral_deleted",
+        entity_type="provider",
+        entity_id=removed["npi"],
+        details={"referral_id": removed["referral_id"]},
+        user=username,
+        ip_address=request.client.host if request.client else None,
+    )
+    return {"deleted": removed["referral_id"], "npi": removed["npi"]}
 
 
 # ── Stats ─────────────────────────────────────────────────────────────────────
