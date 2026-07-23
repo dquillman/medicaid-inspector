@@ -191,21 +191,37 @@ def train_model() -> dict:
     from core.review_store import get_review_queue
     from core.store import get_prescanned
 
-    # Gather labeled data from review queue
+    # Gather labeled data from the review queue. Labels come from the
+    # case-ledger (queue_status) — the pipeline's source of truth:
+    #   positive: confirmed / referred (Reported; incl. legacy tip_filed)
+    #   negative: dismissed (a human ruled it not-fraud)
+    # The retired workflow `status` field is still read as a FALLBACK so labels
+    # recorded before the pipeline migration keep teaching the model; when both
+    # fields are set, queue_status wins.
     all_review = get_review_queue()
-    positive_statuses = {"confirmed_fraud", "referred"}
-    negative_statuses = {"dismissed"}
+    ledger_positive = {"confirmed", "referred", "tip_filed"}
+    ledger_negative = {"dismissed"}
+    legacy_positive = {"confirmed_fraud", "referred"}
+    legacy_negative = {"dismissed"}
 
     labeled_npis: dict[str, int] = {}
     for item in all_review:
-        status = item.get("status", "")
         npi = item.get("npi", "")
         if not npi:
             continue
-        if status in positive_statuses:
+        qstatus = item.get("queue_status", "") or ""
+        if qstatus in ledger_positive:
             labeled_npis[npi] = 1
-        elif status in negative_statuses:
+        elif qstatus in ledger_negative:
             labeled_npis[npi] = 0
+        else:
+            # No ledger label (still open/under_review) — fall back to a legacy
+            # workflow-status label if one was recorded pre-migration.
+            status = item.get("status", "")
+            if status in legacy_positive:
+                labeled_npis[npi] = 1
+            elif status in legacy_negative:
+                labeled_npis[npi] = 0
 
     total_labeled = len(labeled_npis)
     positive_count = sum(1 for v in labeled_npis.values() if v == 1)
@@ -215,7 +231,7 @@ def train_model() -> dict:
         return {
             "trained": False,
             "error": f"Insufficient labeled samples: {total_labeled} found, minimum 10 required. "
-                     f"Mark more providers as 'confirmed_fraud'/'referred' or 'dismissed' in the Review Queue.",
+                     f"Mark more cases Confirmed/Reported (fraud) or Dismissed (not fraud) in the Review Queue.",
             "positive_count": positive_count,
             "negative_count": negative_count,
             "total_labeled": total_labeled,

@@ -237,27 +237,32 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 export default function FraudBrain() {
   const boardRef = useRef<HTMLDivElement>(null)
-  // Active/All view toggle — a VIEW filter only, defaulting to All. Stale
-  // providers stay on the board (they're recovery leads — FCA reaches back
-  // 6 years; going quiet is itself a bust-out signal) and keep their original
-  // rank numbers; this just hides them when you want active schemes only.
-  const [activeOnly, setActiveOnly] = useState(false)
+  // Actionable/All view toggle — a VIEW filter only, DEFAULTING to Actionable
+  // so the board is always "what needs my attention": resolved cases
+  // (Reported/Dismissed — the work is done) and expired providers (past the
+  // recovery window) are hidden by default and backfilled by the next ranked
+  // candidates, so reporting your whole top-10 refreshes the board instead of
+  // leaving a museum of finished cases. STALE stays visible — recovery leads
+  // are still live work. "All" is one click away and shows everything ranked;
+  // nothing is ever removed from the ranking and ranks never renumber.
+  const [actionableOnly, setActionableOnly] = useState(true)
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['fraud-brain'],
-    queryFn: () => api.fraudBrainTop(10),
+    // Fetch 25 deep so the Actionable view still fills 10 slots after
+    // resolved/expired rows are filtered out.
+    queryFn: () => api.fraudBrainTop(25),
     // Kept short + refetch-on-focus so this board and the Review Queue's Brain
     // scores (via useProviderFlags) converge on the same snapshot.
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   })
-  // Original board rank rides along so hiding inactive rows never promotes #4
-  // to #1 — rank is identity on this board, not a display index. "Inactive" =
-  // stale (recovery lead) OR expired (past the recovery window) — both are
-  // non-active; only fresh/aging are still billing.
   const ranked = (data?.top ?? []).map((p, i) => ({ p, rank: i + 1 }))
-  const isInactive = (r?: string | null) => r === 'stale' || r === 'expired'
-  const shown = activeOnly ? ranked.filter(({ p }) => !isInactive(p.recency)) : ranked
-  const staleCount = ranked.filter(({ p }) => isInactive(p.recency)).length
+  const isResolved = (p: FraudBrainProvider) =>
+    p.queue_status === 'referred' || p.queue_status === 'tip_filed' || p.queue_status === 'dismissed'
+  const isExcluded = ({ p }: { p: FraudBrainProvider }) => p.recency === 'expired' || isResolved(p)
+  const BOARD_SIZE = 10
+  const shown = (actionableOnly ? ranked.filter(r => !isExcluded(r)) : ranked).slice(0, BOARD_SIZE)
+  const hiddenCount = ranked.slice(0, BOARD_SIZE).filter(isExcluded).length
 
   // The reveal: cards seat in sequence, score bars sweep up the threat ramp,
   // brain scores count up, #1 locks. Re-runs on Recompute (data identity changes).
@@ -294,7 +299,7 @@ export default function FraudBrain() {
         }
       })
     },
-    { dependencies: [data?.top, activeOnly], scope: boardRef },
+    { dependencies: [data?.top, actionableOnly], scope: boardRef },
   )
 
   return (
@@ -350,32 +355,33 @@ export default function FraudBrain() {
       )}
       {data?.note && <div className="card"><p className="text-sm text-ink-tertiary">{data.note}</p></div>}
 
-      {/* Active/All view toggle — hides stale (recovery-lead) rows on demand;
-          never removes them from the ranking or renumbers the board. */}
-      {ranked.length > 0 && staleCount > 0 && (
+      {/* Actionable/All view toggle — Actionable (default) hides resolved
+          (Reported/Dismissed) and expired rows, backfilling with the next
+          ranked candidates; All shows everything. Ranks never renumber. */}
+      {ranked.length > 0 && hiddenCount > 0 && (
         <div className="flex items-center gap-2">
           <div className="inline-flex rounded border border-hairline overflow-hidden">
             <button
-              onClick={() => setActiveOnly(false)}
+              onClick={() => setActionableOnly(true)}
               className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider transition-colors ${
-                !activeOnly ? 'bg-surface-2 text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'
+                actionableOnly ? 'bg-surface-2 text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'
+              }`}
+            >
+              Actionable
+            </button>
+            <button
+              onClick={() => setActionableOnly(false)}
+              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider transition-colors border-l border-hairline ${
+                !actionableOnly ? 'bg-surface-2 text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'
               }`}
             >
               All
             </button>
-            <button
-              onClick={() => setActiveOnly(true)}
-              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider transition-colors border-l border-hairline ${
-                activeOnly ? 'bg-surface-2 text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'
-              }`}
-            >
-              Active only
-            </button>
           </div>
           <span className="text-[11px] text-ink-tertiary font-mono">
-            {activeOnly
-              ? `${staleCount} inactive (stale/expired) provider${staleCount === 1 ? '' : 's'} hidden — ranks unchanged`
-              : `${staleCount} of ${ranked.length} no longer active — stale (recovery lead) or expired (past the ~6yr recovery window)`}
+            {actionableOnly
+              ? `${hiddenCount} resolved/expired case${hiddenCount === 1 ? '' : 's'} hidden, next candidates backfilled — ranks unchanged`
+              : `showing all ranked, including reported/dismissed/expired`}
           </span>
         </div>
       )}
