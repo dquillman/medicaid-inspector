@@ -41,6 +41,19 @@ _VERIFIED = {
     "WV": {"url": "https://ago.wv.gov/medicaid-fraud-control-unit-mfcu", "phone": ""},
     "IN": {"url": "https://www.in.gov/attorneygeneral/about-the-office/medicaid-fraud-and-patient-abuse/medicaid-fraud-resources/", "phone": ""},
     "VA": {"url": "https://www.oag.state.va.us/programs-outreach/medicaid-fraud", "phone": ""},
+    # Batch-verified 2026-07-23 against each state's own .gov filing page.
+    "CA": {"url": "https://oag.ca.gov/dmfea/reporting", "phone": ""},
+    "TX": {"url": "https://www.texasattorneygeneral.gov/divisions/law-enforcement/medicaid-fraud-control-unit", "phone": "800-252-8011"},
+    "NY": {"url": "https://ag.ny.gov/medicaid-fraud/contact", "phone": "800-771-7755"},
+    "FL": {"url": "https://www.myfloridalegal.com/page/EBC480598BBF32D885256CC6005B54D1", "phone": "850-414-3300"},
+    "PA": {"url": "https://www.pa.gov/agencies/dhs/report-fraud/medicaid-fraud-abuse", "phone": "844-347-8477"},
+    "OH": {"url": "https://www.ohioattorneygeneral.gov/reportmedicaidfraud", "phone": "800-282-0515"},
+    "IL": {"url": "https://www.illinoisattorneygeneral.gov/open-and-honest-government/Medicaid-Fraud-and-Patient-Abuse/", "phone": "866-748-2297"},
+    "NC": {"url": "https://ncdoj.gov/medicaid-provider-fraud-complaint-form/", "phone": "877-546-7226"},
+    "GA": {"url": "https://law.georgia.gov/key-issues/elder-abuse/medicaid-fraud-and-patient-abuse-complaint-form", "phone": "800-436-7442"},
+    "NJ": {"url": "https://www.nj.gov/oag/medicaidfraud/about.html", "phone": "609-292-1272"},
+    "WA": {"url": "https://www.atg.wa.gov/medicaid-fraud", "phone": "360-586-8888"},
+    "OR": {"url": "https://www.doj.state.or.us/consumer-protection/sales-scams-fraud/medicaid-fraud/", "phone": "971-673-1880"},
 }
 
 
