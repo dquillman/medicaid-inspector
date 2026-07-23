@@ -166,9 +166,12 @@ async def _brain_queue_npis() -> set[str]:
 
     # Keep any case a human has moved off the default 'open' state visible even
     # if it later drops off the board, so in-progress work is never hidden.
+    # EXCEPT archived: the archive is deliberately its own surface (the
+    # Archived tab reads the full store via /archived) — a bulk stale-cleanup
+    # of thousands must not flood the working queue view.
     actioned = {
         i["npi"] for i in get_review_queue()
-        if (i.get("queue_status") or "open") != "open"
+        if (i.get("queue_status") or "open") not in ("open", "archived")
     }
     return top | actioned
 
@@ -435,6 +438,38 @@ async def redact_note(npi: str, note_id: str, user: dict = Depends(require_admin
     if entry is None:
         raise HTTPException(404, f"Review item not found: {npi}")
     return {"npi": npi, "note": entry}
+
+
+@router.get("/archived")
+async def list_archived(page: int = 1, limit: int = 50):
+    """Paginated archive — its own surface, separate from the working queue."""
+    from core.review_store import get_archived_items
+    res = get_archived_items(page=page, limit=limit)
+    res["items"] = _enrich_items(res["items"])
+    return res
+
+
+@router.post("/archive-stale")
+async def archive_all_stale(user: dict = Depends(require_admin)):
+    """Bulk-archive EVERY stale provider (last claim >24mo behind the newest
+    data) — Dave's housekeeping action. Creates archived queue entries for
+    stale providers that never had a case, and archives existing New/
+    Investigating stale cases. Protected states (Confirmed / Reported /
+    Dismissed) are never touched: judgments, proof-of-filing records, and
+    training labels survive. Archived is never a training label, so this is
+    guaranteed model-safe."""
+    from core.review_store import bulk_archive
+    from services.fraud_brain import recency_badge, dataset_newest_month_index
+    actor = user.get("username") or user.get("email") or "admin"
+    newest = dataset_newest_month_index()
+    stale = [
+        {"npi": p["npi"], "risk_score": p.get("risk_score", 0),
+         "total_paid": p.get("total_paid", 0), "total_claims": p.get("total_claims", 0)}
+        for p in get_prescanned()
+        if p.get("npi") and recency_badge(p.get("last_month"), newest) == "stale"
+    ]
+    result = bulk_archive(stale, actor=actor)
+    return {"stale_providers_found": len(stale), **result}
 
 
 @router.get("/{npi}/history")

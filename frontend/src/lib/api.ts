@@ -407,6 +407,15 @@ export const api = {
   getReviewHistory: (npi: string) =>
     get<{ npi: string; audit_trail: AuditEntry[] }>(`/review/${npi}/history`),
 
+  // The archive is its own surface — archived cases are hidden from the
+  // working queue view and read from the full store here.
+  archivedList: (page = 1, limit = 50) =>
+    get<{ items: ReviewItem[]; total: number; page: number }>('/review/archived', { page, limit }),
+
+  archiveAllStale: () =>
+    mutate<{ stale_providers_found: number; archived: number; created: number;
+             protected_skipped: number; already_archived: number }>('POST', '/review/archive-stale'),
+
   // Append-only case-note log — `notes` (the summary box) stays editable;
   // these entries are permanent, timestamped, and authored (human vs HAL).
   getCaseNotes: (npi: string) =>

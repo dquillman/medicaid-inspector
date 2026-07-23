@@ -570,6 +570,15 @@ export default function ReviewQueue() {
     refetchInterval: 15000,
   })
 
+  // The archive is its own surface (bulk stale-cleanup can hold thousands of
+  // cases) — archived rows are excluded from the working-queue payload above
+  // and fetched separately here. `total` drives the tab badge.
+  const { data: archivedData } = useQuery({
+    queryKey: ['review-archived'],
+    queryFn: () => api.archivedList(1, 100),
+    refetchInterval: 30000,
+  })
+
   // Clear selection when the filter changes
   useEffect(() => { setSelectedNpis(new Set()) }, [statusFilter])
 
@@ -581,6 +590,7 @@ export default function ReviewQueue() {
       api.updateReview(npi, update),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review-queue'] })
+      queryClient.invalidateQueries({ queryKey: ['review-archived'] })
       queryClient.invalidateQueries({ queryKey: ['review-history'] })
     },
   })
@@ -594,6 +604,7 @@ export default function ReviewQueue() {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review-queue'] })
+      queryClient.invalidateQueries({ queryKey: ['review-archived'] })
       queryClient.invalidateQueries({ queryKey: ['review-history'] })
       setSelectedNpis(new Set())
     },
@@ -604,6 +615,7 @@ export default function ReviewQueue() {
       api.setQueueStatus(npi, newStatus),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review-queue'] })
+      queryClient.invalidateQueries({ queryKey: ['review-archived'] })
       queryClient.invalidateQueries({ queryKey: ['review-history'] })
     },
   })
@@ -698,12 +710,16 @@ export default function ReviewQueue() {
     confirmed:    rawItems.filter(i => qs(i) === 'confirmed').length,
     referred:     rawItems.filter(isReported).length,
     dismissed:    rawItems.filter(i => qs(i) === 'dismissed').length,
-    archived:     rawItems.filter(i => qs(i) === 'archived').length,
+    // Archived lives outside the working-queue payload — count from its own
+    // endpoint (full-store total, not just the visible page).
+    archived:     archivedData?.total ?? 0,
   }
 
-  // Filter by the selected stage (client-side), then NPI search.
+  // Filter by the selected stage (client-side), then NPI search. The Archived
+  // tab swaps to the archive's own dataset.
   const statusFiltered =
-    statusFilter === 'all'      ? rawItems
+    statusFilter === 'archived' ? (archivedData?.items ?? [])
+    : statusFilter === 'all'      ? rawItems
     : statusFilter === 'referred' ? rawItems.filter(isReported)
     : rawItems.filter(i => qs(i) === statusFilter)
   const searchFiltered = npiSearch.trim()

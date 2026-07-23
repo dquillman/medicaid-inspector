@@ -213,6 +213,83 @@ def update_review_item(
     return result
 
 
+def bulk_archive(npis_with_meta: list[dict], *, actor: str) -> dict:
+    """Archive many providers in ONE pass with ONE disk/GCS save.
+
+    For each entry ({npi, risk_score?, flags?, total_paid?, total_claims?}):
+      - creates a queue item if the NPI has none (so never-worked stale
+        providers can enter the archive), then
+      - sets queue_status='archived' with a full audit entry — UNLESS the case
+        is in a protected state: confirmed/referred/tip_filed (real judgments /
+        proof-of-filing records) or dismissed (a training label) or already
+        archived. Protected cases are counted and left untouched.
+
+    Per-call set_queue_status would save 6k+ times; this exists precisely so a
+    bulk archive is one lock + one save."""
+    now = time.time()
+    archived = created = protected = already = 0
+    protected_states = {"confirmed", "referred", "tip_filed", "dismissed"}
+    with _review_lock:
+        for meta in npis_with_meta:
+            npi = meta.get("npi")
+            if not npi:
+                continue
+            item = _review_items.get(npi)
+            if item is None:
+                item = {
+                    "npi": npi,
+                    "risk_score": meta.get("risk_score", 0),
+                    "flags": meta.get("flags", []),
+                    "signal_results": [],
+                    "total_paid": meta.get("total_paid", 0),
+                    "total_claims": meta.get("total_claims", 0),
+                    "status": "pending",
+                    "queue_status": DEFAULT_QUEUE_STATUS,
+                    "notes": "",
+                    "assigned_to": None,
+                    "added_at": now,
+                    "updated_at": now,
+                    "audit_trail": [],
+                }
+                _review_items[npi] = item
+                created += 1
+            current = _queue_status_of(item)
+            if current == "archived":
+                already += 1
+                continue
+            if current in protected_states:
+                protected += 1
+                continue
+            item.setdefault("audit_trail", []).append({
+                "action": "queue_status_change",
+                "previous_queue_status": current,
+                "new_queue_status": "archived",
+                "actor": actor or "unknown",
+                "actor_type": "user",
+                "timestamp": now,
+                "note": "Bulk archive (stale cleanup) — closed without judgment",
+            })
+            item["queue_status"] = "archived"
+            item["queue_status_updated_at"] = now
+            item["updated_at"] = now
+            archived += 1
+    save_review_to_disk()
+    return {"archived": archived, "created": created,
+            "protected_skipped": protected, "already_archived": already}
+
+
+def get_archived_items(page: int = 1, limit: int = 50) -> dict:
+    """Paginated list of archived cases from the FULL store (they are hidden
+    from the main queue view — the archive is its own surface)."""
+    with _review_lock:
+        items = [dict(i) for i in _review_items.values()
+                 if _queue_status_of(i) == "archived"]
+    items.sort(key=lambda x: -(x.get("queue_status_updated_at") or x.get("updated_at") or 0))
+    total = len(items)
+    start = (max(1, page) - 1) * limit
+    return {"items": items[start:start + limit], "total": total, "page": page}
+
+
 # ── case-ledger status (queue_status) mutations ───────────────────────────────
 
 class QueueStatusError(Exception):
