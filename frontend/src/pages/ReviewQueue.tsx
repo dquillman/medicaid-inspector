@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { api } from '../lib/api'
-import type { ReviewItem, ReviewCounts, AuditEntry, CaseNote } from '../lib/types'
+import type { ReviewItem, AuditEntry, CaseNote } from '../lib/types'
 import { fmt } from '../lib/format'
 import { threatColor, magnitudeGlyph } from '../lib/threat'
 import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
@@ -14,7 +14,10 @@ import ProviderFlags from '../components/ProviderFlags'
 import RecencyBadge from '../components/RecencyBadge'
 import { useProviderFlags } from '../hooks/useProviderFlags'
 
-type StatusFilter = 'all' | 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
+// The queue now speaks ONE status model: the case-ledger (queue_status). The
+// legacy workflow `status` (pending/assigned/investigating) was a redundant
+// second axis and has been retired from the UI.
+type StatusFilter = 'all' | 'open' | 'under_review' | 'tip_filed' | 'confirmed' | 'referred' | 'dismissed'
 
 // The Fraud Brain is the queue's authority, so its fused meta-score is the
 // primary number. The raw 18-signal risk (one of the Brain's five inputs) is
@@ -309,34 +312,20 @@ function CaseNotesPanel({ npi }: { npi: string }) {
   )
 }
 
-function StatusDropdown({ item, onChange }: { item: ReviewItem; onChange: (status: string) => void }) {
-  return (
-    <select
-      value={item.status}
-      onChange={e => onChange(e.target.value)}
-      className="bg-gray-800 text-xs rounded px-1.5 py-1 border border-gray-700 text-gray-300 focus:outline-none focus:border-blue-500 cursor-pointer"
-    >
-      {Object.entries(STATUS_LABELS).map(([key, label]) => (
-        <option key={key} value={key}>{label}</option>
-      ))}
-    </select>
-  )
-}
-
-// Case-ledger status — the human-gated disposition, distinct from the workflow
-// status above. Setting it here is an explicit human action (the analyst is
-// signed in), so tip_filed / confirmed are permitted. The Fraud Brain reads
-// this value one-way for badges; it never affects the computed score.
+// The case-ledger status — now the queue's ONE status control (the legacy
+// workflow dropdown was retired). Human-gated and audited: setting it is an
+// explicit human action, so tip_filed / confirmed are permitted here. The
+// Fraud Brain reads this value one-way for badges; it never affects the score.
 function QueueStatusDropdown({ item, onChange }: { item: ReviewItem; onChange: (status: string) => void }) {
   return (
     <select
       value={item.queue_status ?? 'open'}
       onChange={e => onChange(e.target.value)}
-      title="Case-ledger status (audited). Distinct from drafting a tip; the Fraud Brain reads this read-only."
-      className="mt-1 bg-gray-800 text-[11px] rounded px-1.5 py-1 border border-gray-700 text-cyan-300 focus:outline-none focus:border-cyan-500 cursor-pointer"
+      title="Case status (audited). The Fraud Brain reads this read-only."
+      className="bg-gray-800 text-xs rounded px-1.5 py-1 border border-gray-700 text-cyan-300 focus:outline-none focus:border-cyan-500 cursor-pointer"
     >
       {Object.entries(QUEUE_STATUS_LABELS).map(([key, label]) => (
-        <option key={key} value={key}>Case: {label}</option>
+        <option key={key} value={key}>{label}</option>
       ))}
     </select>
   )
@@ -351,7 +340,6 @@ function ReviewRow({
   onToggleSelect,
   onToggleExpand,
   onToggleTriage,
-  onStatusChange,
   onQueueStatusChange,
   onNotesSave,
   onAssignedToSave,
@@ -364,12 +352,11 @@ function ReviewRow({
   onToggleSelect: (npi: string) => void
   onToggleExpand: (npi: string) => void
   onToggleTriage: (npi: string) => void
-  onStatusChange: (npi: string, status: string) => void
   onQueueStatusChange: (npi: string, status: string) => void
   onNotesSave: (npi: string, notes: string) => void
   onAssignedToSave: (npi: string, assignedTo: string) => void
 }) {
-  const isFraud = item.status === 'confirmed_fraud'
+  const isFraud = item.queue_status === 'confirmed'
   return (
     <>
       <tr
@@ -431,10 +418,7 @@ function ReviewRow({
         </td>
         <td className="px-4 py-3 text-sm text-gray-400">{fmt(item.total_paid)}</td>
         <td className="px-4 py-3">
-          <div className="flex flex-col items-start">
-            <StatusDropdown item={item} onChange={status => onStatusChange(item.npi, status)} />
-            <QueueStatusDropdown item={item} onChange={status => onQueueStatusChange(item.npi, status)} />
-          </div>
+          <QueueStatusDropdown item={item} onChange={status => onQueueStatusChange(item.npi, status)} />
         </td>
         <td className="px-4 py-3">
           <AssignedToCell item={item} onSave={assignedTo => onAssignedToSave(item.npi, assignedTo)} />
@@ -559,7 +543,6 @@ export default function ReviewQueue() {
   const [searchParams] = useSearchParams()
   const statusParam = searchParams.get('status') as StatusFilter | null
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(statusParam ?? 'all')
-  const [page, setPage] = useState(1)
   const [selectedNpis, setSelectedNpis] = useState<Set<string>>(new Set())
   const [npiSearch, setNpiSearch] = useState('')
   // The Fraud Brain is the boss: default the queue to Brain rank ascending
@@ -567,7 +550,6 @@ export default function ReviewQueue() {
   const [sortField, setSortField] = useState<SortField>('brain')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const { brainRank } = useProviderFlags()
-  const LIMIT = 50
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -578,56 +560,43 @@ export default function ReviewQueue() {
     }
   }
 
-  const { data: countsData } = useQuery({
-    queryKey: ['review-counts'],
-    queryFn: api.reviewCounts,
-    refetchInterval: 10000,
-  })
-
-
-  const counts: ReviewCounts = countsData ?? {
-    pending: 0, assigned: 0, investigating: 0, confirmed_fraud: 0, referred: 0, dismissed: 0, total: 0,
-  }
-
+  // The visible queue is a small set (Brain top-N + human-actioned cases), so
+  // fetch it whole and filter/count by case-ledger status CLIENT-SIDE — no
+  // server-side status param, one status model, no separate counts endpoint.
   const { data, isLoading } = useQuery({
-    queryKey: ['review-queue', statusFilter, page],
-    queryFn: () => api.reviewQueue({
-      status: statusFilter === 'all' ? undefined : statusFilter,
-      page,
-      limit: LIMIT,
-    }),
+    queryKey: ['review-queue'],
+    queryFn: () => api.reviewQueue({ page: 1, limit: 500 }),
     refetchInterval: 15000,
   })
 
-  // Clear selection when page/filter changes
-  useEffect(() => { setSelectedNpis(new Set()) }, [statusFilter, page])
+  // Clear selection when the filter changes
+  useEffect(() => { setSelectedNpis(new Set()) }, [statusFilter])
 
   const [expandedNpis, setExpandedNpis] = useState<Set<string>>(new Set())
   const [triageNpis, setTriageNpis] = useState<Set<string>>(new Set())
 
   const updateMutation = useMutation({
-    mutationFn: ({ npi, update }: { npi: string; update: { status?: string; notes?: string; assigned_to?: string | null } }) =>
+    mutationFn: ({ npi, update }: { npi: string; update: { notes?: string; assigned_to?: string | null } }) =>
       api.updateReview(npi, update),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review-queue'] })
-      queryClient.invalidateQueries({ queryKey: ['review-counts'] })
       queryClient.invalidateQueries({ queryKey: ['review-history'] })
     },
   })
 
+  // Bulk case-ledger change — no bulk endpoint exists, so apply setQueueStatus
+  // per NPI (the visible set is small). tip_filed/confirmed are human-gated at
+  // the API, and the analyst is signed in, so those transitions are permitted.
   const bulkMutation = useMutation({
-    mutationFn: (data: { npis: string[]; status: string }) =>
-      api.bulkUpdateReview(data),
+    mutationFn: async ({ npis, newStatus }: { npis: string[]; newStatus: string }) => {
+      for (const npi of npis) await api.setQueueStatus(npi, newStatus)
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['review-queue'] })
-      queryClient.invalidateQueries({ queryKey: ['review-counts'] })
       queryClient.invalidateQueries({ queryKey: ['review-history'] })
       setSelectedNpis(new Set())
     },
   })
-
-  const handleStatusChange = (npi: string, status: string) =>
-    updateMutation.mutate({ npi, update: { status } })
 
   const queueStatusMutation = useMutation({
     mutationFn: ({ npi, newStatus }: { npi: string; newStatus: string }) =>
@@ -681,16 +650,16 @@ export default function ReviewQueue() {
     }
   }
 
-  const handleBulkAction = (status: string) => {
+  const handleBulkAction = (newStatus: string) => {
     const npis = Array.from(selectedNpis)
     if (npis.length === 0) return
-    bulkMutation.mutate({ npis, status })
+    bulkMutation.mutate({ npis, newStatus })
   }
 
   const handleExportCSV = () => {
-    const confirmed = items.filter(i => i.status === 'confirmed_fraud')
+    const confirmed = items.filter(i => i.queue_status === 'confirmed')
     if (confirmed.length === 0) {
-      alert('No confirmed fraud cases on this page to export. Switch to the Confirmed tab first.')
+      alert('No confirmed cases to export. Set a case to "Confirmed" first.')
       return
     }
     const headers = ['NPI', 'Name', 'State', 'Risk Score', 'Flags', 'Total Paid', 'Total Claims', 'Status', 'Notes']
@@ -702,7 +671,7 @@ export default function ReviewQueue() {
       i.flags.length.toString(),
       i.total_paid.toString(),
       i.total_claims.toString(),
-      i.status,
+      i.queue_status ?? 'open',
       `"${(i.notes ?? '').replace(/"/g, '""')}"`,
     ])
     const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
@@ -710,17 +679,32 @@ export default function ReviewQueue() {
     const url  = URL.createObjectURL(blob)
     const a    = document.createElement('a')
     a.href     = url
-    a.download = `confirmed_fraud_${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `confirmed_cases_${new Date().toISOString().slice(0, 10)}.csv`
     a.click()
     URL.revokeObjectURL(url)
   }
 
   const rawItems   = data?.items ?? []
 
-  // NPI search filter (client-side on current page data)
+  // Case-ledger counts, computed client-side over the whole visible queue.
+  const qs = (i: ReviewItem) => i.queue_status ?? 'open'
+  const queueCounts = {
+    total:        rawItems.length,
+    open:         rawItems.filter(i => qs(i) === 'open').length,
+    under_review: rawItems.filter(i => qs(i) === 'under_review').length,
+    tip_filed:    rawItems.filter(i => qs(i) === 'tip_filed').length,
+    confirmed:    rawItems.filter(i => qs(i) === 'confirmed').length,
+    referred:     rawItems.filter(i => qs(i) === 'referred').length,
+    dismissed:    rawItems.filter(i => qs(i) === 'dismissed').length,
+  }
+
+  // Filter by the selected ledger status (client-side), then NPI search.
+  const statusFiltered = statusFilter === 'all'
+    ? rawItems
+    : rawItems.filter(i => qs(i) === statusFilter)
   const searchFiltered = npiSearch.trim()
-    ? rawItems.filter(i => i.npi.includes(npiSearch.trim()))
-    : rawItems
+    ? statusFiltered.filter(i => i.npi.includes(npiSearch.trim()))
+    : statusFiltered
 
   // Client-side sort
   const sortedItems = [...searchFiltered].sort((a, b) => {
@@ -740,25 +724,24 @@ export default function ReviewQueue() {
       case 'risk_score':    cmp = a.risk_score - b.risk_score; break
       case 'flags':         cmp = a.flags.length - b.flags.length; break
       case 'total_paid':    cmp = a.total_paid - b.total_paid; break
-      case 'status':        cmp = a.status.localeCompare(b.status); break
+      case 'status':        cmp = qs(a).localeCompare(qs(b)); break
       case 'updated_at':    cmp = (a.updated_at || 0) - (b.updated_at || 0); break
     }
     return sortDir === 'asc' ? cmp : -cmp
   })
 
   const items      = sortedItems
-  const total      = npiSearch.trim() ? searchFiltered.length : (data?.total ?? 0)
-  const totalPages = npiSearch.trim() ? 1 : Math.ceil((data?.total ?? 0) / LIMIT)
+  const total      = searchFiltered.length
   const allOnPageSelected = items.length > 0 && items.every(i => selectedNpis.has(i.npi))
 
   const tabs: { key: StatusFilter; label: string; count: number }[] = [
-    { key: 'all',             label: 'All',           count: counts.total },
-    { key: 'pending',         label: 'Pending',       count: counts.pending },
-    { key: 'assigned',        label: 'Assigned',      count: counts.assigned },
-    { key: 'investigating',   label: 'Investigating', count: counts.investigating },
-    { key: 'confirmed_fraud', label: 'Confirmed',     count: counts.confirmed_fraud },
-    { key: 'referred',        label: 'Referred',      count: counts.referred },
-    { key: 'dismissed',       label: 'Dismissed',     count: counts.dismissed },
+    { key: 'all',          label: 'All',          count: queueCounts.total },
+    { key: 'open',         label: 'In Review',    count: queueCounts.open },
+    { key: 'under_review', label: 'Under Review', count: queueCounts.under_review },
+    { key: 'tip_filed',    label: 'Tip Filed',    count: queueCounts.tip_filed },
+    { key: 'confirmed',    label: 'Confirmed',    count: queueCounts.confirmed },
+    { key: 'referred',     label: 'Referred',     count: queueCounts.referred },
+    { key: 'dismissed',    label: 'Dismissed',    count: queueCounts.dismissed },
   ]
 
   return (
@@ -770,11 +753,11 @@ export default function ReviewQueue() {
             Flagged Providers Requiring Human Review
           </p>
           <p className="text-xs text-gray-400 mt-2">
-            <span className="text-yellow-400 font-semibold">{counts.pending}</span> cases pending review
+            <span className="text-yellow-400 font-semibold">{queueCounts.open}</span> in review
             <span className="text-gray-600 mx-2">&middot;</span>
-            <span className="text-red-400 font-semibold">{counts.confirmed_fraud}</span> confirmed fraud
+            <span className="text-red-400 font-semibold">{queueCounts.confirmed}</span> confirmed
             <span className="text-gray-600 mx-2">&middot;</span>
-            <span className="text-orange-400 font-semibold">{counts.referred}</span> referred to law enforcement
+            <span className="text-orange-400 font-semibold">{queueCounts.referred}</span> referred to law enforcement
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -782,7 +765,7 @@ export default function ReviewQueue() {
             <input
               type="text"
               value={npiSearch}
-              onChange={e => { setNpiSearch(e.target.value); setPage(1) }}
+              onChange={e => setNpiSearch(e.target.value)}
               placeholder="Search NPI..."
               className="input w-44 pl-8 text-sm font-mono"
             />
@@ -808,13 +791,13 @@ export default function ReviewQueue() {
           <button
             onClick={handleExportCSV}
             className={`px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 ${
-              statusFilter === 'confirmed_fraud'
+              statusFilter === 'confirmed'
                 ? 'bg-red-700 hover:bg-red-600 text-white border-red-500 shadow-lg shadow-red-900/30'
                 : 'bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600'
             }`}
-            aria-label="Export confirmed fraud cases as CSV"
+            aria-label="Export confirmed cases as CSV"
           >
-            {statusFilter === 'confirmed_fraud' && <ArrowDownTrayIcon />}
+            {statusFilter === 'confirmed' && <ArrowDownTrayIcon />}
             Export Confirmed CSV
           </button>
         </div>
@@ -828,8 +811,8 @@ export default function ReviewQueue() {
             label={tab.label}
             count={tab.count}
             active={statusFilter === tab.key}
-            onClick={() => { setStatusFilter(tab.key); setPage(1) }}
-            variant={tab.key === 'confirmed_fraud' ? 'danger' : 'default'}
+            onClick={() => setStatusFilter(tab.key)}
+            variant={tab.key === 'confirmed' ? 'danger' : 'default'}
           />
         ))}
       </div>
@@ -842,11 +825,11 @@ export default function ReviewQueue() {
           </span>
           <div className="flex gap-2 ml-2">
             <button
-              onClick={() => handleBulkAction('confirmed_fraud')}
+              onClick={() => handleBulkAction('confirmed')}
               disabled={bulkMutation.isPending}
               className="px-4 py-1.5 text-xs rounded bg-red-700 hover:bg-red-600 text-white font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
             >
-              Confirm Fraud
+              Confirm
             </button>
             <button
               onClick={() => handleBulkAction('dismissed')}
@@ -856,11 +839,11 @@ export default function ReviewQueue() {
               Dismiss All
             </button>
             <button
-              onClick={() => handleBulkAction('reviewed')}
+              onClick={() => handleBulkAction('under_review')}
               disabled={bulkMutation.isPending}
               className="px-4 py-1.5 text-xs rounded bg-blue-700 hover:bg-blue-600 text-white font-medium transition-colors disabled:opacity-50"
             >
-              Mark Reviewed
+              Mark Under Review
             </button>
             <button
               onClick={() => handleBulkAction('referred')}
@@ -927,7 +910,6 @@ export default function ReviewQueue() {
                   onToggleSelect={handleToggleSelect}
                   onToggleExpand={handleToggleExpand}
                   onToggleTriage={handleToggleTriage}
-                  onStatusChange={handleStatusChange}
                   onQueueStatusChange={handleQueueStatusChange}
                   onNotesSave={handleNotesSave}
                   onAssignedToSave={handleAssignedToSave}
@@ -938,28 +920,8 @@ export default function ReviewQueue() {
         )}
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-gray-400">
-          <span>{total.toLocaleString()} total items</span>
-          <div className="flex gap-2">
-            <button
-              onClick={() => setPage(p => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 transition-colors"
-            >
-              Prev
-            </button>
-            <span className="px-3 py-1">Page {page} of {totalPages}</span>
-            <button
-              onClick={() => setPage(p => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-3 py-1 bg-gray-800 rounded disabled:opacity-40 hover:bg-gray-700 transition-colors"
-            >
-              Next
-            </button>
-          </div>
-        </div>
+      {items.length > 0 && (
+        <div className="text-xs text-gray-500">{total.toLocaleString()} case{total === 1 ? '' : 's'} shown</div>
       )}
 
       {/* MFCU Referral Status Panel */}
