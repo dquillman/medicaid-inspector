@@ -39,6 +39,19 @@ export default function OigTipButton({
               <h3 className="font-display font-semibold text-ink-primary text-sm truncate">HHS-OIG Hotline Tip — {providerName || npi}</h3>
               <button onClick={() => setText(null)} className="text-ink-tertiary hover:text-ink-primary text-lg leading-none shrink-0 ml-3">×</button>
             </div>
+            {/* Destination banner — OIG is FEDERAL (one national hotline), the
+                counterpart to the MFCU flow's per-state destination card. */}
+            <div className="mx-5 mt-3 bg-blue-950/40 border border-blue-800/50 rounded-lg px-4 py-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[11px] uppercase tracking-wider text-blue-300/80 font-semibold">Federal destination — HHS-OIG Hotline</p>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/50 text-emerald-300 border border-emerald-700/50">verified</span>
+              </div>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1 text-xs">
+                <a href="https://tips.oig.hhs.gov/" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">tips.oig.hhs.gov ↗</a>
+                <span className="text-ink-tertiary">1-800-HHS-TIPS</span>
+              </div>
+              <p className="text-[11px] text-ink-tertiary mt-1">Auto-drafted below — review, copy, and submit at the portal (the app only logs that you filed).</p>
+            </div>
             <pre className="flex-1 overflow-auto px-5 py-4 text-xs font-mono text-ink-secondary whitespace-pre-wrap">{text}</pre>
             <div className="flex items-center gap-2 px-5 py-3 border-t border-hairline">
               <button

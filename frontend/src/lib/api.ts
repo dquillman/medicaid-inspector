@@ -1163,6 +1163,14 @@ export const api = {
   submitReferral: (npi: string, data: { mfcu_contact?: string; jurisdiction?: string; case_number?: string; notes?: string }) =>
     mutate<MFCUReferral>('POST', `/referrals/${npi}/submit`, data),
 
+  // Resolve a provider's state to its Medicaid Fraud Control Unit.
+  mfcuDirectory: (state: string) =>
+    get<{
+      state: string | null; state_name: string | null; office: string | null
+      url: string | null; phone: string | null; verified: boolean
+      directory_url: string; namfcu_url: string; note?: string
+    }>(`/referrals/mfcu-directory/${state}`),
+
   listReferrals: (params?: { stage?: string; npi?: string }) =>
     get<ReferralsResponse>('/referrals', params as Record<string, string>),
 

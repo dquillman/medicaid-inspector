@@ -208,6 +208,16 @@ async def delete_referral_endpoint(
     return {"deleted": removed["referral_id"], "npi": removed["npi"]}
 
 
+@router.get("/mfcu-directory/{state}")
+async def mfcu_directory_lookup(state: str):
+    """Resolve a provider's state to its Medicaid Fraud Control Unit — office
+    name, filing URL, phone — so the referral flow can auto-target the right
+    state MFCU. `verified` flags whether the contact is confirmed or a lookup
+    link to check first."""
+    from core.mfcu_directory import get_mfcu
+    return get_mfcu(state)
+
+
 # ── Stats ─────────────────────────────────────────────────────────────────────
 
 @router.get("/stats/summary")

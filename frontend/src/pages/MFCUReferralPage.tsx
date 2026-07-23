@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, get, mutate } from '../lib/api'
@@ -59,6 +59,45 @@ export default function MFCUReferralPage() {
   const brainVal = brainScore(npi ?? '')
   const usingBrain = brainVal != null
   const eligibilityScore = brainVal ?? riskScore
+
+  // ── Auto-target the provider's state MFCU ───────────────────────────
+  const providerState = provider?.state ?? provider?.nppes?.address?.state ?? ''
+  const { data: mfcu } = useQuery({
+    queryKey: ['mfcu-directory', providerState],
+    queryFn: () => api.mfcuDirectory(providerState),
+    enabled: !!providerState,
+  })
+
+  // Auto-generated referral narrative from the provider's flagged signals.
+  const autoNarrative = (() => {
+    if (!provider) return ''
+    const sigLines = flaggedSignals.map(s => `• ${s.signal}: ${s.reason}`).join('\n')
+    const total = provider.spending?.total_paid ?? provider.total_paid ?? 0
+    const claims = provider.spending?.total_claims ?? provider.total_claims ?? 0
+    return (
+      `Subject: ${providerName} (NPI ${npi})` +
+      (provider.specialty ? ` — ${provider.specialty}` : '') +
+      (providerState ? `, ${providerState}` : '') + '.\n\n' +
+      `Nature of complaint: potentially abusive/fraudulent Medicaid billing patterns identified ` +
+      `through analysis of publicly available HHS Medicaid provider-spending data (opendata.hhs.gov). ` +
+      `Reimbursed approximately ${fmt(total)} across ${claims.toLocaleString()} claims, with ` +
+      `${flaggedSignals.length} concurrent fraud-detection signal(s) flagged:\n${sigLines}\n\n` +
+      `These are statistical indicators that warrant investigative review — not adjudicated findings. ` +
+      `Detailed per-signal evidence (peer means, z-scores, procedure codes) available on request.`
+    )
+  })()
+
+  // Prefill jurisdiction + narrative once the provider/MFCU data lands, unless
+  // the analyst has already typed something.
+  useEffect(() => {
+    if (mfcu?.state_name && !jurisdiction) setJurisdiction(mfcu.state_name)
+    if (mfcu?.office && !mfcuContact) {
+      setMfcuContact(mfcu.phone ? `${mfcu.office} — ${mfcu.phone}` : mfcu.office)
+    }
+  }, [mfcu])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (autoNarrative && !notes) setNotes(autoNarrative)
+  }, [autoNarrative])  // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Gate check queries ──────────────────────────────────────────────
   const { data: oigData } = useQuery({
@@ -287,6 +326,38 @@ export default function MFCUReferralPage() {
               {overridden && (
                 <div className="bg-yellow-900/30 border border-yellow-700/50 rounded-lg px-4 py-2.5 text-yellow-300 text-xs">
                   Supervisor override active &mdash; gate requirements were bypassed.
+                </div>
+              )}
+
+              {/* Auto-targeted state MFCU */}
+              {mfcu?.office && (
+                <div className="bg-blue-950/40 border border-blue-800/50 rounded-lg px-4 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] uppercase tracking-wider text-blue-300/80 font-semibold">
+                      File with this state&rsquo;s MFCU
+                    </p>
+                    {mfcu.verified ? (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-900/50 text-emerald-300 border border-emerald-700/50">verified</span>
+                    ) : (
+                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-300 border border-amber-700/50">verify contact</span>
+                    )}
+                  </div>
+                  <p className="text-sm text-gray-200 mt-1">{mfcu.office}</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs">
+                    {mfcu.url && (
+                      <a href={mfcu.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:text-blue-300 underline">
+                        {mfcu.verified ? 'Filing page ↗' : 'Look up filing page ↗'}
+                      </a>
+                    )}
+                    {mfcu.phone && <span className="text-gray-400">{mfcu.phone}</span>}
+                    <a href={mfcu.directory_url} target="_blank" rel="noopener noreferrer" className="text-gray-500 hover:text-gray-300 underline">
+                      HHS-OIG directory ↗
+                    </a>
+                  </div>
+                  {mfcu.note && <p className="text-[11px] text-amber-300/80 mt-1.5">{mfcu.note}</p>}
+                  <p className="text-[11px] text-gray-500 mt-2">
+                    The app submits an internal referral record; file the actual complaint at the state&rsquo;s page above.
+                  </p>
                 </div>
               )}
 
