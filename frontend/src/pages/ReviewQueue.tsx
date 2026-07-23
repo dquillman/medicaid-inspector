@@ -15,8 +15,9 @@ import RecencyBadge from '../components/RecencyBadge'
 import { useProviderFlags } from '../hooks/useProviderFlags'
 
 // The queue speaks ONE status model: the case-ledger pipeline (see queueStatus).
-// Filter keys are the 5 stage values plus 'all'.
-type StatusFilter = 'all' | 'open' | 'under_review' | 'confirmed' | 'referred' | 'dismissed' | 'archived'
+// Filter keys are the stage values plus 'all'. tip_filed = Reported: OIG;
+// referred = Reported: MFCU — two distinct reporting settings.
+type StatusFilter = 'all' | 'open' | 'under_review' | 'confirmed' | 'tip_filed' | 'referred' | 'dismissed' | 'archived'
 
 // The Fraud Brain is the queue's authority, so its fused meta-score is the
 // primary number. The raw 18-signal risk (one of the Brain's five inputs) is
@@ -318,9 +319,7 @@ function CaseNotesPanel({ npi }: { npi: string }) {
 function QueueStatusDropdown({ item, onChange }: { item: ReviewItem; onChange: (status: string) => void }) {
   return (
     <select
-      // Legacy 'tip_filed' has no stage of its own (it now means "Reported" =
-      // 'referred'), so show it as 'referred' in the picker.
-      value={item.queue_status === 'tip_filed' ? 'referred' : (item.queue_status ?? 'open')}
+      value={item.queue_status ?? 'open'}
       onChange={e => onChange(e.target.value)}
       title="Case status (audited). The Fraud Brain reads this read-only."
       className="bg-gray-800 text-xs rounded px-1.5 py-1 border border-gray-700 text-cyan-300 focus:outline-none focus:border-cyan-500 cursor-pointer"
@@ -700,15 +699,16 @@ export default function ReviewQueue() {
   const rawItems   = data?.items ?? []
 
   // Case-ledger counts, computed client-side over the whole visible queue.
-  // 'referred' (Reported) folds in the legacy 'tip_filed' value.
+  // tip_filed (Reported: OIG) and referred (Reported: MFCU) are two distinct
+  // reporting settings, counted separately.
   const qs = (i: ReviewItem) => i.queue_status ?? 'open'
-  const isReported = (i: ReviewItem) => qs(i) === 'referred' || qs(i) === 'tip_filed'
   const queueCounts = {
     total:        rawItems.length,
     open:         rawItems.filter(i => qs(i) === 'open').length,
     under_review: rawItems.filter(i => qs(i) === 'under_review').length,
     confirmed:    rawItems.filter(i => qs(i) === 'confirmed').length,
-    referred:     rawItems.filter(isReported).length,
+    tip_filed:    rawItems.filter(i => qs(i) === 'tip_filed').length,
+    referred:     rawItems.filter(i => qs(i) === 'referred').length,
     dismissed:    rawItems.filter(i => qs(i) === 'dismissed').length,
     // Archived lives outside the working-queue payload — count from its own
     // endpoint (full-store total, not just the visible page).
@@ -719,8 +719,7 @@ export default function ReviewQueue() {
   // tab swaps to the archive's own dataset.
   const statusFiltered =
     statusFilter === 'archived' ? (archivedData?.items ?? [])
-    : statusFilter === 'all'      ? rawItems
-    : statusFilter === 'referred' ? rawItems.filter(isReported)
+    : statusFilter === 'all'    ? rawItems
     : rawItems.filter(i => qs(i) === statusFilter)
   const searchFiltered = npiSearch.trim()
     ? statusFiltered.filter(i => i.npi.includes(npiSearch.trim()))
@@ -760,10 +759,11 @@ export default function ReviewQueue() {
     { key: 'all',          label: 'All',           count: queueCounts.total },
     { key: 'open',         label: 'New',           count: queueCounts.open },
     { key: 'under_review', label: 'Investigating', count: queueCounts.under_review },
-    { key: 'confirmed',    label: 'Confirmed',     count: queueCounts.confirmed },
-    { key: 'referred',     label: 'Reported',      count: queueCounts.referred },
-    { key: 'dismissed',    label: 'Dismissed',     count: queueCounts.dismissed },
-    { key: 'archived',     label: 'Archived',      count: queueCounts.archived },
+    { key: 'confirmed',    label: 'Confirmed',      count: queueCounts.confirmed },
+    { key: 'tip_filed',    label: 'Reported: OIG',  count: queueCounts.tip_filed },
+    { key: 'referred',     label: 'Reported: MFCU', count: queueCounts.referred },
+    { key: 'dismissed',    label: 'Dismissed',      count: queueCounts.dismissed },
+    { key: 'archived',     label: 'Archived',       count: queueCounts.archived },
   ]
 
   return (
@@ -779,7 +779,7 @@ export default function ReviewQueue() {
             <span className="text-gray-600 mx-2">&middot;</span>
             <span className="text-red-400 font-semibold">{queueCounts.confirmed}</span> confirmed fraud
             <span className="text-gray-600 mx-2">&middot;</span>
-            <span className="text-emerald-400 font-semibold">{queueCounts.referred}</span> reported to authorities
+            <span className="text-emerald-400 font-semibold">{queueCounts.tip_filed + queueCounts.referred}</span> reported to authorities
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -861,11 +861,20 @@ export default function ReviewQueue() {
               Confirm Fraud
             </button>
             <button
+              onClick={() => handleBulkAction('tip_filed')}
+              disabled={bulkMutation.isPending}
+              title="Tip filed with the federal HHS-OIG hotline"
+              className="px-4 py-1.5 text-xs rounded bg-teal-700 hover:bg-teal-600 text-white font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+            >
+              Reported: OIG
+            </button>
+            <button
               onClick={() => handleBulkAction('referred')}
               disabled={bulkMutation.isPending}
+              title="Referred to the state Medicaid Fraud Control Unit"
               className="px-4 py-1.5 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
             >
-              Mark Reported
+              Reported: MFCU
             </button>
             <button
               onClick={() => handleBulkAction('dismissed')}

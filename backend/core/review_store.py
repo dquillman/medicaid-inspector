@@ -31,11 +31,11 @@ VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 # so bulk-archiving stale cases can't poison the supervised model.
 VALID_QUEUE_STATUSES = {"open", "under_review", "tip_filed", "dismissed", "confirmed", "referred", "archived"}
 DEFAULT_QUEUE_STATUS = "open"
-# Transitions that carry real-world weight — confirming fraud, and reporting it
-# to the authorities (OIG tip + MFCU referral) — must be a deliberate HUMAN
-# action, never an automatic side effect of an AI drafting a document. Enforced
-# in set_queue_status by requiring actor_type == "user". ('tip_filed' is the
-# legacy value for 'referred'/Reported; kept here so old flows stay gated.)
+# Transitions that carry real-world weight — confirming fraud, and the two
+# reporting settings ('tip_filed' = Reported: OIG hotline tip; 'referred' =
+# Reported: MFCU state referral) — must be a deliberate HUMAN action, never an
+# automatic side effect of an AI drafting a document. Enforced in
+# set_queue_status by requiring actor_type == "user".
 HUMAN_GATED_QUEUE_STATUSES = {"confirmed", "referred", "tip_filed"}
 VALID_ACTOR_TYPES = {"user", "system", "ai"}
 
