@@ -353,13 +353,28 @@ def compute_top_frauds(limit: int = 10) -> dict:
             feat_means[col] = (sum(vals) / len(vals)) if vals else 0.0
 
     # NOTE (candidate-engine / case-ledger separation): the Fraud Brain score is
-    # a pure function of billing/fraud/data signals. Review-queue DISPOSITION
-    # (queue_status: under_review / tip_filed / confirmed / …) is deliberately
-    # NOT read here and never alters the computed score — that would let case
-    # decisions feed back into the very ranking they were made from. Disposition
-    # is attached AFTER scoring, as a read-only display badge (see below), and
-    # OIG-excluded providers are filtered by federal LEIE *data* (not by any
-    # case decision) since they belong on the Excluded page.
+    # a pure function of billing/fraud/data signals — disposition never alters a
+    # computed SCORE. MEMBERSHIP is a different matter (Dave's rule): three
+    # kinds of provider are excluded from the ranking entirely and receive NO
+    # brain rank, same as OIG-excluded providers:
+    #   - REPORTED cases (queue_status referred / legacy tip_filed): the work is
+    #     done — filed with OIG + referred to MFCU. A membership gate, not a
+    #     score input: nothing here changes any remaining provider's score.
+    #   - STALE providers (last claim >24mo behind the newest data): not an
+    #     active scheme.
+    #   - EXPIRED providers (last claim past the ~6yr FCA recovery window):
+    #     neither active nor recoverable.
+    # Excluded counts are reported in the result so the board can say what was
+    # gated. Providers with no parseable claim months are kept (can't prove
+    # staleness). Dismissed cases still rank (they're hidden by the queue gate
+    # and the board's Actionable view, and their labels train the model).
+    from core.review_store import get_queue_statuses
+    _reported = {
+        n for n, s in get_queue_statuses([p.get("npi") for p in providers if p.get("npi")]).items()
+        if s in ("referred", "tip_filed")
+    }
+    newest_idx = dataset_newest_month_index()
+    excluded_counts = {"reported": 0, "stale": 0, "expired": 0}
 
     # Label-trained supervised model — empty dict until the user has labeled
     # >=10 providers and trained it (ML Model page)
@@ -405,6 +420,21 @@ def compute_top_frauds(limit: int = 10) -> dict:
         oig = is_excluded(npi)[0]
         if oig:
             continue
+
+        # Membership gates (see the note above): reported / expired / stale
+        # providers are NOT ranked at all.
+        if npi in _reported:
+            excluded_counts["reported"] += 1
+            continue
+        _age = months_since(p.get("last_month"))
+        if _age is not None and _age > FCA_RECOVERY_WINDOW_MONTHS:
+            excluded_counts["expired"] += 1
+            continue
+        _lm_idx = _ym_index(p.get("last_month"))
+        if _lm_idx is not None and newest_idx is not None and (newest_idx - _lm_idx) > RECENCY_AGING_MONTHS:
+            excluded_counts["stale"] += 1
+            continue
+
         deact_date = get_deactivation(npi)
 
         total_paid = float(p.get("total_paid") or 0)
@@ -617,6 +647,10 @@ def compute_top_frauds(limit: int = 10) -> dict:
     return {
         "top": scored[:limit],
         "providers_evaluated": len(scored),
+        # Membership gates (not score inputs): providers excluded from the
+        # ranking entirely — reported (work done), stale (not active), expired
+        # (past the recovery window). They receive no brain rank.
+        "excluded": excluded_counts,
         "ml_model_used": ml_trained,
         "supervised_model_used": sup_active,
         "corroborated_providers": len(corroboration),

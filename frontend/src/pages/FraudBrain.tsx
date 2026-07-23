@@ -340,6 +340,13 @@ export default function FraudBrain() {
           <MetaStat label="Computed In" value={data.cached ? 'cached' : `${(data.computed_in_ms / 1000).toFixed(1)}s`} />
         </div>
       )}
+      {data?.excluded && (data.excluded.reported + data.excluded.stale + data.excluded.expired) > 0 && (
+        <p className="text-[11px] text-ink-tertiary font-mono">
+          Not ranked (no brain rank): {data.excluded.reported.toLocaleString()} reported ·{' '}
+          {data.excluded.stale.toLocaleString()} stale ·{' '}
+          {data.excluded.expired.toLocaleString()} expired
+        </p>
+      )}
 
       <WorkflowPanel />
 
