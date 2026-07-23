@@ -578,10 +578,23 @@ export default function HalPanel({
         micGrantedRef.current = true
         startRec()
       })
-      .catch(() => {
+      .catch((err: DOMException) => {
         setListening(false)
         setLive(false)
-        setMessages((m) => [...m, { role: 'assistant', content: MIC_ERRORS['not-allowed'], error: true }])
+        // Map getUserMedia's DOMException to the right cause. NotFoundError is
+        // the Win11 gotcha: mic access granted but the OS exposes no device
+        // (usually Privacy → "Let desktop apps access your microphone" is off),
+        // which is a MISSING DEVICE, not a permission block — say so.
+        const name = err?.name ?? ''
+        const why =
+          name === 'NotFoundError' || name === 'DevicesNotFoundError' || name === 'OverconstrainedError'
+            ? 'No microphone was found. On Windows: Settings → Privacy & security → Microphone → turn on ' +
+              '"Let desktop apps access your microphone", and check System → Sound → Input shows a working mic. ' +
+              'Then reload and try again.'
+            : name === 'NotReadableError' || name === 'TrackStartError'
+              ? 'The microphone is in use by another app (or a driver error). Close whatever is using it, then retry.'
+              : MIC_ERRORS['not-allowed'] // NotAllowedError / SecurityError / other → permission block
+        setMessages((m) => [...m, { role: 'assistant', content: why, error: true }])
       })
   }, [canListen, listening, busy, send])
   useEffect(() => {
