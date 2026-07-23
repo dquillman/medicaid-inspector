@@ -4,6 +4,15 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, get, mutate } from '../lib/api'
 import { fmt } from '../lib/format'
 import type { MFCUReferral } from '../lib/types'
+import { useProviderFlags } from '../hooks/useProviderFlags'
+
+// Referral-eligibility threshold, on the FRAUD BRAIN score (the app's authority),
+// not the raw 18-signal risk. Calibrated to the real board distribution: the top
+// of a 95k-provider board is ~49 and NOTHING scores ≥50, so the legacy raw-risk
+// ≥60 gate passed literally no one. 40 captures the genuinely-elevated tier
+// (~top-20). Falls back to the raw risk score when the provider isn't on the
+// current board (e.g. already Reported → excluded from the Brain ranking).
+const BRAIN_REFERRAL_MIN = 40
 
 /* ─── Gate types ────────────────────────────────────────────────────────── */
 
@@ -44,6 +53,13 @@ export default function MFCUReferralPage() {
   const riskScore = provider?.risk_score ?? 0
   const flaggedSignals = (provider?.signal_results ?? []).filter(s => s.flagged)
 
+  // Brain score is the app's authority. It's undefined for providers not on the
+  // current board (off-board or Reported→excluded), so fall back to raw risk.
+  const { brainScore } = useProviderFlags()
+  const brainVal = brainScore(npi ?? '')
+  const usingBrain = brainVal != null
+  const eligibilityScore = brainVal ?? riskScore
+
   // ── Gate check queries ──────────────────────────────────────────────
   const { data: oigData } = useQuery({
     queryKey: ['oig', npi],
@@ -68,12 +84,13 @@ export default function MFCUReferralPage() {
   if (allLoaded && phase === 'gate-loading' && gates.length === 0) {
     const flaggedCount = flaggedSignals.length
 
+    const scoreLabel = usingBrain ? 'Brain score' : 'Risk score (off board)'
     const gate1: GateResult = {
-      label: 'Risk Score Threshold',
-      passed: riskScore >= 60,
-      detail: riskScore >= 60
-        ? `Risk score is ${riskScore} (minimum 60)`
-        : `Risk score is ${riskScore} — must be 60 or above`,
+      label: 'Fraud Brain Threshold',
+      passed: eligibilityScore >= BRAIN_REFERRAL_MIN,
+      detail: eligibilityScore >= BRAIN_REFERRAL_MIN
+        ? `${scoreLabel} ${eligibilityScore.toFixed(1)} (minimum ${BRAIN_REFERRAL_MIN})`
+        : `${scoreLabel} ${eligibilityScore.toFixed(1)} — must be ${BRAIN_REFERRAL_MIN} or above`,
     }
 
     const gate2Passed = flaggedCount >= 3 || oigData.excluded || samData.excluded
