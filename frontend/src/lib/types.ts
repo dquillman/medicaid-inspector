@@ -174,7 +174,7 @@ export interface ReviewItem {
   total_claims: number
   status: 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
   // Case-ledger status — human-gated, decoupled from the computed risk score.
-  queue_status?: 'open' | 'under_review' | 'tip_filed' | 'confirmed' | 'referred' | 'dismissed'
+  queue_status?: 'open' | 'under_review' | 'tip_filed' | 'confirmed' | 'referred' | 'dismissed' | 'archived'
   notes: string
   assigned_to?: string | null
   added_at: number

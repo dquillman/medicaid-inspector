@@ -258,7 +258,8 @@ export default function FraudBrain() {
   })
   const ranked = (data?.top ?? []).map((p, i) => ({ p, rank: i + 1 }))
   const isResolved = (p: FraudBrainProvider) =>
-    p.queue_status === 'referred' || p.queue_status === 'tip_filed' || p.queue_status === 'dismissed'
+    p.queue_status === 'referred' || p.queue_status === 'tip_filed' ||
+    p.queue_status === 'dismissed' || p.queue_status === 'archived'
   const isExcluded = ({ p }: { p: FraudBrainProvider }) => p.recency === 'expired' || isResolved(p)
   const BOARD_SIZE = 10
   const shown = (actionableOnly ? ranked.filter(r => !isExcluded(r)) : ranked).slice(0, BOARD_SIZE)

@@ -246,6 +246,10 @@ def train_model() -> dict:
         if not npi:
             continue
         qstatus = item.get("queue_status", "") or ""
+        if qstatus == "archived":
+            # Archived = closed WITHOUT judgment — never a label, and the
+            # legacy fallback below must not resurrect one either.
+            continue
         if qstatus in ledger_positive:
             labeled_npis[npi] = 1
         elif qstatus in ledger_negative:

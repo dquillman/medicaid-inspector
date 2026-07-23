@@ -518,15 +518,17 @@ TOOLS: list[Tool] = [
             "fraud). IMPORTANT: the weighty transitions 'confirmed' and 'referred' (and legacy "
             "'tip_filed') require a HUMAN and are REFUSED here — an AI must not mark a case "
             "confirmed or reported as a side effect; a person does those in the review UI. An "
-            "AI may set 'open', 'under_review', or 'dismissed'. Does not add NPIs to the queue "
-            "and never changes the risk score."
+            "AI may set 'open', 'under_review', 'dismissed', or 'archived'. 'archived' closes "
+            "a case WITHOUT judgment (too old / not pursuing) — unlike 'dismissed' it is never "
+            "a training label, so it is the right state for stale-case cleanup. Does not add "
+            "NPIs to the queue and never changes the risk score."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "npi": _NPI_SCHEMA,
                 "new_status": {"type": "string", "enum": sorted(
-                    ["open", "under_review", "confirmed", "referred", "tip_filed", "dismissed"])},
+                    ["open", "under_review", "confirmed", "referred", "tip_filed", "dismissed", "archived"])},
                 "note": {"type": "string", "description": "Optional reason/context recorded in the audit trail"},
             },
             "required": ["npi", "new_status"],

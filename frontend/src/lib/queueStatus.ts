@@ -29,12 +29,13 @@ export const CASE_STAGES = [
   { value: 'under_review', label: 'Investigating', blurb: 'You are actively working it' },
   { value: 'confirmed',    label: 'Confirmed',     blurb: 'Verified as fraud' },
   { value: 'referred',     label: 'Reported',      blurb: 'Filed with OIG + referred to MFCU' },
-  { value: 'dismissed',    label: 'Dismissed',     blurb: 'Not fraud — closed' },
+  { value: 'dismissed',    label: 'Dismissed',     blurb: 'Not fraud — closed (trains the model)' },
+  { value: 'archived',     label: 'Archived',      blurb: 'Closed without judgment — never trains the model' },
 ] as const
 
 export const QUEUE_STATUS_ORDER = CASE_STAGES.map(s => s.value)
 
-export type QueueStatus = 'open' | 'under_review' | 'confirmed' | 'referred' | 'tip_filed' | 'dismissed'
+export type QueueStatus = 'open' | 'under_review' | 'confirmed' | 'referred' | 'tip_filed' | 'dismissed' | 'archived'
 
 // Display label for any backend value (incl. legacy `tip_filed` → "Reported").
 export const QUEUE_STATUS_LABELS: Record<string, string> = {
@@ -44,6 +45,7 @@ export const QUEUE_STATUS_LABELS: Record<string, string> = {
   referred:     'Reported',
   tip_filed:    'Reported',   // legacy value — same meaning as referred now
   dismissed:    'Dismissed',
+  archived:     'Archived',
 }
 
 // Colours track the progression: neutral → active → fraud(red) → done(green) → closed(grey).
@@ -54,6 +56,7 @@ export const QUEUE_STATUS_COLORS: Record<string, string> = {
   referred:     'text-emerald-400 border-emerald-400/50 bg-emerald-400/10',
   tip_filed:    'text-emerald-400 border-emerald-400/50 bg-emerald-400/10',
   dismissed:    'text-gray-500 border-gray-500/40 bg-gray-500/10',
+  archived:     'text-gray-600 border-gray-600/40 bg-gray-600/10',
 }
 
 export function queueStatusLabel(status: string): string {

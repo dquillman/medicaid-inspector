@@ -26,7 +26,10 @@ VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 # score refreshes. The Fraud Brain may READ this (for badges / de-prioritising
 # already-actioned providers) but must NEVER write it, and it must never feed
 # back into the computed risk score. One-way, read-only.
-VALID_QUEUE_STATUSES = {"open", "under_review", "tip_filed", "dismissed", "confirmed", "referred"}
+# 'archived' = closed WITHOUT judgment ("too old / not pursuing") — unlike
+# 'dismissed' ("a human judged this NOT fraud") it is NEVER a training label,
+# so bulk-archiving stale cases can't poison the supervised model.
+VALID_QUEUE_STATUSES = {"open", "under_review", "tip_filed", "dismissed", "confirmed", "referred", "archived"}
 DEFAULT_QUEUE_STATUS = "open"
 # Transitions that carry real-world weight — confirming fraud, and reporting it
 # to the authorities (OIG tip + MFCU referral) — must be a deliberate HUMAN

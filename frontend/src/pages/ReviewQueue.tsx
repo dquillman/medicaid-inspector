@@ -16,7 +16,7 @@ import { useProviderFlags } from '../hooks/useProviderFlags'
 
 // The queue speaks ONE status model: the case-ledger pipeline (see queueStatus).
 // Filter keys are the 5 stage values plus 'all'.
-type StatusFilter = 'all' | 'open' | 'under_review' | 'confirmed' | 'referred' | 'dismissed'
+type StatusFilter = 'all' | 'open' | 'under_review' | 'confirmed' | 'referred' | 'dismissed' | 'archived'
 
 // The Fraud Brain is the queue's authority, so its fused meta-score is the
 // primary number. The raw 18-signal risk (one of the Brain's five inputs) is
@@ -698,6 +698,7 @@ export default function ReviewQueue() {
     confirmed:    rawItems.filter(i => qs(i) === 'confirmed').length,
     referred:     rawItems.filter(isReported).length,
     dismissed:    rawItems.filter(i => qs(i) === 'dismissed').length,
+    archived:     rawItems.filter(i => qs(i) === 'archived').length,
   }
 
   // Filter by the selected stage (client-side), then NPI search.
@@ -746,6 +747,7 @@ export default function ReviewQueue() {
     { key: 'confirmed',    label: 'Confirmed',     count: queueCounts.confirmed },
     { key: 'referred',     label: 'Reported',      count: queueCounts.referred },
     { key: 'dismissed',    label: 'Dismissed',     count: queueCounts.dismissed },
+    { key: 'archived',     label: 'Archived',      count: queueCounts.archived },
   ]
 
   return (
@@ -852,9 +854,18 @@ export default function ReviewQueue() {
             <button
               onClick={() => handleBulkAction('dismissed')}
               disabled={bulkMutation.isPending}
+              title="Judgment: NOT fraud — this trains the model"
               className="px-4 py-1.5 text-xs rounded bg-gray-600 hover:bg-gray-500 text-white font-medium transition-colors disabled:opacity-50"
             >
               Dismiss
+            </button>
+            <button
+              onClick={() => handleBulkAction('archived')}
+              disabled={bulkMutation.isPending}
+              title="Close WITHOUT judgment (too old / not pursuing) — never trains the model"
+              className="px-4 py-1.5 text-xs rounded bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600 font-medium transition-colors disabled:opacity-50"
+            >
+              Archive
             </button>
           </div>
           <button

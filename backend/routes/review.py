@@ -41,9 +41,10 @@ BRAIN_GATE_LIMIT = 10
 
 
 # Case-pipeline states where the work is DONE: reported to the authorities
-# (referred; legacy tip_filed) or dismissed as not-fraud. A terminal case no
-# longer needs a candidate slot — the whole point of the slot is "work this".
-TERMINAL_QUEUE_STATUSES = {"referred", "tip_filed", "dismissed"}
+# (referred; legacy tip_filed), dismissed as not-fraud, or archived (closed
+# without judgment). A terminal case no longer needs a candidate slot — the
+# whole point of the slot is "work this".
+TERMINAL_QUEUE_STATUSES = {"referred", "tip_filed", "dismissed", "archived"}
 
 
 async def _brain_top_npis(limit: int = BRAIN_GATE_LIMIT) -> set[str]:
