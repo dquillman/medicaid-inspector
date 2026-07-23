@@ -18,7 +18,9 @@ export const QUEUE_STATUS_ORDER = [
 export type QueueStatus = (typeof QUEUE_STATUS_ORDER)[number]
 
 export const QUEUE_STATUS_LABELS: Record<string, string> = {
-  open:         'In Review',
+  // 'open' = the default/untouched state. Labeled "New" (not "In Review") so it
+  // reads as clearly distinct from "Under Review" (actively being worked).
+  open:         'New',
   under_review: 'Under Review',
   tip_filed:    'Tip Filed',
   confirmed:    'Confirmed',

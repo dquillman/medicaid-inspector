@@ -736,7 +736,7 @@ export default function ReviewQueue() {
 
   const tabs: { key: StatusFilter; label: string; count: number }[] = [
     { key: 'all',          label: 'All',          count: queueCounts.total },
-    { key: 'open',         label: 'In Review',    count: queueCounts.open },
+    { key: 'open',         label: 'New',          count: queueCounts.open },
     { key: 'under_review', label: 'Under Review', count: queueCounts.under_review },
     { key: 'tip_filed',    label: 'Tip Filed',    count: queueCounts.tip_filed },
     { key: 'confirmed',    label: 'Confirmed',    count: queueCounts.confirmed },
@@ -753,7 +753,7 @@ export default function ReviewQueue() {
             Flagged Providers Requiring Human Review
           </p>
           <p className="text-xs text-gray-400 mt-2">
-            <span className="text-yellow-400 font-semibold">{queueCounts.open}</span> in review
+            <span className="text-yellow-400 font-semibold">{queueCounts.open}</span> new
             <span className="text-gray-600 mx-2">&middot;</span>
             <span className="text-red-400 font-semibold">{queueCounts.confirmed}</span> confirmed
             <span className="text-gray-600 mx-2">&middot;</span>
