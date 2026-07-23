@@ -246,16 +246,25 @@ export default function FraudBrain() {
   // are still live work. "All" is one click away and shows everything ranked;
   // nothing is ever removed from the ranking and ranks never renumber.
   const [actionableOnly, setActionableOnly] = useState(true)
+  // The Recompute button must genuinely bypass the backend's 15-min cache —
+  // previously it refetched the CACHED board, which made it a no-op. The ref
+  // flips to true for exactly one fetch when the button is clicked.
+  const forceRef = useRef(false)
   const { data, isLoading, error, refetch, isFetching } = useQuery({
     queryKey: ['fraud-brain'],
     // Fetch 25 deep so the Actionable view still fills 10 slots after
     // resolved/expired rows are filtered out.
-    queryFn: () => api.fraudBrainTop(25),
+    queryFn: () => {
+      const force = forceRef.current
+      forceRef.current = false
+      return api.fraudBrainTop(25, force)
+    },
     // Kept short + refetch-on-focus so this board and the Review Queue's Brain
     // scores (via useProviderFlags) converge on the same snapshot.
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   })
+  const recompute = () => { forceRef.current = true; void refetch() }
   const ranked = (data?.top ?? []).map((p, i) => ({ p, rank: i + 1 }))
   const isResolved = (p: FraudBrainProvider) =>
     p.queue_status === 'referred' || p.queue_status === 'tip_filed' ||
@@ -321,7 +330,7 @@ export default function FraudBrain() {
           </p>
         </div>
         <button
-          onClick={() => refetch()}
+          onClick={recompute}
           disabled={isFetching}
           className="shrink-0 px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-surface-2 hover:bg-hairline border border-hairline hover:border-filament-dim rounded text-ink-secondary hover:text-filament-core transition-colors disabled:opacity-50"
         >

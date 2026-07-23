@@ -668,13 +668,33 @@ def compute_top_frauds(limit: int = 10) -> dict:
     }
 
 
+def _apply_live_ledger(entries: list[dict]) -> list[dict]:
+    """Re-check the case ledger on every CACHED serve: a provider Dave just
+    marked Reported (or archived) must vanish from the board immediately, not
+    after the 15-min TTL. Cheap (one in-memory dict read); returns fresh copies
+    with up-to-date queue_status and newly-reported/archived rows dropped —
+    the same membership rule compute_top_frauds applies at compute time."""
+    from core.review_store import get_queue_statuses
+    statuses = get_queue_statuses([e["npi"] for e in entries])
+    out = []
+    for e in entries:
+        qs = statuses.get(e["npi"])
+        if qs in ("referred", "tip_filed", "archived"):
+            continue
+        out.append({**e, "queue_status": qs})
+    return out
+
+
 def get_top_frauds(limit: int = 10, force_refresh: bool = False) -> dict:
     """TTL-cached wrapper around compute_top_frauds."""
     with _lock:
         cached = _cache["result"]
         fresh = (time.time() - _cache["computed_at"]) < CACHE_TTL_SEC
-    if cached and fresh and not force_refresh and len(cached.get("top", [])) >= limit:
-        return {**cached, "top": cached["top"][:limit], "cached": True}
+    if cached and fresh and not force_refresh:
+        live = _apply_live_ledger(cached["top"])
+        if len(live) >= limit:
+            return {**cached, "top": live[:limit], "cached": True}
+        # Too few rows survive the live ledger check — fall through to recompute.
 
     # Defense-in-depth: never serve OR cache a ranking computed while the OIG
     # exclusion store is empty. On a cold start that store loads at startup /
@@ -687,7 +707,7 @@ def get_top_frauds(limit: int = 10, force_refresh: bool = False) -> dict:
     from core.oig_store import get_oig_stats
     oig_ready = get_oig_stats().get("record_count", 0) > 0
     if not oig_ready and cached and len(cached.get("top", [])) >= limit:
-        return {**cached, "top": cached["top"][:limit], "cached": True, "warming": True}
+        return {**cached, "top": _apply_live_ledger(cached["top"])[:limit], "cached": True, "warming": True}
 
     result = compute_top_frauds(limit=max(limit, 25))  # compute a few extra for cheap re-serves
 
