@@ -55,6 +55,7 @@ function PrepareCaseButton({ npi, queueStatus }: { npi: string; queueStatus?: st
       setMsg(r.packet_ok ? 'Prepared — packet ready in Review Queue' : 'Prepared — open packet manually (build failed)')
       qc.invalidateQueries({ queryKey: ['fraud-brain'] })
       qc.invalidateQueries({ queryKey: ['review-queue'] })
+      qc.invalidateQueries({ queryKey: ['brain-membership'] })
     } catch (err) {
       setState('error')
       setMsg(err instanceof Error ? err.message : 'Preparation failed')
@@ -296,6 +297,7 @@ function Stat({ label, value }: { label: string; value: string }) {
 
 export default function FraudBrain() {
   const boardRef = useRef<HTMLDivElement>(null)
+  const qc = useQueryClient()
   // Actionable/All view toggle — a VIEW filter only, DEFAULTING to Actionable
   // so the board is always "what needs my attention": resolved cases
   // (Reported/Dismissed — the work is done) and expired providers (past the
@@ -323,7 +325,13 @@ export default function FraudBrain() {
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   })
-  const recompute = () => { forceRef.current = true; void refetch() }
+  const recompute = () => {
+    forceRef.current = true
+    void refetch()
+    // A forced recompute updates the backend's cached board; refresh the
+    // membership map too so the Review Queue's Brain scores don't lag behind.
+    void qc.invalidateQueries({ queryKey: ['brain-membership'] })
+  }
   const ranked = (data?.top ?? []).map((p, i) => ({ p, rank: i + 1 }))
   const isResolved = (p: FraudBrainProvider) =>
     p.queue_status === 'referred' || p.queue_status === 'tip_filed' ||

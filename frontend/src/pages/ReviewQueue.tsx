@@ -75,6 +75,7 @@ function RunAutoPrepButton() {
       setMsg(r.last_result || (r.ok ? 'Prepared' : 'Nothing to prepare'))
       qc.invalidateQueries({ queryKey: ['review-queue'] })
       qc.invalidateQueries({ queryKey: ['auto-prep-status'] })
+      qc.invalidateQueries({ queryKey: ['brain-membership'] })
       setTimeout(() => setState('idle'), 4000)
     } catch (err) {
       setState('error')

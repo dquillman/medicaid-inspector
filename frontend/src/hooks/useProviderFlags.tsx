@@ -29,10 +29,16 @@ export function ProviderFlagsProvider({ children }: { children: ReactNode }) {
     // pages like Claim Patterns / Billing Codes surface providers well past the
     // top-100, and the BRAIN chip should appear for any provider on the board.
     queryFn: () => api.fraudBrainMembership(500),
-    // Short stale window + refetch on focus so the Review Queue's Brain scores
-    // stay in lockstep with the Fraud Brain page's board — otherwise a snapshot
-    // cached right after a backend deploy (cold start) lingers and disagrees.
+    // Keep the Review Queue's Brain scores in lockstep with the Fraud Brain
+    // board. This provider mounts ONCE at app level, so page navigation never
+    // remounts it — without a poll, a snapshot cached before a board recompute
+    // (or a backend cold start) lingers and disagrees with the board. The
+    // membership endpoint serves from the backend's 15-min cache (a cheap,
+    // near-instant read), so polling every 60s is cheap insurance against drift,
+    // on top of refetch-on-focus and the explicit invalidation the board's
+    // Recompute / case-prep actions fire.
     staleTime: 60_000,
+    refetchInterval: 60_000,
     refetchOnWindowFocus: true,
     retry: 1,
   })
