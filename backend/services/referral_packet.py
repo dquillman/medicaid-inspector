@@ -387,6 +387,32 @@ def render_referral_html(packet: dict, *, hcpcs_descriptions: dict | None = None
         if slim_note else ""
     )
 
+    # Executive summary — the report-ready headline an OIG/MFCU reviewer reads
+    # first: the scheme in one line + dollars at risk + strength. The one-line
+    # scheme is the strongest triggered signal's own finding (its "reason"),
+    # falling back to the plain-English narrative's first sentence.
+    _flagged_sigs = [s for s in packet["signals"] if s.get("flagged")]
+    _top_sig = max(_flagged_sigs, key=lambda s: (s.get("score") or 0) * float(s.get("weight") or 0),
+                   default=None)
+    _scheme = (_top_sig or {}).get("reason") or ""
+    if not _scheme:
+        # narrative is a dict {sections:[{title,content}]}; take the first
+        # section's opening sentence as the fallback scheme line.
+        _narr = packet.get("narrative")
+        _secs = _narr.get("sections") if isinstance(_narr, dict) else None
+        _first = ((_secs[0].get("content") if _secs else "") or "").strip()
+        _scheme = (_first.split(". ")[0] + ".") if _first else "Multiple fraud signals triggered — see the analysis below."
+    exec_summary = (
+        f'<div style="border:2px solid {head_color};border-radius:10px;padding:16px 20px;margin:0 0 20px;background:#fff7f7">'
+        f'<div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#991b1b;font-weight:bold;margin-bottom:8px">Executive Summary</div>'
+        f'<p style="margin:0 0 10px;font-size:15px;color:#111;font-weight:600">{_esc(_scheme)}</p>'
+        f'<div style="display:flex;gap:28px;flex-wrap:wrap;font-size:13px;color:#374151">'
+        f'<span><strong style="color:#991b1b;font-size:16px">{_fmt(bill["total_paid"])}</strong> total Medicaid paid (dollars at risk)</span>'
+        f'<span><strong>{risk["flagged_count"]}</strong> of {risk["total_signals"]} fraud signals triggered</span>'
+        f'<span>Recommendation: <strong>{_esc(rec.get("level","") or "See section 10")}</strong></span>'
+        f'</div></div>'
+    )
+
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="UTF-8">
 <title>Fraud Referral Packet - NPI {_esc(npi)}</title>
@@ -421,6 +447,7 @@ td{{padding:8px 12px;border-bottom:1px solid #e5e7eb;vertical-align:top}}
     <div style="font-size:10px;letter-spacing:1px;opacity:0.7">RISK SCORE</div>
   </div>
 </div>
+{exec_summary}
 
 <h2>1. Provider Identification</h2>
 <table>

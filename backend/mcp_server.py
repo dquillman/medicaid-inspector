@@ -536,6 +536,28 @@ TOOLS: list[Tool] = [
         },
     ),
     Tool(
+        name="list_queue",
+        description=(
+            "List the NPIs currently in the Investigation (review) queue, newest "
+            "activity first — for triage, dedupe, and cross-checking against the "
+            "live Brain ranking. Returns each case's NPI, provider name, state, "
+            "case-ledger status (open=New, under_review=Investigating, confirmed, "
+            "tip_filed=Reported: OIG, referred=Reported: MFCU, dismissed, archived), "
+            "risk score, and added/updated timestamps, plus overall counts by "
+            "status. Optionally filter by a single status. This is the read "
+            "counterpart to update_queue_status; it does NOT change anything."
+        ),
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "status": {"type": "string", "description": "Optional filter",
+                           "enum": sorted(["open", "under_review", "confirmed",
+                                           "referred", "tip_filed", "dismissed", "archived"])},
+                "limit": {"type": "integer", "description": "Max rows (default 100, max 500)"},
+            },
+        },
+    ),
+    Tool(
         name="update_bug_status",
         description=(
             "Change the status of a bug previously recorded via log_bug (OPEN / "
@@ -751,6 +773,61 @@ async def _tool_update_queue_status(args: dict) -> dict:
     }
 
 
+# ── Tool 13: list_queue ───────────────────────────────────────────────────────
+
+_QUEUE_STATUS_LABELS = {
+    "open": "New", "under_review": "Investigating", "confirmed": "Confirmed",
+    "tip_filed": "Reported: OIG", "referred": "Reported: MFCU",
+    "dismissed": "Dismissed", "archived": "Archived",
+}
+
+
+async def _tool_list_queue(args: dict) -> dict:
+    """Enumerate what's actually in the Investigation (review) queue — the
+    counterpart to update_queue_status (which needs an NPI you already know) and
+    top_risky_providers (the live Brain ranking, NOT the queue). Lets JARVIS see
+    every case sitting in the queue to triage, dedupe, or recommend dismissals
+    without the user hand-supplying each NPI."""
+    from core.review_store import get_review_queue, get_review_counts
+    from core.store import get_provider_by_npi
+
+    status = str(args.get("status", "")).strip() or None
+    limit = int(args.get("limit", 100) or 100)
+    limit = max(1, min(limit, 500))
+
+    items = get_review_queue(status_filter=status)
+    # Newest activity first so triage sees recently-touched cases at the top.
+    items = sorted(items, key=lambda it: it.get("updated_at") or it.get("added_at") or 0, reverse=True)
+
+    rows = []
+    for it in items[:limit]:
+        npi = it.get("npi")
+        p = get_provider_by_npi(npi) or {}
+        name = (it.get("provider_name") or p.get("provider_name")
+                or (p.get("nppes") or {}).get("name") or "")
+        state = it.get("state") or p.get("state") or ((p.get("nppes") or {}).get("address") or {}).get("state", "")
+        qs = it.get("queue_status") or "open"
+        rows.append({
+            "npi": npi,
+            "provider_name": name,
+            "state": state,
+            "queue_status": qs,
+            "status_label": _QUEUE_STATUS_LABELS.get(qs, qs),
+            "risk_score": round(float(it.get("risk_score") or p.get("risk_score") or 0), 1),
+            "added_at": it.get("added_at"),
+            "updated_at": it.get("updated_at"),
+        })
+
+    _log_phi("read", "case", "*", tool="list_queue", status=status or "all", returned=len(rows))
+    return {
+        "counts": get_review_counts(),
+        "status_filter": status or "all",
+        "returned": len(rows),
+        "total_in_queue": len(items),
+        "queue": rows,
+    }
+
+
 # ── Tool 12: update_bug_status ────────────────────────────────────────────────
 
 _VALID_BUG_STATUSES = {"OPEN", "IN_PROGRESS", "FIXED", "WONT_FIX", "DUPLICATE"}
@@ -869,6 +946,7 @@ _HANDLERS = {
     "log_bug": _tool_log_bug,
     "list_bugs": _tool_list_bugs,
     "update_queue_status": _tool_update_queue_status,
+    "list_queue": _tool_list_queue,
     "add_case_note": _tool_add_case_note,
     "update_bug_status": _tool_update_bug_status,
 }

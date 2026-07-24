@@ -7,9 +7,10 @@ import { useProviderFlags } from '../hooks/useProviderFlags'
  * nothing when neither applies, so it's safe to drop next to any NPI/name.
  */
 export default function ProviderFlags({ npi, className = '' }: { npi: string; className?: string }) {
-  const { isWatched, brainRank, isTipped } = useProviderFlags()
+  const { isWatched, brainRank, brainScore, isTipped } = useProviderFlags()
   const watched = isWatched(npi)
   const rank = brainRank(npi)
+  const score = brainScore(npi)
   const tipped = isTipped(npi)
   if (!watched && rank === undefined && !tipped) return null
 
@@ -22,7 +23,7 @@ export default function ProviderFlags({ npi, className = '' }: { npi: string; cl
         <Link
           to="/fraud-brain"
           onClick={(e) => e.stopPropagation()}
-          title={`On the Fraud Brain list — rank #${rank}`}
+          title={`On the Fraud Brain list — rank #${rank}${score !== undefined ? `, Brain score ${score.toFixed(1)}/100` : ''}. Click to open the board.`}
           className="text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-threat-high/15 text-threat-high border border-threat-high/40 hover:bg-threat-high/25 transition-colors"
         >
           BRAIN #{rank}
