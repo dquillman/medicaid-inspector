@@ -278,16 +278,24 @@ async def auto_prep_loop() -> None:
         await asyncio.sleep(1800)
 
 
+# queue_status values that mean a human has actually started working the
+# case — auto-prepare must not touch these. "open" is deliberately NOT here:
+# it's the default the instant a provider is merely added to the queue, before
+# any investigation happens, so it stays eligible for auto-preparation.
+_ALREADY_WORKED_STATUSES = {"under_review", "tip_filed", "confirmed", "referred", "dismissed", "archived"}
+
+
 def pick_nightly_lead() -> str | None:
-    """The ONE provider the nightly job prepares: the #1 fresh, unworked Brain
-    lead that hasn't been prepared yet. Returns None when there's nothing to do
-    (board empty, or every top lead already prepared/worked)."""
+    """The ONE provider the nightly job prepares: the #1 fresh Brain lead that
+    isn't already being worked (queue_status beyond 'open') and hasn't been
+    auto-prepared yet. Returns None when there's nothing to do (board empty,
+    or every top lead is already in progress or prepared)."""
     try:
         from services.fraud_brain import get_top_frauds
         from core.review_store import get_review_item
         board = get_top_frauds(limit=10)
         for e in board.get("top", []):
-            if e.get("queue_status"):  # already in the ledger — being worked
+            if e.get("queue_status") in _ALREADY_WORKED_STATUSES:
                 continue
             item = get_review_item(e["npi"])
             if item and item.get("prepared_at"):
