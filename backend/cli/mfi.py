@@ -65,6 +65,18 @@ _DEFAULT_GCLOUD_REGION = os.environ.get("MFI_GCLOUD_REGION", "us-central1")
 _DEFAULT_GCLOUD_PROJECT = os.environ.get("MFI_GCLOUD_PROJECT", "medicaid-inspector")
 _HEALTH_TIMEOUT_SECONDS = 60
 
+# ── Auto-memory: teach HAL what shipped ──────────────────────────────────────
+# The Second Brain is centralized (one brain, every HAL face reads it), so a
+# successful deploy writes a release note there via the shared writer and lets
+# it sync to Firestore. That keeps MFI's cloud HAL — and the console, Admin
+# Core, Cipher, etc. — current with zero per-app read-side wiring. Best-effort:
+# a memory failure must NEVER fail a deploy.
+_HAL_APP_NAME = "mfi"
+_HAL_BRAIN_DIR = pathlib.Path(os.environ.get("HAL_BRAIN_DIR", r"G:\Users\daveq\2nd Brain"))
+# Marker in the repo root records the last version taught, so redeploying the
+# same version (e.g. `deploy all` runs backend then frontend) teaches once.
+_HAL_RELEASE_MARKER = _BACKEND_DIR.parent / ".hal_released"
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 def _log(msg: str) -> None:
@@ -620,6 +632,72 @@ def cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+# ── Subcommand: remember-release (teach HAL) ─────────────────────────────────
+def _current_version() -> str:
+    pkg = _BACKEND_DIR.parent / "frontend" / "package.json"
+    return json.loads(pkg.read_text(encoding="utf-8")).get("version", "")
+
+
+def _release_notes_from_git() -> str:
+    """The HEAD commit message — in the release flow this is the `vX.Y.Z: …`
+    commit (subject + bullet body), which is exactly the changelog we want."""
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(_BACKEND_DIR.parent), "log", "-1", "--pretty=%B"],
+            capture_output=True, text=True, check=True,
+        )
+        return out.stdout.strip()
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def _teach_hal_release(*, version: str, notes: str, force: bool = False) -> bool:
+    """Write a release note into the Second Brain via the shared writer, so
+    every HAL face learns what shipped. Returns True if HAL was taught.
+    Best-effort — callers ignore the result; this never raises."""
+    try:
+        version = (version or "").strip().lstrip("v")
+        if not version:
+            return False
+        if not force and _HAL_RELEASE_MARKER.exists():
+            if _HAL_RELEASE_MARKER.read_text(encoding="utf-8").strip() == version:
+                return False  # already taught this release (e.g. backend+frontend pair)
+        writer = _HAL_BRAIN_DIR / "remember-release.py"
+        if not writer.exists():
+            _log(f"HAL memory skipped: brain writer not found at {writer} "
+                 "(set HAL_BRAIN_DIR if the Second Brain lives elsewhere)")
+            return False
+        if not notes.strip():
+            _log("HAL memory skipped: no release notes (commit the vX.Y.Z release message first)")
+            return False
+        # Same interpreter running this CLI — the writer is stdlib-only and calls
+        # hal.py itself for the brain-specific Python.
+        proc = subprocess.run(
+            [sys.executable, str(writer), _HAL_APP_NAME, version, "--from-stdin"],
+            input=notes, text=True, cwd=str(_HAL_BRAIN_DIR), check=False,
+        )
+        if proc.returncode == 0:
+            _HAL_RELEASE_MARKER.write_text(version + "\n", encoding="utf-8")
+            _log(f"taught HAL: {_HAL_APP_NAME} v{version} (Second Brain + Firestore)")
+            return True
+        _log(f"HAL memory writer exited {proc.returncode} — deploy is unaffected")
+        return False
+    except Exception as exc:  # noqa: BLE001 — memory must never break a deploy
+        _log(f"HAL memory step failed ({exc}) — deploy is unaffected")
+        return False
+
+
+def cmd_remember_release(args: argparse.Namespace) -> int:
+    """Explicitly teach HAL what this release shipped (normally automatic on
+    deploy). Notes default to the HEAD commit message; --notes overrides."""
+    version = (args.version or _current_version()).strip()
+    notes = args.notes if args.notes else _release_notes_from_git()
+    if not notes.strip():
+        return _err("no release notes — pass --notes or make the vX.Y.Z release commit first")
+    ok = _teach_hal_release(version=version, notes=notes, force=True)
+    return 0 if ok else _err("HAL was not taught (see message above)")
+
+
 # ── Argument parsing ─────────────────────────────────────────────────────────
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -719,13 +797,28 @@ def _build_parser() -> argparse.ArgumentParser:
     p_version = sub.add_parser("version", help="Print version and exit")
     p_version.set_defaults(func=cmd_version)
 
+    # remember-release (teach HAL — normally automatic after deploy)
+    p_rr = sub.add_parser(
+        "remember-release",
+        help="Teach HAL what this release shipped (writes the Second Brain + syncs)",
+    )
+    p_rr.add_argument("--version", default=None, help="Version taught (default: frontend/package.json)")
+    p_rr.add_argument("--notes", default=None, help="Changelog text (default: HEAD commit message)")
+    p_rr.set_defaults(func=cmd_remember_release)
+
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
-    return args.func(args)
+    rc = args.func(args)
+    # Auto-memory: after a successful deploy, teach HAL what shipped so every
+    # HAL face stays current. Marker-guarded (once per version) and best-effort
+    # — it can only log, never change the deploy's exit code.
+    if rc == 0 and getattr(args, "command", None) == "deploy":
+        _teach_hal_release(version=_current_version(), notes=_release_notes_from_git())
+    return rc
 
 
 if __name__ == "__main__":

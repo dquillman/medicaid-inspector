@@ -98,3 +98,4 @@ backend/phi_access_log.json
 
 # Stale build-staging fossil — canonical Dockerfile is at repo root
 deploy-tmp/
+.hal_released
