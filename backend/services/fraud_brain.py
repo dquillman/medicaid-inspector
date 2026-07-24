@@ -357,6 +357,10 @@ def compute_top_frauds(limit: int = 10) -> dict:
     # computed SCORE. MEMBERSHIP is a different matter (Dave's rule): three
     # kinds of provider are excluded from the ranking entirely and receive NO
     # brain rank, same as OIG-excluded providers:
+    #   - CONFIRMED cases (queue_status confirmed): a human has verified the
+    #     fraud — investigation is over. The board is for leads still needing
+    #     investigation, so a confirmed case drops off and is worked (reported)
+    #     from the Review Queue, not the board. (Dave's call 2026-07-24.)
     #   - REPORTED cases (queue_status referred / legacy tip_filed): the work is
     #     done — filed with OIG + referred to MFCU. A membership gate, not a
     #     score input: nothing here changes any remaining provider's score.
@@ -369,12 +373,11 @@ def compute_top_frauds(limit: int = 10) -> dict:
     # staleness). Dismissed cases still rank (they're hidden by the queue gate
     # and the board's Actionable view, and their labels train the model).
     from core.review_store import get_queue_statuses
-    _reported = {
-        n for n, s in get_queue_statuses([p.get("npi") for p in providers if p.get("npi")]).items()
-        if s in ("referred", "tip_filed")
-    }
+    _statuses = get_queue_statuses([p.get("npi") for p in providers if p.get("npi")])
+    _reported = {n for n, s in _statuses.items() if s in ("referred", "tip_filed")}
+    _confirmed = {n for n, s in _statuses.items() if s == "confirmed"}
     newest_idx = dataset_newest_month_index()
-    excluded_counts = {"reported": 0, "stale": 0, "expired": 0}
+    excluded_counts = {"reported": 0, "confirmed": 0, "stale": 0, "expired": 0}
 
     # Label-trained supervised model — empty dict until the user has labeled
     # >=10 providers and trained it (ML Model page)
@@ -421,8 +424,11 @@ def compute_top_frauds(limit: int = 10) -> dict:
         if oig:
             continue
 
-        # Membership gates (see the note above): reported / expired / stale
-        # providers are NOT ranked at all.
+        # Membership gates (see the note above): confirmed / reported / expired
+        # / stale providers are NOT ranked at all.
+        if npi in _confirmed:
+            excluded_counts["confirmed"] += 1
+            continue
         if npi in _reported:
             excluded_counts["reported"] += 1
             continue
@@ -670,16 +676,17 @@ def compute_top_frauds(limit: int = 10) -> dict:
 
 def _apply_live_ledger(entries: list[dict]) -> list[dict]:
     """Re-check the case ledger on every CACHED serve: a provider Dave just
-    marked Reported (or archived) must vanish from the board immediately, not
-    after the 15-min TTL. Cheap (one in-memory dict read); returns fresh copies
-    with up-to-date queue_status and newly-reported/archived rows dropped —
-    the same membership rule compute_top_frauds applies at compute time."""
+    marked Confirmed / Reported (or archived) must vanish from the board
+    immediately, not after the 15-min TTL. Cheap (one in-memory dict read);
+    returns fresh copies with up-to-date queue_status and newly-confirmed/
+    reported/archived rows dropped — the same membership rule
+    compute_top_frauds applies at compute time."""
     from core.review_store import get_queue_statuses
     statuses = get_queue_statuses([e["npi"] for e in entries])
     out = []
     for e in entries:
         qs = statuses.get(e["npi"])
-        if qs in ("referred", "tip_filed", "archived"):
+        if qs in ("confirmed", "referred", "tip_filed", "archived"):
             continue
         out.append({**e, "queue_status": qs})
     return out

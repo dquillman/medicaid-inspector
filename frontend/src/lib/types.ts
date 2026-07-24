@@ -1756,7 +1756,7 @@ export interface FraudBrainResponse {
   providers_evaluated: number
   // Membership gates: providers excluded from the ranking entirely (no brain
   // rank) — reported (work done), stale (not active), expired (past recovery).
-  excluded?: { reported: number; stale: number; expired: number }
+  excluded?: { confirmed: number; reported: number; stale: number; expired: number }
   ml_model_used: boolean
   supervised_model_used?: boolean
   corroborated_providers: number
