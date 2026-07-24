@@ -339,6 +339,53 @@ async def add_single_review(body: AddReviewBody, user: dict = Depends(require_us
     return {"item": enriched[0], "already_existed": False}
 
 
+# NOTE: static /prepare/* paths are declared BEFORE /prepare/{npi} — FastAPI
+# matches in declaration order, so the parameterized route must come last.
+
+@router.get("/prepare/status")
+async def auto_prep_status(user: dict = Depends(require_user)):
+    """Nightly auto-prepare state: when it last ran, which single lead it
+    prepared (one per day by design — Dave submits at most one/day)."""
+    from services.case_prep import get_auto_prep_status
+    return get_auto_prep_status()
+
+
+@router.post("/prepare/run-nightly")
+async def run_nightly_now(user: dict = Depends(require_admin)):
+    """Admin: trigger today's single-lead auto-preparation immediately
+    (same date guard — refuses a second run in one day unless nothing ran)."""
+    from services.case_prep import run_auto_prep_once
+    return await run_auto_prep_once()
+
+
+@router.post("/prepare/{npi}")
+async def prepare_case_endpoint(npi: str, user: dict = Depends(require_user)):
+    """One-click case preparation — automates workflow steps 2–6: opens the
+    case at Under Review with the auto-note, corroborates (network ring ties,
+    claim patterns, Brain evidence) into an AI-authored case note, and attaches
+    the referral packet. Human-gated steps (Confirm / submit / Reported) are
+    untouched — the analyst finishes those.
+
+    Honors the same Brain-top-10 promotion gate as /add for NEW queue entries;
+    a provider already in the ledger can be prepared regardless of rank."""
+    from services.case_prep import prepare_case
+
+    if not get_review_item(npi):
+        top_npis = await _brain_top_npis()
+        if npi not in top_npis:
+            raise HTTPException(
+                400,
+                f"NPI {npi} is not currently in the Fraud Brain top {BRAIN_GATE_LIMIT}. "
+                "Only providers on the Brain board can be prepared into the Review Queue.",
+            )
+    actor = user.get("username") or user.get("email") or "user"
+    result = await prepare_case(npi, actor=f"case-prep ({actor})")
+    if not result.get("ok"):
+        code = 409 if result.get("error") == "already prepared" else 400
+        raise HTTPException(code, result.get("error", "preparation failed"))
+    return result
+
+
 @router.post("/bulk-update")
 async def bulk_update_review(body: BulkUpdateBody):
     """Update status for multiple NPIs at once."""

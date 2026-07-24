@@ -391,6 +391,17 @@ export const api = {
   addToReview: (data: { npi: string; status?: string; notes?: string; assigned_to?: string }) =>
     mutate<{ item: ReviewItem; already_existed: boolean }>('POST', '/review/add', data),
 
+  // One-click case preparation — automates workflow steps 2–6 (open case,
+  // corroborate into a case note, attach referral packet). Long-running
+  // (~1–2 min: network + packet build); human steps stay human.
+  prepareCase: (npi: string) =>
+    mutate<{ ok: boolean; npi: string; provider_name: string; brain_score?: number;
+             packet_ok: boolean; elapsed_s: number }>('POST', `/review/prepare/${npi}`),
+
+  autoPrepStatus: () =>
+    get<{ enabled: boolean; one_per_day: boolean; runs_at_utc_hour: number;
+          last_run_date?: string; last_prepared_npi?: string; last_result?: string }>('/review/prepare/status'),
+
   reviewBackfill: () =>
     mutate<{ status: string; added: number }>('POST', '/review/backfill'),
 

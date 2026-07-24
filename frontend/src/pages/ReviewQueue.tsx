@@ -390,6 +390,14 @@ function ReviewRow({
               {item.provider_name || <span className="text-gray-600 italic">--</span>}
             </span>
             <ProviderFlags npi={item.npi} className="ml-1.5 shrink-0" />
+            {item.prepared_at != null && (
+              <span
+                className="ml-1.5 shrink-0 align-middle text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/40"
+                title="Auto-prepared: corroboration noted in the case log and the referral packet is attached. Your move: read the packet, Confirm if real, submit, mark Reported."
+              >
+                READY
+              </span>
+            )}
             {item.stale && (
               <span
                 className="ml-1.5 shrink-0 align-middle text-[10px] font-mono font-semibold leading-none px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/40"

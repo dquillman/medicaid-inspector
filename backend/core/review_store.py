@@ -570,6 +570,29 @@ def get_review_item(npi: str) -> Optional[dict]:
 
 # ── case management extensions ───────────────────────────────────────────────
 
+def mark_prepared(npi: str, *, actor: str = "case-prep") -> Optional[dict]:
+    """Stamp a case as auto-prepared (evidence gathered, packet attached) so the
+    UI can badge it "Ready for review". Idempotent; audit-trailed."""
+    now = time.time()
+    with _review_lock:
+        item = _review_items.get(npi)
+        if item is None:
+            return None
+        item["prepared_at"] = now
+        item["prepared_by"] = actor
+        item["updated_at"] = now
+        item.setdefault("audit_trail", []).append({
+            "action": "case_prepared",
+            "actor": actor,
+            "actor_type": "ai",
+            "timestamp": now,
+            "note": "Auto-preparation complete — corroboration noted, packet attached",
+        })
+        result = dict(item)
+    save_review_to_disk()
+    return result
+
+
 def add_document(npi: str, doc: dict) -> Optional[dict]:
     """Add a document record to a review case. Returns updated item or None."""
     now = time.time()

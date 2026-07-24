@@ -268,6 +268,12 @@ async def lifespan(app: FastAPI):
     # NOTE: Parquet stays remote (read via DuckDB httpfs) — no local download on Cloud Run.
     # The 2.8GB file is too large to download reliably in a container.
 
+    # Nightly auto-prepare: ONE Fraud Brain lead per day gets steps 2-6 run
+    # automatically (case opened, corroboration noted, packet attached). Date-
+    # guarded state in auto_prep_state.json (GCS-synced) makes restarts safe.
+    from services.case_prep import auto_prep_loop
+    asyncio.create_task(auto_prep_loop())
+
     yield
 
 

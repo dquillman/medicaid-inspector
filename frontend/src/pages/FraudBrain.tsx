@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import Breadcrumbs from '../components/Breadcrumbs'
@@ -19,6 +19,50 @@ import type { FraudBrainProvider } from '../lib/types'
  * ranking. The Brain reads queue_status one-way — this display never writes it
  * and it never affects the brain_score. Title spells out the separation.
  */
+/**
+ * One-click preparation — automates workflow steps 2–6 for this lead: opens
+ * the case at Under Review with the auto-note, corroborates (ring ties, claim
+ * patterns, Brain evidence) into an AI-authored case note, and attaches the
+ * referral packet. The human-gated steps (Confirm → submit → Reported) stay
+ * yours. Long-running (~1–2 min), so the button shows live state.
+ */
+function PrepareCaseButton({ npi, disabled }: { npi: string; disabled?: boolean }) {
+  const qc = useQueryClient()
+  const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [msg, setMsg] = useState('')
+  const run = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (state === 'running' || state === 'done') return
+    setState('running')
+    try {
+      const r = await api.prepareCase(npi)
+      setState('done')
+      setMsg(r.packet_ok ? 'Prepared — packet ready in Review Queue' : 'Prepared — open packet manually (build failed)')
+      qc.invalidateQueries({ queryKey: ['fraud-brain'] })
+      qc.invalidateQueries({ queryKey: ['review-queue'] })
+    } catch (err) {
+      setState('error')
+      setMsg(err instanceof Error ? err.message : 'Preparation failed')
+    }
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <button
+        onClick={run}
+        disabled={disabled || state === 'running' || state === 'done'}
+        title="Auto-run steps 2–6: open case, corroborate (network/claim patterns), attach referral packet. You still confirm and submit."
+        className="shrink-0 px-2 py-1 text-[10px] font-mono uppercase tracking-wider bg-surface-2 hover:bg-hairline border border-hairline hover:border-filament-dim rounded text-ink-secondary hover:text-filament-core transition-colors disabled:opacity-50"
+      >
+        {state === 'running' ? 'Preparing…' : state === 'done' ? 'Prepared ✓' : 'Prepare Case'}
+      </button>
+      {msg && (
+        <span className={`text-[10px] ${state === 'error' ? 'text-threat-high' : 'text-ink-tertiary'}`}>{msg}</span>
+      )}
+    </span>
+  )
+}
+
 function QueueStatusBadge({ status }: { status: string }) {
   const cls = QUEUE_STATUS_COLORS[status] ?? 'text-ink-secondary border-hairline bg-surface-2'
   return (
@@ -168,7 +212,8 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
             {/* Data-recency badge — annotation only, never a scoring input.
                 Stale = recovery lead (FCA reaches back 6 years), not innocent. */}
             <RecencyBadge recency={p.recency} lastActiveMonth={p.last_active_month} dataAgeMonths={p.data_age_months} />
-            <div className="ml-auto">
+            <div className="ml-auto flex items-center gap-1.5">
+              <PrepareCaseButton npi={p.npi} disabled={!!p.queue_status && p.queue_status !== 'open'} />
               <OigTipButton npi={p.npi} providerName={p.provider_name} state={p.state} riskScore={p.brain_score} />
             </div>
           </div>

@@ -193,6 +193,10 @@ export interface ReviewItem {
   last_active_month?: string | null
   data_age_months?: number | null
   recency?: 'fresh' | 'aging' | 'stale' | 'expired' | null
+  // Auto-preparation (case_prep): set when steps 2–6 ran — evidence noted,
+  // packet attached — so the queue can badge "Ready for review".
+  prepared_at?: number | null
+  prepared_by?: string | null
 }
 
 export interface OigStatus {
