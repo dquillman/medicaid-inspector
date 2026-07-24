@@ -13,6 +13,7 @@ import QuickTriagePanel from '../components/QuickTriagePanel'
 import ProviderFlags from '../components/ProviderFlags'
 import RecencyBadge from '../components/RecencyBadge'
 import { useProviderFlags } from '../hooks/useProviderFlags'
+import { useAuth } from '../lib/auth'
 
 // The queue speaks ONE status model: the case-ledger pipeline (see queueStatus).
 // Filter keys are the stage values plus 'all'. tip_filed = Reported: OIG;
@@ -45,6 +46,59 @@ function BrainCell({ npi, risk }: { npi: string; risk: number }) {
       >
         risk {risk.toFixed(1)}
       </span>
+    </div>
+  )
+}
+
+/**
+ * Admin on-demand trigger for auto-prepare — nightly runs the top 2 Brain
+ * leads automatically; this lets you pull that forward or prepare more right
+ * now if you decide to work more than the daily default. Preparing is not
+ * submitting: every prepared case still needs a human Confirm + submit.
+ */
+function RunAutoPrepButton() {
+  const { isAdmin } = useAuth()
+  const qc = useQueryClient()
+  const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [msg, setMsg] = useState('')
+  const { data: status } = useQuery({
+    queryKey: ['auto-prep-status'],
+    queryFn: () => api.autoPrepStatus(),
+    enabled: isAdmin,
+    staleTime: 60_000,
+  })
+  if (!isAdmin) return null
+
+  const run = async () => {
+    setState('running')
+    try {
+      const r = await api.runAutoPrepNow({ force: true, count: 2 })
+      setState('done')
+      setMsg(r.last_result || (r.ok ? 'Prepared' : 'Nothing to prepare'))
+      qc.invalidateQueries({ queryKey: ['review-queue'] })
+      qc.invalidateQueries({ queryKey: ['auto-prep-status'] })
+      setTimeout(() => setState('idle'), 4000)
+    } catch (err) {
+      setState('error')
+      setMsg(err instanceof Error ? err.message : 'Failed')
+    }
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <button
+        onClick={run}
+        disabled={state === 'running'}
+        title={`Auto-prepare the top unworked Brain leads now (#1 and #2 by default). Last run: ${status?.last_run_date ?? 'never'} — ${status?.last_result ?? 'n/a'}`}
+        className="px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600 disabled:opacity-50"
+      >
+        {state === 'running' ? 'Preparing…' : 'Run Auto-Prep Now (#1 + #2)'}
+      </button>
+      {msg && (
+        <span className={`text-xs max-w-[220px] truncate ${state === 'error' ? 'text-red-400' : 'text-gray-400'}`} title={msg}>
+          {msg}
+        </span>
+      )}
     </div>
   )
 }
@@ -811,6 +865,7 @@ export default function ReviewQueue() {
               </button>
             )}
           </div>
+          <RunAutoPrepButton />
           <button
             onClick={() => window.open('/api/review/export/csv', '_blank', 'noopener,noreferrer')}
             className="px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600"

@@ -399,8 +399,15 @@ export const api = {
              packet_ok: boolean; elapsed_s: number }>('POST', `/review/prepare/${npi}`),
 
   autoPrepStatus: () =>
-    get<{ enabled: boolean; one_per_day: boolean; runs_at_utc_hour: number;
-          last_run_date?: string; last_prepared_npi?: string; last_result?: string }>('/review/prepare/status'),
+    get<{ enabled: boolean; leads_per_night: number; runs_at_utc_hour: number;
+          last_run_date?: string; last_prepared_npis?: string[]; last_result?: string }>('/review/prepare/status'),
+
+  // Admin: run auto-prepare on demand (e.g. wants more than the nightly count
+  // prepared today). force bypasses the once-a-day guard; count overrides how
+  // many top leads to prepare (default matches the nightly job's own default).
+  runAutoPrepNow: (opts?: { force?: boolean; count?: number }) =>
+    mutate<{ ok: boolean; results?: unknown[]; last_prepared_npis?: string[]; last_result?: string }>(
+      'POST', `/review/prepare/run-nightly?force=${opts?.force ?? true}&count=${opts?.count ?? 2}`),
 
   reviewBackfill: () =>
     mutate<{ status: string; added: number }>('POST', '/review/backfill'),

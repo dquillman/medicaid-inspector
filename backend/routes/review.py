@@ -351,14 +351,13 @@ async def auto_prep_status(user: dict = Depends(require_user)):
 
 
 @router.post("/prepare/run-nightly")
-async def run_nightly_now(force: bool = False, user: dict = Depends(require_admin)):
-    """Admin: trigger today's single-lead auto-preparation immediately.
-    By default honors the date guard (refuses a second run in one day);
-    ?force=true re-evaluates today's pick regardless — for retrying after a
-    "no eligible lead" result caused by a since-fixed picker bug, not for
-    preparing extra leads in a day."""
+async def run_nightly_now(force: bool = False, count: int = 2, user: dict = Depends(require_admin)):
+    """Admin: trigger today's auto-preparation immediately (default: top 2
+    leads). By default honors the date guard (refuses a second run in one
+    day); ?force=true re-evaluates today's pick regardless — e.g. to prepare
+    more leads on demand, or retry after a since-fixed picker bug."""
     from services.case_prep import run_auto_prep_once
-    return await run_auto_prep_once(force=force)
+    return await run_auto_prep_once(force=force, count=count)
 
 
 @router.post("/prepare/{npi}")

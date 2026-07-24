@@ -200,11 +200,13 @@ async def prepare_case(npi: str, *, actor: str = "case-prep") -> dict:
             "elapsed_s": round(time.time() - t0, 1)}
 
 
-# ── Nightly auto-prepare: ONE lead per day ───────────────────────────────────
-# Dave submits at most one referral a day, so the nightly job prepares exactly
-# the #1 fresh unworked Brain lead — never a batch. State (last run date, what
-# was prepared) is a small JSON persisted to disk + GCS so restarts/redeploys
-# can't double-prepare a day or silently skip one.
+# ── Nightly auto-prepare: the top N unworked leads per day ───────────────────
+# PREPARING is not SUBMITTING — case_prep never sets a human-gated status
+# (confirmed/tip_filed/referred), so preparing multiple leads costs nothing on
+# the reporting side; it just means more evidence-gathered, packet-ready cases
+# are waiting when Dave decides how many to actually work/submit that day.
+# State (last run date, what was prepared) is a small JSON persisted to disk +
+# GCS so restarts/redeploys can't double-prepare a day or silently skip one.
 
 import datetime as _dt
 import json as _json
@@ -212,6 +214,7 @@ import pathlib as _pathlib
 
 _STATE_FILE = _pathlib.Path(__file__).parent.parent / "auto_prep_state.json"
 AUTO_PREP_HOUR_UTC = 9  # ~2am Pacific / 3am Mountain — after any data refresh
+AUTO_PREP_LEADS_PER_NIGHT = 2  # #1 and #2 fresh unworked Brain leads
 
 
 def _load_state() -> dict:
@@ -232,38 +235,48 @@ def _save_state(state: dict) -> None:
 
 def get_auto_prep_status() -> dict:
     """For the UI/API: when it last ran and what it prepared."""
-    return {"enabled": True, "one_per_day": True,
+    return {"enabled": True, "leads_per_night": AUTO_PREP_LEADS_PER_NIGHT,
             "runs_at_utc_hour": AUTO_PREP_HOUR_UTC, **_load_state()}
 
 
-async def run_auto_prep_once(*, force: bool = False) -> dict:
-    """Prepare today's single lead if it hasn't been done yet today."""
+async def run_auto_prep_once(*, force: bool = False, count: int = AUTO_PREP_LEADS_PER_NIGHT) -> dict:
+    """Prepare today's top `count` leads (default 2 — #1 and #2) if today
+    hasn't run yet. Each lead is independent: one failing doesn't block the
+    other. Submission stays 100% manual regardless of how many are prepared."""
     today = _dt.datetime.now(_dt.timezone.utc).date().isoformat()
     state = _load_state()
     if not force and state.get("last_run_date") == today:
         return {"ok": False, "skipped": "already ran today", **state}
-    npi = pick_nightly_lead()
-    if not npi:
-        state.update({"last_run_date": today, "last_result": "nothing to prepare "
+
+    npis = pick_nightly_leads(count)
+    if not npis:
+        state.update({"last_run_date": today, "last_prepared_npis": [],
+                      "last_result": "nothing to prepare "
                       "(board empty or all top leads already worked/prepared)"})
         _save_state(state)
-        return {"ok": False, "skipped": "no eligible lead", **state}
-    result = await prepare_case(npi, actor="nightly-auto-prep")
+        return {"ok": False, "skipped": "no eligible leads", **state}
+
+    results = []
+    for npi in npis:
+        results.append(await prepare_case(npi, actor="nightly-auto-prep"))
+    prepared = [r["npi"] for r in results if r.get("ok")]
+    failed = [(r["npi"], r.get("error", "unknown")) for r in results if not r.get("ok")]
     state.update({
         "last_run_date": today,
-        "last_prepared_npi": npi if result.get("ok") else state.get("last_prepared_npi"),
-        "last_result": ("prepared " + npi) if result.get("ok")
-                       else f"failed: {result.get('error', 'unknown')}",
+        "last_prepared_npis": prepared or state.get("last_prepared_npis", []),
+        "last_result": (f"prepared {', '.join(prepared)}" if prepared else "no leads prepared")
+                       + (f"; failed: {failed}" if failed else ""),
         "last_run_at": time.time(),
     })
     _save_state(state)
-    return {**result, **state}
+    return {"ok": bool(prepared), "results": results, **state}
 
 
 async def auto_prep_loop() -> None:
     """Background task (started from main.py lifespan): once past the daily
-    hour, run the single-lead preparation. Checks every 30 min; the date guard
-    in run_auto_prep_once makes restarts and multiple checks harmless."""
+    hour, run the day's preparation (top N leads). Checks every 30 min; the
+    date guard in run_auto_prep_once makes restarts and multiple checks
+    harmless."""
     await asyncio.sleep(120)  # let startup (state download, caches) settle
     while True:
         try:
@@ -271,8 +284,8 @@ async def auto_prep_loop() -> None:
             if now.hour >= AUTO_PREP_HOUR_UTC:
                 res = await run_auto_prep_once()
                 if res.get("ok"):
-                    logger.info("nightly auto-prep: prepared %s (%s)",
-                                res.get("npi"), res.get("provider_name"))
+                    logger.info("nightly auto-prep: prepared %s",
+                                res.get("last_prepared_npis"))
         except Exception:  # noqa: BLE001 — the loop must survive anything
             logger.error("nightly auto-prep iteration failed", exc_info=True)
         await asyncio.sleep(1800)
@@ -285,22 +298,25 @@ async def auto_prep_loop() -> None:
 _ALREADY_WORKED_STATUSES = {"under_review", "tip_filed", "confirmed", "referred", "dismissed", "archived"}
 
 
-def pick_nightly_lead() -> str | None:
-    """The ONE provider the nightly job prepares: the #1 fresh Brain lead that
-    isn't already being worked (queue_status beyond 'open') and hasn't been
-    auto-prepared yet. Returns None when there's nothing to do (board empty,
-    or every top lead is already in progress or prepared)."""
+def pick_nightly_leads(count: int = AUTO_PREP_LEADS_PER_NIGHT) -> list[str]:
+    """The top `count` Brain leads (by rank, #1 first) the nightly job
+    prepares: fresh, not already being worked (queue_status beyond 'open'),
+    and not yet auto-prepared. Returns fewer than `count` (possibly empty)
+    when the board doesn't have that many eligible leads."""
+    picked: list[str] = []
     try:
         from services.fraud_brain import get_top_frauds
         from core.review_store import get_review_item
         board = get_top_frauds(limit=10)
         for e in board.get("top", []):
+            if len(picked) >= count:
+                break
             if e.get("queue_status") in _ALREADY_WORKED_STATUSES:
                 continue
             item = get_review_item(e["npi"])
             if item and item.get("prepared_at"):
                 continue
-            return e["npi"]
+            picked.append(e["npi"])
     except Exception:  # noqa: BLE001
         logger.warning("case_prep: nightly lead pick failed", exc_info=True)
-    return None
+    return picked
