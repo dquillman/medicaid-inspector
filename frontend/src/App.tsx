@@ -51,6 +51,7 @@ import CommandPalette from './components/CommandPalette'
 import KeyboardShortcuts from './components/KeyboardShortcuts'
 import HalPanel, { useHalOpen } from './components/HalPanel'
 import { mutate } from './lib/api'
+import { notifyAuthChanged } from './lib/auth'
 
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 
@@ -254,6 +255,7 @@ export default function App() {
           if (parsed.savedAt && age > SESSION_MAX_AGE_MS) {
             // Token expired -- clear it
             localStorage.removeItem('mfi_session')
+            notifyAuthChanged()
           } else {
             setUser(parsed)
             setView('app')
@@ -287,6 +289,7 @@ export default function App() {
       const session: AuthUser = { email, token: data.token, savedAt: Date.now() }
       setUser(session)
       localStorage.setItem('mfi_session', JSON.stringify(session))
+      notifyAuthChanged() // let useAuth() pick up the new session + role (same tab)
       setView('app')
       return null
     } catch (e) {
@@ -308,6 +311,7 @@ export default function App() {
       const session: AuthUser = { email, token: data.token, savedAt: Date.now() }
       setUser(session)
       localStorage.setItem('mfi_session', JSON.stringify(session))
+      notifyAuthChanged() // let useAuth() pick up the new session + role (same tab)
       setView('app')
       return null
     } catch (e) {
@@ -326,6 +330,7 @@ export default function App() {
       const session: AuthUser = { email, token: data.token, savedAt: Date.now() }
       setUser(session)
       localStorage.setItem('mfi_session', JSON.stringify(session))
+      notifyAuthChanged() // let useAuth() pick up the new session + role (same tab)
       setView('app')
       return null
     } catch (e) {
@@ -336,6 +341,7 @@ export default function App() {
   const handleLogout = () => {
     setUser(null)
     localStorage.removeItem('mfi_session')
+    notifyAuthChanged() // clear useAuth()'s user/role in the same tab
     setView('landing')
   }
 
