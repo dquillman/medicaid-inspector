@@ -350,6 +350,27 @@ async def auto_prep_status(user: dict = Depends(require_user)):
     return get_auto_prep_status()
 
 
+@router.get("/prepare/state/{npi}")
+async def prepare_state(npi: str, user: dict = Depends(require_user)):
+    """Lightweight, instant read of one case's preparation state — for the
+    Prepare Case button to POLL. prepare itself can take 60–90s and 502s
+    through Firebase Hosting's ~60s proxy timeout even though the BACKEND
+    finishes fine; the button fires prepare, ignores the proxy result, and
+    polls THIS until prepared_at appears."""
+    item = get_review_item(npi)
+    if not item:
+        return {"npi": npi, "in_queue": False, "prepared_at": None, "packet_ready": False}
+    docs = item.get("documents") or []
+    packet = next((d for d in docs if d.get("type") == "referral_packet"), None)
+    return {
+        "npi": npi,
+        "in_queue": True,
+        "queue_status": item.get("queue_status"),
+        "prepared_at": item.get("prepared_at"),
+        "packet_ready": bool(packet and (packet.get("status") == "ready")),
+    }
+
+
 @router.post("/prepare/run-nightly")
 async def run_nightly_now(force: bool = False, count: int = 2, user: dict = Depends(require_admin)):
     """Admin: trigger today's auto-preparation immediately (default: top 2

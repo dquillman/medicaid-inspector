@@ -402,6 +402,13 @@ export const api = {
     get<{ enabled: boolean; leads_per_night: number; runs_at_utc_hour: number;
           last_run_date?: string; last_prepared_npis?: string[]; last_result?: string }>('/review/prepare/status'),
 
+  // Instant poll of one case's preparation state. prepareCase can run 60–90s
+  // and 502 through Firebase Hosting's ~60s proxy even though the backend
+  // finishes — the button polls this until prepared_at appears.
+  prepareState: (npi: string) =>
+    get<{ npi: string; in_queue: boolean; queue_status?: string;
+          prepared_at?: number | null; packet_ready: boolean }>(`/review/prepare/state/${npi}`),
+
   // Admin: run auto-prepare on demand (e.g. wants more than the nightly count
   // prepared today). force bypasses the once-a-day guard; count overrides how
   // many top leads to prepare (default matches the nightly job's own default).

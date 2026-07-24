@@ -44,22 +44,43 @@ function PrepareCaseButton({ npi, queueStatus }: { npi: string; queueStatus?: st
       </span>
     )
   }
+  const finishDone = (packetReady: boolean) => {
+    setState('done')
+    setMsg(packetReady ? 'Prepared — packet ready in Review Queue' : 'Prepared — see Review Queue (open packet there)')
+    qc.invalidateQueries({ queryKey: ['fraud-brain'] })
+    qc.invalidateQueries({ queryKey: ['review-queue'] })
+    qc.invalidateQueries({ queryKey: ['brain-membership'] })
+  }
+
   const run = async (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
     if (state === 'running' || state === 'done') return
     setState('running')
-    try {
-      const r = await api.prepareCase(npi)
-      setState('done')
-      setMsg(r.packet_ok ? 'Prepared — packet ready in Review Queue' : 'Prepared — open packet manually (build failed)')
-      qc.invalidateQueries({ queryKey: ['fraud-brain'] })
-      qc.invalidateQueries({ queryKey: ['review-queue'] })
-      qc.invalidateQueries({ queryKey: ['brain-membership'] })
-    } catch (err) {
-      setState('error')
-      setMsg(err instanceof Error ? err.message : 'Preparation failed')
+    setMsg('')
+    // Fire preparation, but DON'T trust its HTTP result: prepare runs ~60–90s
+    // and 502s through Firebase Hosting's ~60s proxy timeout even though the
+    // backend completes fine. Source of truth is polling the case state until
+    // prepared_at appears. (Errors on the POST are swallowed on purpose.)
+    api.prepareCase(npi).then(
+      (r) => { if (r?.ok) finishDone(!!r.packet_ok) },  // fast path (<60s): done immediately
+      () => { /* 502/timeout expected for slow providers — polling handles it */ },
+    )
+    // Poll every 5s for up to ~4 min (prepare is bounded well under this).
+    const deadline = Date.now() + 4 * 60 * 1000
+    const poll = async () => {
+      try {
+        const s = await api.prepareState(npi)
+        if (s.prepared_at) { finishDone(s.packet_ready); return }
+      } catch { /* transient — keep polling */ }
+      if (Date.now() > deadline) {
+        setState('error')
+        setMsg('Still preparing — check the Review Queue in a moment')
+        return
+      }
+      setTimeout(poll, 5000)
     }
+    setTimeout(poll, 5000)
   }
   return (
     <span className="inline-flex items-center gap-1.5">

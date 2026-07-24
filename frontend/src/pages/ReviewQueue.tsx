@@ -67,19 +67,29 @@ function RunAutoPrepButton() {
     staleTime: 60_000,
   })
 
+  const refresh = () => {
+    qc.invalidateQueries({ queryKey: ['review-queue'] })
+    qc.invalidateQueries({ queryKey: ['auto-prep-status'] })
+    qc.invalidateQueries({ queryKey: ['brain-membership'] })
+  }
   const run = async () => {
     setState('running')
+    setMsg('')
     try {
       const r = await api.runAutoPrepNow({ force: true, count: 2 })
       setState('done')
       setMsg(r.last_result || (r.ok ? 'Prepared' : 'Nothing to prepare'))
-      qc.invalidateQueries({ queryKey: ['review-queue'] })
-      qc.invalidateQueries({ queryKey: ['auto-prep-status'] })
-      qc.invalidateQueries({ queryKey: ['brain-membership'] })
-      setTimeout(() => setState('idle'), 4000)
-    } catch (err) {
-      setState('error')
-      setMsg(err instanceof Error ? err.message : 'Failed')
+      refresh()
+      setTimeout(() => setState('idle'), 5000)
+    } catch {
+      // Preparing 2 leads takes ~2–3 min and 502s through the ~60s proxy even
+      // though the backend keeps running to completion — don't show a hard
+      // error. Tell the user it's working and refresh the queue as cases land.
+      setState('done')
+      setMsg('Preparing in the background — cases will appear in the queue shortly')
+      setTimeout(refresh, 60_000)
+      setTimeout(refresh, 120_000)
+      setTimeout(() => { refresh(); setState('idle') }, 180_000)
     }
   }
 
