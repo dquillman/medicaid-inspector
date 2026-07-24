@@ -26,10 +26,24 @@ import type { FraudBrainProvider } from '../lib/types'
  * referral packet. The human-gated steps (Confirm → submit → Reported) stay
  * yours. Long-running (~1–2 min), so the button shows live state.
  */
-function PrepareCaseButton({ npi, disabled }: { npi: string; disabled?: boolean }) {
+function PrepareCaseButton({ npi, queueStatus }: { npi: string; queueStatus?: string | null }) {
   const qc = useQueryClient()
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [msg, setMsg] = useState('')
+  // A lead already worked (any ledger status past the default 'open') can't be
+  // re-prepared. Show WHY as a plain label instead of a dead disabled button —
+  // a silent disabled button reads as "nothing happened" when clicked.
+  const alreadyInQueue = !!queueStatus && queueStatus !== 'open'
+  if (alreadyInQueue && state === 'idle') {
+    return (
+      <span
+        className="shrink-0 px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-ink-tertiary border border-hairline/60 rounded bg-surface-2/40"
+        title={`Already a case (status: ${queueStatus}). Prepare only applies to fresh leads — work this one from the Review Queue.`}
+      >
+        In review queue
+      </span>
+    )
+  }
   const run = async (e: React.MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
@@ -50,11 +64,11 @@ function PrepareCaseButton({ npi, disabled }: { npi: string; disabled?: boolean 
     <span className="inline-flex items-center gap-1.5">
       <button
         onClick={run}
-        disabled={disabled || state === 'running' || state === 'done'}
-        title="Auto-run steps 2–6: open case, corroborate (network/claim patterns), attach referral packet. You still confirm and submit."
-        className="shrink-0 px-2 py-1 text-[10px] font-mono uppercase tracking-wider bg-surface-2 hover:bg-hairline border border-hairline hover:border-filament-dim rounded text-ink-secondary hover:text-filament-core transition-colors disabled:opacity-50"
+        disabled={state === 'running' || state === 'done'}
+        title="Auto-run steps 2–6: open case, corroborate (network/claim patterns), attach referral packet (~1–2 min). You still confirm and submit."
+        className="shrink-0 px-2 py-1 text-[10px] font-mono uppercase tracking-wider bg-surface-2 hover:bg-hairline border border-hairline hover:border-filament-dim rounded text-ink-secondary hover:text-filament-core transition-colors disabled:opacity-60"
       >
-        {state === 'running' ? 'Preparing…' : state === 'done' ? 'Prepared ✓' : 'Prepare Case'}
+        {state === 'running' ? '⏳ Preparing…' : state === 'done' ? 'Prepared ✓' : 'Prepare Case'}
       </button>
       {msg && (
         <span className={`text-[10px] ${state === 'error' ? 'text-threat-high' : 'text-ink-tertiary'}`}>{msg}</span>
@@ -213,7 +227,7 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
                 Stale = recovery lead (FCA reaches back 6 years), not innocent. */}
             <RecencyBadge recency={p.recency} lastActiveMonth={p.last_active_month} dataAgeMonths={p.data_age_months} />
             <div className="ml-auto flex items-center gap-1.5">
-              <PrepareCaseButton npi={p.npi} disabled={!!p.queue_status && p.queue_status !== 'open'} />
+              <PrepareCaseButton npi={p.npi} queueStatus={p.queue_status} />
               <OigTipButton npi={p.npi} providerName={p.provider_name} state={p.state} riskScore={p.brain_score} />
             </div>
           </div>
