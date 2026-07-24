@@ -13,7 +13,6 @@ import QuickTriagePanel from '../components/QuickTriagePanel'
 import ProviderFlags from '../components/ProviderFlags'
 import RecencyBadge from '../components/RecencyBadge'
 import { useProviderFlags } from '../hooks/useProviderFlags'
-import { useAuth } from '../lib/auth'
 
 // The queue speaks ONE status model: the case-ledger pipeline (see queueStatus).
 // Filter keys are the stage values plus 'all'. tip_filed = Reported: OIG;
@@ -51,23 +50,22 @@ function BrainCell({ npi, risk }: { npi: string; risk: number }) {
 }
 
 /**
- * Admin on-demand trigger for auto-prepare — nightly runs the top 2 Brain
- * leads automatically; this lets you pull that forward or prepare more right
- * now if you decide to work more than the daily default. Preparing is not
+ * On-demand trigger for auto-prepare — nightly runs the top 2 Brain leads
+ * automatically; this lets you pull that forward or prepare more right now if
+ * you decide to work more than the daily default. Always visible to any
+ * logged-in user; the backend endpoint enforces admin, so a non-admin just
+ * gets a clean "Admin access required" message inline. Preparing is not
  * submitting: every prepared case still needs a human Confirm + submit.
  */
 function RunAutoPrepButton() {
-  const { isAdmin } = useAuth()
   const qc = useQueryClient()
   const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
   const [msg, setMsg] = useState('')
   const { data: status } = useQuery({
     queryKey: ['auto-prep-status'],
     queryFn: () => api.autoPrepStatus(),
-    enabled: isAdmin,
     staleTime: 60_000,
   })
-  if (!isAdmin) return null
 
   const run = async () => {
     setState('running')
