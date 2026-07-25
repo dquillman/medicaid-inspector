@@ -220,6 +220,53 @@ def upload_file(filename: str) -> bool:
         return False
 
 
+# ── Durable object storage (evidence blobs) ──────────────────────────────────
+# upload_file() above is for STATE FILES: it reads from _BACKEND_DIR and is
+# DEBOUNCED, so a call inside the debounce window silently no-ops. That is fine
+# for a JSON file that gets rewritten constantly and wrong for evidence, where a
+# skipped write means the artifact is simply lost. These helpers take raw bytes,
+# never debounce, and report failure so the caller can refuse the upload.
+
+def upload_bytes(object_path: str, data: bytes, content_type: str = "application/octet-stream") -> bool:
+    """Write raw bytes to GCS at `object_path`. Returns False if unavailable."""
+    bucket = _get_bucket()
+    if not bucket:
+        return False
+    try:
+        blob = bucket.blob(object_path)
+        blob.upload_from_string(data, content_type=content_type)
+        log.info("[gcs_sync] Uploaded object %s (%.1f KB)", object_path, len(data) / 1024)
+        return True
+    except Exception as e:
+        log.warning("[gcs_sync] Failed to upload object %s: %s", object_path, e)
+        return False
+
+
+def download_bytes(object_path: str) -> bytes | None:
+    """Read an object back from GCS. None if missing/unavailable."""
+    bucket = _get_bucket()
+    if not bucket:
+        return None
+    try:
+        blob = bucket.blob(object_path)
+        if not blob.exists():
+            return None
+        return blob.download_as_bytes()
+    except Exception as e:
+        log.warning("[gcs_sync] Failed to download object %s: %s", object_path, e)
+        return None
+
+
+def object_exists(object_path: str) -> bool:
+    bucket = _get_bucket()
+    if not bucket:
+        return False
+    try:
+        return bucket.blob(object_path).exists()
+    except Exception:
+        return False
+
+
 def upload_all() -> int:
     """Upload all existing sync files to GCS. Returns count uploaded."""
     bucket = _get_bucket()

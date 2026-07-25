@@ -4,6 +4,7 @@ Tracks metadata for evidence files uploaded to cases, including SHA-256 hashes.
 Persisted to backend/evidence_metadata.json.
 """
 import json
+import os
 import re
 import time
 import pathlib
@@ -29,6 +30,17 @@ def _safe_extension(original_filename: str) -> str:
 
 _META_FILE = pathlib.Path(__file__).parent.parent / "evidence_metadata.json"
 _EVIDENCE_DIR = pathlib.Path(__file__).parent.parent / "evidence"
+
+# Evidence blobs live under this prefix in the GCS bucket — the durable store.
+# The local _EVIDENCE_DIR is only a cache (see add_evidence).
+_GCS_PREFIX = "evidence"
+# Local dev has no bucket; allow disk-only there so uploads remain testable.
+# NEVER set this on Cloud Run — it re-opens the data-loss hole.
+_ALLOW_LOCAL_ONLY = os.environ.get("EVIDENCE_ALLOW_LOCAL_ONLY", "").lower() in ("1", "true", "yes")
+
+
+class EvidenceStorageError(RuntimeError):
+    """Raised when evidence cannot be stored durably — the upload is refused."""
 
 # In-memory: case_id (NPI) -> list of evidence records
 _evidence: dict[str, list[dict]] = {}
@@ -106,9 +118,33 @@ def add_evidence(
     except ValueError:
         raise ValueError("Stored path escaped evidence directory") from None
 
-    # Write the file first. Only register metadata if the write succeeds,
-    # so we never have a metadata record pointing at a missing file.
-    stored_path.write_bytes(file_bytes)
+    # DURABILITY (audit 2026-07-25, P0): the container filesystem is ephemeral —
+    # a cold start, redeploy, or a request served by another instance made the
+    # bytes vanish while the metadata record survived, leaving a custody record
+    # pointing at nothing. GCS is now the SOURCE OF TRUTH; the local file is
+    # only a read cache. If the durable write fails we refuse the upload rather
+    # than accept evidence we cannot promise to keep.
+    object_path = f"{_GCS_PREFIX}/{case_id}/{stored_filename}"
+    durable = False
+    try:
+        from core.gcs_sync import upload_bytes
+        durable = upload_bytes(object_path, file_bytes)
+    except Exception:  # noqa: BLE001 — treated as "not durable" below
+        durable = False
+    if not durable and not _ALLOW_LOCAL_ONLY:
+        raise EvidenceStorageError(
+            "Evidence was NOT stored: durable object storage is unavailable, and "
+            "the container filesystem is ephemeral (the file would be lost on the "
+            "next deploy or cold start). Nothing was recorded — retry once storage "
+            "is reachable."
+        )
+
+    # Local copy = fast-path cache only; GCS holds the authoritative object.
+    try:
+        stored_path.write_bytes(file_bytes)
+    except Exception:
+        if not durable:
+            raise  # neither store worked — surface it
 
     now = time.time()
     record = {
@@ -163,15 +199,33 @@ def get_evidence_record(case_id: str, evidence_id: str) -> Optional[dict]:
     return None
 
 
+def _rehydrate_from_gcs(rec: dict) -> Optional[pathlib.Path]:
+    """Pull an evidence object back down from durable storage into the local
+    cache. This is the normal path after a cold start/redeploy/new instance —
+    the container's disk is empty but the object is safe in GCS."""
+    stored_path = _EVIDENCE_DIR / rec["stored_filename"]
+    try:
+        from core.gcs_sync import download_bytes
+        data = download_bytes(f"{_GCS_PREFIX}/{rec['case_id']}/{rec['stored_filename']}")
+    except Exception:  # noqa: BLE001
+        data = None
+    if data is None:
+        return None
+    _ensure_evidence_dir()
+    stored_path.write_bytes(data)
+    return stored_path
+
+
 def get_evidence_file_path(case_id: str, evidence_id: str) -> Optional[pathlib.Path]:
-    """Return the filesystem path to an evidence file, verifying integrity."""
+    """Return the filesystem path to an evidence file, fetching it from durable
+    storage first if the local cache is cold."""
     rec = get_evidence_record(case_id, evidence_id)
     if not rec:
         return None
     stored_path = _EVIDENCE_DIR / rec["stored_filename"]
-    if not stored_path.exists():
-        return None
-    return stored_path
+    if stored_path.exists():
+        return stored_path
+    return _rehydrate_from_gcs(rec)
 
 
 def verify_evidence_integrity(case_id: str, evidence_id: str) -> Optional[dict]:
@@ -181,7 +235,10 @@ def verify_evidence_integrity(case_id: str, evidence_id: str) -> Optional[dict]:
         return None
     stored_path = _EVIDENCE_DIR / rec["stored_filename"]
     if not stored_path.exists():
-        return {"valid": False, "error": "File not found on disk"}
+        stored_path = _rehydrate_from_gcs(rec) or stored_path
+    if not stored_path.exists():
+        return {"valid": False, "error": "File not found in durable storage or local cache",
+                "evidence_id": evidence_id, "original_hash": rec["sha256_hash"]}
     current_hash = compute_sha256(stored_path.read_bytes())
     original_hash = rec["sha256_hash"]
     return {

@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Form, R
 from fastapi.responses import FileResponse
 
 from core.evidence_store import (
+    EvidenceStorageError,
     add_evidence,
     get_evidence_list,
     get_evidence_record,
@@ -40,14 +41,21 @@ async def upload_evidence(
     if len(file_bytes) > 50 * 1024 * 1024:
         raise HTTPException(413, "File too large — maximum 50MB")
 
-    record = add_evidence(
-        case_id=case_id,
-        original_filename=file.filename,
-        file_bytes=file_bytes,
-        uploaded_by=user.get("username", "unknown"),
-        description=description,
-        evidence_type=evidence_type,
-    )
+    try:
+        record = add_evidence(
+            case_id=case_id,
+            original_filename=file.filename,
+            file_bytes=file_bytes,
+            uploaded_by=user.get("username", "unknown"),
+            description=description,
+            evidence_type=evidence_type,
+        )
+    except EvidenceStorageError as e:
+        # Durable storage unavailable — the upload was REFUSED, not half-saved.
+        # 503 (retryable) rather than a 500, and the message says plainly that
+        # nothing was recorded so the user re-uploads instead of assuming it
+        # landed. Evidence we can't keep is worse than evidence we rejected.
+        raise HTTPException(503, str(e)) from e
 
     # Log PHI access
     log_phi_access(
