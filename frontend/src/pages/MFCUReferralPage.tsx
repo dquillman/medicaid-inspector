@@ -367,12 +367,25 @@ export default function MFCUReferralPage() {
                     </a>
                   </div>
                   {mfcu.note && <p className="text-[11px] text-amber-300/80 mt-1.5">{mfcu.note}</p>}
-                  <p className="text-[11px] text-gray-500 mt-2">
-                    The app submits an internal referral record; file the actual complaint at the state&rsquo;s page above.
+                  <p className="text-[11px] text-amber-200/90 mt-2 font-medium">
+                    Two steps: (1) COPY the narrative below and submit it on the state&rsquo;s
+                    page above &mdash; this app never transmits anything. (2) Come back and log
+                    it so your case record matches what you actually filed.
                   </p>
                 </div>
               )}
 
+              {/* These are the APP'S OWN case-record fields, not the state's
+                  intake form. Pre-filling them made the page look like a
+                  government form that had completed itself — the reason a user
+                  believed a referral had been transmitted. */}
+              <div className="mt-6 mb-2 border-t border-gray-800 pt-4">
+                <h3 className="text-sm font-semibold text-gray-200">Your case record</h3>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Stays in this app. Nothing here is sent to the state &mdash; it records
+                  what <em>you</em> filed, so the Review Queue matches reality.
+                </p>
+              </div>
               <div className="space-y-4">
                 <div>
                   <label className="block text-gray-300 text-xs font-medium mb-1">
@@ -421,7 +434,7 @@ export default function MFCUReferralPage() {
                     className={`${inputClass} min-h-[80px] resize-y`}
                     value={notes}
                     onChange={e => setNotes(e.target.value)}
-                    placeholder="Additional context for the MFCU referral..."
+                    placeholder="Your own notes about this referral (kept in the app)"
                     rows={3}
                   />
                 </div>
