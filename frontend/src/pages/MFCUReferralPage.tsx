@@ -457,8 +457,7 @@ export default function MFCUReferralPage() {
 
                 <div>
                   <label className="block text-gray-300 text-xs font-medium mb-1">
-                    Case Number <span className="text-gray-600">(optional)</span>
-                   <span className="text-gray-500 font-normal">(optional &mdash; MFI assigns one)</span></label>
+                    Case Number <span className="text-gray-500 font-normal">(optional &mdash; MFI assigns one)</span></label>
                   <input
                     type="text"
                     className={inputClass}

@@ -2869,10 +2869,26 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     # identical for OIG and MFCU (one narrative, two destinations).
     if dest == "mfcu":
         _state_name = (addr.get("state") or cached.get("state") or "").strip()
+        # State intake forms typically ask for a SINGLE "date of service", not a
+        # range (Dave hit this on the AZ form). Same rule as the OIG wizard's
+        # "when did the activity occur": most recent billed month, day 01 — the
+        # dataset is monthly, so a specific day is not knowable. The full range
+        # stays in the body's TIME PERIOD OF ACTIVITY line.
+        if last_m and "-" in str(last_m):
+            _y, _mo = str(last_m).split("-")[:2]
+            _dos = f"{_mo}/01/{_y}"
+        else:
+            _dos = "(use the last month in TIME PERIOD OF ACTIVITY below, day 01)"
         _header = (
             f"MEDICAID FRAUD CONTROL UNIT (MFCU) REFERRAL — Suspected Medicaid Provider Fraud\n"
             f"Jurisdiction: {_state_name or '(state of the subject provider)'}\n"
             "File with the state MFCU intake form (see the destination card in the app).\n"
+            f"Form answer — single 'date of service': {_dos} "
+            "(most recent billed month; full period is in the narrative)\n"
+            "Form answer — 'recipient/patient name' (if required): Unknown — "
+            "provider-level billing analysis; no individual recipient identified\n"
+            "Leave blank what we don't hold: state provider/Medicaid ID, license "
+            "number, provider phone. Never guess on a government form.\n"
         )
     else:
         _header = (
