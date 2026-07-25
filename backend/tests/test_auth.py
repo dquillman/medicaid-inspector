@@ -57,6 +57,9 @@ def test_list_users_requires_admin(client):
 
 
 def test_list_users_as_admin(client, auth_headers):
+    # Self-contained: don't depend on another test having created this user.
+    client.post("/api/auth/users", headers=auth_headers,
+                json={"username": "testuser", "password": "passw0rd123", "role": "viewer"})
     resp = client.get("/api/auth/users", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
@@ -65,19 +68,26 @@ def test_list_users_as_admin(client, auth_headers):
 
 
 def test_create_user_as_admin(client, auth_headers):
+    # Unique name so re-running inside one session can't collide with itself.
+    import uuid
+    uname = f"newuser_{uuid.uuid4().hex[:8]}"
     resp = client.post(
         "/api/auth/users",
         headers=auth_headers,
-        json={"username": "newuser", "password": "pass123", "role": "viewer"},
+        json={"username": uname, "password": "passw0rd123", "role": "viewer"},  # >=8 chars (policy)
     )
     assert resp.status_code == 200
     data = resp.json()
-    assert data["user"]["username"] == "newuser"
+    assert data["user"]["username"] == uname
     assert data["user"]["role"] == "viewer"
 
 
-def test_get_roles(client):
-    resp = client.get("/api/auth/roles")
+def test_get_roles(client, auth_headers):
+    # /api/auth/roles is require_admin by design (it feeds the user-management
+    # UI). The old test called it unauthenticated and expected 200 — written
+    # before the auth hardening.
+    assert client.get("/api/auth/roles").status_code == 401
+    resp = client.get("/api/auth/roles", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert "roles" in data

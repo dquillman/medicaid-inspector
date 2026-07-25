@@ -1,7 +1,33 @@
 steps:
+  # ── GATE: tests must pass BEFORE anything deploys ────────────────────────
+  # Previously this file deployed the backend as step 1 and ran no tests at all,
+  # so a broken build reached production and was discovered there. Cloud Build
+  # stops the pipeline on a non-zero step, so these run first by design.
+  - name: 'python:3.11'
+    id: 'backend-tests'
+    dir: 'backend'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        pip install --quiet -r requirements.txt pytest
+        python -m pytest tests/ -q
+
+  - name: 'node:20'
+    id: 'frontend-build'
+    dir: 'frontend'
+    entrypoint: bash
+    args:
+      - '-c'
+      - |
+        npm ci
+        npx tsc --noEmit -p tsconfig.json
+        npm run build
+
   # Build and deploy backend to Cloud Run
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: gcloud
+    waitFor: ['backend-tests', 'frontend-build']
     args:
       - 'run'
       - 'deploy'

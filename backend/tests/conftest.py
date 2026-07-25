@@ -31,10 +31,15 @@ _BACKEND_DIR = pathlib.Path(__file__).resolve().parent.parent
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
-TEST_ADMIN_USER = "admin"
-TEST_ADMIN_PASSWORD = "test-admin-pw-do-not-use-in-prod"
+# The bootstrap admin (ADMIN_PASSWORD) exists only to create the fixture user.
+BOOTSTRAP_USER = "admin"
+BOOTSTRAP_PASSWORD = "test-admin-pw-do-not-use-in-prod"
+# The identity the tests actually assert on. Admin role: the same fixture is
+# used for admin-only endpoints (list/create users, roles).
+TEST_ADMIN_USER = "testuser"
+TEST_ADMIN_PASSWORD = "testpass123"
 
-os.environ["ADMIN_PASSWORD"] = TEST_ADMIN_PASSWORD   # deterministic login
+os.environ["ADMIN_PASSWORD"] = BOOTSTRAP_PASSWORD    # deterministic bootstrap login
 os.environ["GCS_BUCKET"] = ""                        # no bucket => sync no-ops
 os.environ["EVIDENCE_ALLOW_LOCAL_ONLY"] = "1"        # evidence tests need no GCS
 os.environ.pop("K_SERVICE", None)                    # don't look like Cloud Run
@@ -49,6 +54,7 @@ _STATE_MODULES = [
     "core.referral_workflow", "core.notification_store", "core.roi_store",
     "core.phi_logger", "core.saved_searches", "core.alert_rules",
     "core.store", "core.history_store", "core.lineage",
+    "core.database",   # app.db — users/sessions/audit live here too
 ]
 
 
@@ -109,7 +115,12 @@ SAMPLE_PROVIDERS: list[dict] = [
         "risk_score": 65.0, "total_paid": 4_200_000.0, "total_claims": 9_100,
         "total_beneficiaries": 260, "first_month": "2023-01", "last_month": "2024-10",
         "top_hcpcs": "H0046", "distinct_hcpcs": 3, "flag_count": 2,
-        "flags": ["revenue_per_bene_outlier", "billing_concentration"],
+        # flags = the FLAGGED subset of signal_results (dicts), matching what
+        # scan_engine actually emits — not a list of signal-name strings.
+        "flags": [
+            {"signal": "revenue_per_bene_outlier", "flagged": True, "score": 0.93, "weight": 15},
+            {"signal": "billing_concentration", "flagged": True, "score": 0.88, "weight": 10},
+        ],
         "signal_results": [
             {"signal": "revenue_per_bene_outlier", "flagged": True, "score": 0.93,
              "weight": 15, "reason": "Revenue/beneficiary is 9.4 sigma above peers"},
@@ -123,7 +134,7 @@ SAMPLE_PROVIDERS: list[dict] = [
         "risk_score": 41.0, "total_paid": 900_000.0, "total_claims": 3_400,
         "total_beneficiaries": 410, "first_month": "2022-06", "last_month": "2024-06",
         "top_hcpcs": "E0601", "distinct_hcpcs": 12, "flag_count": 1,
-        "flags": ["claims_per_bene_anomaly"],
+        "flags": [{"signal": "claims_per_bene_anomaly", "flagged": True, "score": 0.61, "weight": 10}],
         "signal_results": [
             {"signal": "claims_per_bene_anomaly", "flagged": True, "score": 0.61,
              "weight": 10, "reason": "8.3 claims/beneficiary vs peer mean 3.1"},
@@ -157,6 +168,14 @@ def client():
     with TestClient(app) as c:
         from core.store import set_prescanned
         set_prescanned(list(SAMPLE_PROVIDERS))
+        # Seed the fixture identity the tests assert on.
+        boot = c.post("/api/auth/login",
+                      json={"username": BOOTSTRAP_USER, "password": BOOTSTRAP_PASSWORD})
+        assert boot.status_code == 200, f"bootstrap admin login failed: {boot.text}"
+        c.post("/api/auth/users",
+               headers={"Authorization": f"Bearer {boot.json()['token']}"},
+               json={"username": TEST_ADMIN_USER, "password": TEST_ADMIN_PASSWORD,
+                     "role": "admin", "display_name": "Test User"})
         yield c
 
 
@@ -189,6 +208,19 @@ def throwaway_headers(client):
                        json={"username": TEST_ADMIN_USER, "password": TEST_ADMIN_PASSWORD})
     assert resp.status_code == 200, f"throwaway login failed: {resp.text}"
     return {"Authorization": f"Bearer {resp.json()['token']}"}
+
+
+@pytest.fixture(autouse=True)
+def _reset_watchlist():
+    """Empty the watchlist before each test. It is process-global state, so
+    without this an entry added by one test leaks into the next (test_check_watched
+    asserted 'not watched' on an NPI a previous test had already added)."""
+    try:
+        from core import watchlist_store
+        watchlist_store._watchlist_items.clear()
+    except Exception:
+        pass
+    yield
 
 
 @pytest.fixture(autouse=True)

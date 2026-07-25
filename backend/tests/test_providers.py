@@ -51,12 +51,18 @@ def test_provider_detail(client, auth_headers):
 
 
 def test_provider_detail_not_found(client, auth_headers):
-    resp = client.get("/api/providers/0000000000", headers=auth_headers)
+    # NOT 0000000000 — that all-zeros NPI is a real junk aggregate row in the
+    # parquet (review.py guards against it on the Brain board), so the endpoint
+    # legitimately returns 200 for it. Use an NPI absent from cache and dataset.
+    resp = client.get("/api/providers/1999999998", headers=auth_headers)
     assert resp.status_code == 404
 
 
-def test_summary_endpoint(client):
-    resp = client.get("/api/summary")
+def test_summary_endpoint(client, auth_headers):
+    # Auth-gated in main.py (Depends(require_user)) — the old test called it
+    # unauthenticated and expected 200.
+    assert client.get("/api/summary").status_code == 401
+    resp = client.get("/api/summary", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert "total_providers" in data
@@ -65,8 +71,9 @@ def test_summary_endpoint(client):
     assert "flagged_providers" in data
 
 
-def test_prescan_status(client):
-    resp = client.get("/api/prescan/status")
+def test_prescan_status(client, auth_headers):
+    assert client.get("/api/prescan/status").status_code == 401
+    resp = client.get("/api/prescan/status", headers=auth_headers)
     assert resp.status_code == 200
     data = resp.json()
     assert "status" in data or "message" in data

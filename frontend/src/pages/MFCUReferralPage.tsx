@@ -181,6 +181,23 @@ export default function MFCUReferralPage() {
   }, [])
 
   const handleSubmit = useCallback(async () => {
+    // This records that YOU already filed with the state — it transmits nothing.
+    // Without this gate the button read as "submit" and silently marked cases
+    // "Reported: MFCU" for filings that never happened, overwriting a true
+    // "Reported: OIG" status (2026-07-25: two cases had to be corrected by hand).
+    const state = jurisdiction || 'the state'
+    if (!window.confirm(
+      `Log this as filed with ${state}'s MFCU?
+
+` +
+      `This app does NOT transmit anything. It records that YOU already submitted ` +
+      `the referral on the state's own intake form, and sets this case to ` +
+      `"Reported: MFCU".
+
+` +
+      `If you have not actually filed with ${state} yet, click Cancel, submit there first, ` +
+      `then come back and log it.`
+    )) return
     setPhase('submitting')
     try {
       const result = await mutate<MFCUReferral>('POST', `/referrals/${npi}/submit`, {
@@ -420,8 +437,9 @@ export default function MFCUReferralPage() {
                 <button
                   onClick={handleSubmit}
                   className="bg-red-700 hover:bg-red-600 text-white font-bold px-6 py-2.5 rounded transition-colors"
+                  title="Records that YOU already filed with the state MFCU and marks the case Reported: MFCU. This app never transmits to a state."
                 >
-                  Submit Referral
+                  Log MFCU Referral as Filed
                 </button>
               </div>
             </div>

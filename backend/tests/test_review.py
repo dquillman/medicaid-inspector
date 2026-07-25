@@ -90,7 +90,7 @@ def test_review_bulk_update(client, auth_headers):
     resp = client.post(
         "/api/review/bulk-update",
         headers=auth_headers,
-        json={"npis": ["1234567890", "5555555555"], "status": "confirmed"},
+        json={"npis": ["1234567890", "5555555555"], "status": "confirmed_fraud"},  # legacy field value
     )
     assert resp.status_code == 200
     data = resp.json()

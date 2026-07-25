@@ -14,10 +14,10 @@ def test_login_invalid_credentials(client):
     assert resp.status_code == 401
 
 
-def test_roles_endpoint_is_public(client):
-    resp = client.get("/api/auth/roles")
-    assert resp.status_code == 200
-    assert "roles" in resp.json()
+def test_roles_endpoint_requires_admin(client):
+    """/api/auth/roles feeds the user-management UI and is require_admin.
+    Previously asserted to be public — that predates the auth hardening."""
+    assert client.get("/api/auth/roles").status_code == 401
 
 
 def test_protected_endpoint_requires_auth(client):

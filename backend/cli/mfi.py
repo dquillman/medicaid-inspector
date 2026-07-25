@@ -200,6 +200,18 @@ def cmd_backup(args: argparse.Namespace) -> int:
 
 
 # ── Subcommand: deploy ───────────────────────────────────────────────────────
+def _run_backend_tests() -> int:
+    """Run the backend suite. Returns 0 on pass.
+
+    Dave deploys with `./mfi deploy`, NOT Cloud Build — so gating only the
+    cloudbuild.yaml pipeline would gate a path nobody uses. Skip with
+    --skip-tests when you knowingly need to ship without them.
+    """
+    _log("running backend tests …")
+    return _run_shell([sys.executable, "-m", "pytest", "tests/", "-q"],
+                      cwd=str(_BACKEND_DIR))
+
+
 def cmd_deploy_backend(args: argparse.Namespace) -> int:
     """Deploy backend to Cloud Run, then smoke-test /health.
 
@@ -252,6 +264,12 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
         "--max-instances", "1",
         "--quiet",
     ]
+    if not getattr(args, "skip_tests", False):
+        rc = _run_backend_tests()
+        if rc != 0:
+            return _err("backend tests FAILED — refusing to deploy. "
+                        "Fix them, or pass --skip-tests if you must ship anyway.")
+
     _log(f"deploying backend v{app_version} to {_DEFAULT_GCLOUD_SERVICE} …")
     rc = _run_shell(cmd, env=deploy_env)
     if rc != 0:
@@ -728,6 +746,8 @@ def _build_parser() -> argparse.ArgumentParser:
     deploy_sub = p_deploy.add_subparsers(dest="target", required=True)
 
     p_deploy_be = deploy_sub.add_parser("backend", help="Deploy backend to Cloud Run")
+    p_deploy_be.add_argument("--skip-tests", action="store_true",
+                             help="Deploy without running the backend test suite first")
     p_deploy_be.set_defaults(func=cmd_deploy_backend)
 
     p_deploy_fe = deploy_sub.add_parser("frontend", help="Build and deploy frontend to Firebase Hosting")
@@ -737,6 +757,8 @@ def _build_parser() -> argparse.ArgumentParser:
     p_deploy_all = deploy_sub.add_parser(
         "all", help="Deploy backend then frontend (the safe default — keeps the pair in sync)")
     p_deploy_all.add_argument("--skip-build", action="store_true", help="Skip npm run build for the frontend step")
+    p_deploy_all.add_argument("--skip-tests", action="store_true",
+                              help="Deploy without running the backend test suite first")
     p_deploy_all.set_defaults(func=cmd_deploy_all)
 
     # sync-exclusions

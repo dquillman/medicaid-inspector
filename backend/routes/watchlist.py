@@ -42,7 +42,13 @@ def _enrich_with_scan_data(entry: dict) -> dict:
         enriched["risk_score"] = p.get("risk_score", 0)
         enriched["total_paid"] = p.get("total_paid", 0)
         enriched["total_claims"] = p.get("total_claims", 0)
-        enriched["flag_count"] = len([f for f in p.get("flags", []) if f.get("flagged")])
+        # flags are normally dicts (the flagged subset of signal_results), but
+        # older/rebuilt caches have held bare signal-name strings. Count either
+        # rather than 500 on an unexpected shape.
+        _flags = p.get("flags") or []
+        enriched["flag_count"] = sum(
+            1 for f in _flags if (f.get("flagged") if isinstance(f, dict) else bool(f))
+        )
         if not enriched.get("name"):
             enriched["name"] = p.get("provider_name", "")
         if not enriched.get("specialty"):
