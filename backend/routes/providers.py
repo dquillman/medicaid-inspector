@@ -2927,12 +2927,44 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         )
     )
 
+    # ── Per-provider filing guide (Dave's rule, 2026-07-25) ──────────────────
+    # The wizard's answers are NOT the same for every provider — program type
+    # and subject category follow the taxonomy, the allegation follows which
+    # signals fired, the date follows the last billed month, business-vs-
+    # individual follows the NPPES entity type. Derive them per provider and
+    # put the answer sheet ABOVE the copy line so it is never pasted into the
+    # complaint. OIG only: state MFCU intake forms differ by state.
+    filing_guide = None
+    guide_block = ""
+    if dest != "mfcu":
+        try:
+            from services.oig_filing_guide import build_filing_guide, render_filing_guide
+            _prev = False
+            try:
+                from core.review_store import get_queue_status
+                _prev = get_queue_status(npi) in ("tip_filed", "referred")
+            except Exception:
+                pass
+            filing_guide = build_filing_guide(
+                npi=npi, name=name, taxonomy=specialty, state=(addr.get("state") or cached.get("state") or ""),
+                last_month=cached.get("last_month"),
+                flagged_signals=[f.get("signal", "") for f in flags],
+                entity_type=nppes.get("entity_type"), previously_reported=_prev,
+                address=address_str,
+            )
+            guide_block = render_filing_guide(filing_guide)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("oig-tip: filing guide failed for %s", npi, exc_info=True)
+
     # HHS-OIG's submission form rejects non-ASCII typographic characters. The
     # narrative (and the free-text fields the caller may paste) must be plain
     # 7-bit ASCII so the packet is submittable without manual editing.
     from core.text_sanitize import to_ascii
 
+    # `text` stays the PASTEABLE body; the guide rides above the copy line.
     text = to_ascii(text)
+    text_with_guide = to_ascii(guide_block) + text if guide_block else text
     for ind in indicators:
         ind["label"] = to_ascii(ind["label"])
         ind["finding"] = to_ascii(ind["finding"])
@@ -2957,7 +2989,7 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
             elif any(marker in (n.get("text") or "") for n in existing):
                 save_skipped = "an identical draft is already on this case's note log"
             else:
-                body = f"{marker}\n\n{text}"
+                body = f"{marker}\n\n{text_with_guide if guide_block else text}"
                 if len(body) > MAX_CASE_NOTE_CHARS:  # keep the head; note the trim
                     body = body[:MAX_CASE_NOTE_CHARS - 60].rstrip() + \
                         "\n\n[...truncated - regenerate for the full narrative]"
@@ -2974,7 +3006,11 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         "destination": dest,
         "saved_to_case": saved_to_case,
         "save_skipped": save_skipped,
+        # `text` = the pasteable complaint body. `text_with_guide` prepends the
+        # per-provider wizard answer sheet above a COPY-FROM-HERE line.
         "text": text,
+        "text_with_guide": text_with_guide,
+        "filing_guide": filing_guide,
         "fields": {
             "subject_name": to_ascii(name),
             "npi": npi,
