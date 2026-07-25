@@ -3,6 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, get, mutate } from '../lib/api'
 import { fmt } from '../lib/format'
+import { copyText } from '../lib/clipboard'
 import type { MFCUReferral } from '../lib/types'
 import { useProviderFlags } from '../hooks/useProviderFlags'
 
@@ -82,8 +83,10 @@ export default function MFCUReferralPage() {
   })
   const autoNarrative = referralNarrative?.text ?? ''
   const shortNarrative = referralNarrative?.short_narrative ?? ''
-  const [narrativeCopied, setNarrativeCopied] = useState(false)
-  const [shortCopied, setShortCopied] = useState(false)
+  // null = untouched, true = verified on the clipboard, false = copy FAILED
+  // (tell the user to select manually rather than claiming success).
+  const [narrativeCopied, setNarrativeCopied] = useState<boolean | null>(null)
+  const [shortCopied, setShortCopied] = useState<boolean | null>(null)
 
   // Prefill jurisdiction + narrative once the provider/MFCU data lands, unless
   // the analyst has already typed something.
@@ -403,17 +406,24 @@ export default function MFCUReferralPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(autoNarrative)
-                        setNarrativeCopied(true)
-                        setTimeout(() => setNarrativeCopied(false), 2000)
+                      onClick={async () => {
+                        const ok = await copyText(autoNarrative)
+                        setNarrativeCopied(ok)
+                        if (ok) setTimeout(() => setNarrativeCopied(null), 2000)
                       }}
                       className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-black rounded transition-colors"
                     >
-                      {narrativeCopied ? 'Copied ✓' : 'Copy narrative'}
+                      {narrativeCopied === true ? 'Copied ✓'
+                        : narrativeCopied === false ? 'Copy failed' : 'Copy narrative'}
                     </button>
                   </div>
-                  <pre className="max-h-72 overflow-auto px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap">
+                  {narrativeCopied === false && (
+                    <p className="px-4 pt-2 text-[11px] text-red-400">
+                      The browser blocked the copy. Click inside the text below, press
+                      Ctrl+A then Ctrl+C.
+                    </p>
+                  )}
+                  <pre className="max-h-72 overflow-auto px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap select-all">
                     {autoNarrative}
                   </pre>
                 </div>
@@ -438,17 +448,23 @@ export default function MFCUReferralPage() {
                     </div>
                     <button
                       type="button"
-                      onClick={() => {
-                        navigator.clipboard?.writeText(shortNarrative)
-                        setShortCopied(true)
-                        setTimeout(() => setShortCopied(false), 2000)
+                      onClick={async () => {
+                        const ok = await copyText(shortNarrative)
+                        setShortCopied(ok)
+                        if (ok) setTimeout(() => setShortCopied(null), 2000)
                       }}
                       className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-700/70 hover:bg-amber-600 text-black rounded transition-colors"
                     >
-                      {shortCopied ? 'Copied ✓' : 'Copy short version'}
+                      {shortCopied === true ? 'Copied ✓'
+                        : shortCopied === false ? 'Copy failed' : 'Copy short version'}
                     </button>
                   </div>
-                  <p className="px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap">
+                  {shortCopied === false && (
+                    <p className="px-4 pt-2 text-[11px] text-red-400">
+                      The browser blocked the copy. Click the text below, press Ctrl+A then Ctrl+C.
+                    </p>
+                  )}
+                  <p className="px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap select-all">
                     {shortNarrative}
                   </p>
                 </div>

@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../lib/api'
+import { copyText } from '../lib/clipboard'
 
 /**
  * Self-contained "generate an HHS-OIG Hotline complaint" button + modal.
@@ -12,7 +13,7 @@ export default function OigTipButton({
 }: { npi: string; providerName?: string; state?: string; riskScore?: number }) {
   const [text, setText] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [copied, setCopied] = useState<boolean | null>(null)
   const [logged, setLogged] = useState(false)
 
   const generate = async () => {
@@ -52,13 +53,13 @@ export default function OigTipButton({
               </div>
               <p className="text-[11px] text-ink-tertiary mt-1">Auto-drafted below — review, copy, and submit at the portal (the app only logs that you filed).</p>
             </div>
-            <pre className="flex-1 overflow-auto px-5 py-4 text-xs font-mono text-ink-secondary whitespace-pre-wrap">{text}</pre>
+            <pre className="flex-1 overflow-auto px-5 py-4 text-xs font-mono text-ink-secondary whitespace-pre-wrap select-all">{text}</pre>
             <div className="flex items-center gap-2 px-5 py-3 border-t border-hairline">
               <button
-                onClick={() => { navigator.clipboard?.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000) }}
+                onClick={async () => { const ok = await copyText(text); setCopied(ok); if (ok) setTimeout(() => setCopied(null), 2000) }}
                 className="px-3 py-1.5 text-xs font-medium bg-filament-core text-void rounded hover:bg-filament-core/90 transition-colors"
               >
-                {copied ? 'Copied ✓' : 'Copy to clipboard'}
+                {copied === true ? 'Copied ✓' : copied === false ? 'Copy failed — select the text and press Ctrl+C' : 'Copy to clipboard'}
               </button>
               <button
                 onClick={async () => { try { await api.logOigTip({ npi, provider_name: providerName ?? '', state: state ?? '', risk_score: riskScore ?? 0 }); setLogged(true) } catch { /* ignore */ } }}
