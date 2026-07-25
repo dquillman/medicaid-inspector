@@ -413,18 +413,48 @@ export const api = {
   // server-rendered PDF would need headless Chromium in the Cloud Run image —
   // ~300MB and slower cold starts — which isn't worth it for this.)
   referralPacketPdf: async (npi: string) => {
+    // Print from a HIDDEN IFRAME, not a pop-up window.
+    //
+    // The first version opened a tab, which failed two ways: window.open() after
+    // an `await` has lost the user-gesture context (Chrome blocks it), and even
+    // when called synchronously it still dies wherever the user has pop-ups
+    // blocked. An iframe needs no pop-up permission and no gesture at all.
+    //
+    // Browsers take the PDF's default filename from the PRINTING document's
+    // title — for an iframe that's the parent page — so swap the title around
+    // the print call and restore it afterwards.
     const res = await fetch(`${BASE}/providers/${npi}/referral-packet`, { headers: { ...authHeaders() } })
+    if (res.status === 401) throw new Error('Session expired — sign in again')
     if (!res.ok) throw new Error(`Referral packet failed: ${res.status}`)
-    let html = await res.text()
-    // Give the print dialog a sensible default filename (browsers use the title).
-    html = html.replace(/<title>[^<]*<\/title>/i, `<title>referral_packet_${npi}</title>`)
-    const win = window.open('', '_blank', 'noopener,noreferrer')
-    if (!win) throw new Error('Pop-up blocked — allow pop-ups for this site to save the packet as PDF')
-    win.document.write(html)
-    win.document.close()
-    // The packet auto-prints when ?print=1 is present; we opened via document.write
-    // (no URL), so trigger it here once rendering settles.
-    setTimeout(() => { try { win.focus(); win.print() } catch { /* user can use the Save as PDF button */ } }, 400)
+    const html = await res.text()
+
+    const iframe = document.createElement('iframe')
+    iframe.setAttribute('aria-hidden', 'true')
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden'
+    document.body.appendChild(iframe)
+
+    const originalTitle = document.title
+    const cleanup = () => {
+      document.title = originalTitle
+      setTimeout(() => { try { iframe.remove() } catch { /* already gone */ } }, 1000)
+    }
+
+    await new Promise<void>((resolve) => {
+      iframe.onload = () => resolve()
+      const doc = iframe.contentDocument
+      if (!doc) { resolve(); return }
+      doc.open(); doc.write(html); doc.close()
+      // document.write doesn't always fire onload — resolve on a short timer too.
+      setTimeout(resolve, 300)
+    })
+
+    try {
+      document.title = `referral_packet_${npi}`
+      iframe.contentWindow?.focus()
+      iframe.contentWindow?.print()
+    } finally {
+      cleanup()
+    }
   },
 
   addToReview: (data: { npi: string; status?: string; notes?: string; assigned_to?: string }) =>
