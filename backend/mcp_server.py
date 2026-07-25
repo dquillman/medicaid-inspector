@@ -346,8 +346,12 @@ async def _tool_provider_timeline(args: dict) -> dict:
 
 async def _tool_draft_oig_tip(args: dict) -> dict:
     npi = _require_npi(args["npi"])
+    dest = str(args.get("destination", "oig")).strip().lower() or "oig"
     try:
-        result = await provider_oig_tip(npi)
+        # save_note=True (the endpoint default): the narrative lands on the
+        # case's permanent note log, so a drafted referral is never lost to a
+        # chat scrollback.
+        result = await provider_oig_tip(npi, destination=dest)
     except HTTPException as e:
         raise ValueError(f"draft_oig_tip({npi}): {e.detail}") from e
 
@@ -460,10 +464,26 @@ TOOLS: list[Tool] = [
     ),
     Tool(
         name="draft_oig_tip",
-        description="Generate a draft HHS-OIG hotline complaint narrative for a provider from cached fraud signal evidence. Drafting only — does not submit anything to HHS or any external system.",
+        description=(
+            "Generate the referral narrative for a provider — the text that IS the submission, "
+            "since the HHS-OIG Hotline and state MFCU intakes are text-only forms with no file "
+            "attachment. Pass destination='oig' (federal hotline, default) or 'mfcu' (state unit); "
+            "the evidence body is identical, only the routing header/footer differs. "
+            "The generated narrative is AUTOMATICALLY SAVED to the provider's case as an "
+            "append-only case note (deduplicated), so it is on the permanent record and can be "
+            "retrieved later — never tell the user a draft is 'ready' without saying where it "
+            "was saved. Check 'saved_to_case' in the result: if false, 'save_skipped' says why "
+            "(usually the NPI is not in the review queue yet). "
+            "Drafting only — it does NOT submit anything to HHS/MFCU and does NOT change the "
+            "case status; filing and marking tip_filed/referred are human-only actions."
+        ),
         inputSchema={
             "type": "object",
-            "properties": {"npi": _NPI_SCHEMA},
+            "properties": {
+                "npi": _NPI_SCHEMA,
+                "destination": {"type": "string", "enum": ["oig", "mfcu"],
+                                "description": "oig = federal HHS-OIG Hotline (default); mfcu = state Medicaid Fraud Control Unit"},
+            },
             "required": ["npi"],
         },
     ),

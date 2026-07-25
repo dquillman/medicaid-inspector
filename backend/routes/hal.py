@@ -223,6 +223,27 @@ async def hal_chat(req: HalChatRequest, user: dict = Depends(require_user)):
                     "providers": out.get("providers", [])}
         except Exception as e:  # noqa: BLE001 — fall back to the relay on any error
             logger.error("local HAL expert failed, relaying to qcode: %s", e)
+            # Some failures are NOT "HAL is offline" and must not be reported as
+            # such — the generic qcode-relay message below sent Dave chasing a
+            # dev server when the real cause was an exhausted Anthropic balance.
+            # Surface account/key problems verbatim instead of misdirecting.
+            _msg = str(e)
+            _low = _msg.lower()
+            if "credit balance is too low" in _low or "billing" in _low:
+                raise HTTPException(
+                    402,
+                    "HAL is out of Anthropic API credits — the key works, the balance is empty. "
+                    "Top up at console.anthropic.com (Plans & Billing); no app change is needed.",
+                )
+            if "authentication_error" in _low or "invalid x-api-key" in _low or "401" in _low:
+                raise HTTPException(
+                    401,
+                    "HAL's Anthropic API key is invalid or revoked — update the "
+                    "'anthropic-api-key' secret in Secret Manager and redeploy.",
+                )
+            if "rate_limit" in _low or "429" in _low:
+                raise HTTPException(
+                    429, "HAL hit the Anthropic API rate limit — wait a moment and ask again.")
 
     if not settings.HAL_TOKEN:
         raise HTTPException(
