@@ -47,12 +47,14 @@ _SYNC_FILES = [
     "lineage.json",
     "hal_bugs.json",          # bugs logged via HAL's log_bug tool (durable on Cloud Run)
     "auto_prep_state.json",   # nightly case-prep: last run date + prepared NPI (one/day)
+    "feedback_data.json",     # signal FP/TP counts + learned weight multipliers
 ]
 
 _client = None
 _bucket = None
 _upload_lock = threading.Lock()
 _last_upload: dict[str, float] = {}
+_pending_timers: dict[str, "threading.Timer"] = {}  # trailing-edge debounce
 _DEBOUNCE_SEC = 5  # min seconds between uploads of the same file
 
 
@@ -192,13 +194,55 @@ def download_all() -> int:
     return count
 
 
+def _do_upload(filename: str) -> bool:
+    """Actually push the file (no debounce logic). See upload_file()."""
+    bucket = _get_bucket()
+    if not bucket:
+        return False
+    local_path = _BACKEND_DIR / filename
+    if not local_path.exists():
+        return False
+    try:
+        blob = bucket.blob(filename)
+        blob.upload_from_filename(str(local_path))
+        log.info("[gcs_sync] Uploaded %s (%.1f KB)", filename,
+                 local_path.stat().st_size / 1024)
+        return True
+    except Exception as e:
+        log.warning("[gcs_sync] Failed to upload %s: %s", filename, e)
+        return False
+
+
+def _flush_pending(filename: str) -> None:
+    """Trailing-edge upload fired by the debounce timer."""
+    with _upload_lock:
+        _pending_timers.pop(filename, None)
+        _last_upload[filename] = time.time()
+    _do_upload(filename)
+
+
 def upload_file(filename: str) -> bool:
-    """Upload a single file to GCS. Debounced to avoid excessive writes."""
+    """Upload a file to GCS, debounced with a TRAILING edge.
+
+    The old version dropped writes: inside the debounce window it returned
+    False and scheduled nothing, so the LAST write in a burst never reached GCS
+    and was lost on the next restart/redeploy (audit 2026-07-25, #3). Now a
+    debounced call arms a timer for the remainder of the window, so the newest
+    state is always flushed. One timer per file — a burst coalesces into a
+    single upload instead of being silently discarded.
+    """
     with _upload_lock:
         now = time.time()
         last = _last_upload.get(filename, 0)
-        if now - last < _DEBOUNCE_SEC:
-            return False
+        elapsed = now - last
+        if elapsed < _DEBOUNCE_SEC:
+            if filename not in _pending_timers:
+                delay = max(0.05, _DEBOUNCE_SEC - elapsed)
+                t = threading.Timer(delay, _flush_pending, args=(filename,))
+                t.daemon = True          # never block interpreter shutdown
+                _pending_timers[filename] = t
+                t.start()
+            return False                 # deferred, NOT dropped
         _last_upload[filename] = now
 
     bucket = _get_bucket()

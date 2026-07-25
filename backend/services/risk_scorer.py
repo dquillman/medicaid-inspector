@@ -80,7 +80,10 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
         diagnosis_procedure_mismatch(provider_agg, hcpcs_rows, mup_row),
     ]
 
-    composite = sum(s["score"] * s["weight"] for s in signals)
+    # Same feedback-adjusted composite as the scan path — one implementation
+    # so the two scoring routes cannot drift apart.
+    from services.feedback_tracker import composite_with_feedback
+    composite = composite_with_feedback(signals)
     risk_score = min(round(composite, 1), 100.0)
     flags = [s for s in signals if s["flagged"]]
 

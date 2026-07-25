@@ -268,6 +268,19 @@ async def lifespan(app: FastAPI):
     # NOTE: Parquet stays remote (read via DuckDB httpfs) — no local download on Cloud Run.
     # The 2.8GB file is too large to download reliably in a container.
 
+    # ── Single-instance constraint (audit 2026-07-25, #3) ────────────────────
+    # Mutable state is per-instance JSON uploaded to GCS as WHOLE FILES, so two
+    # instances writing concurrently is last-write-wins: one of them silently
+    # loses its changes. `mfi deploy` and cloudbuild both pin --max-instances 1.
+    # If that pin is ever raised, this warning is the tripwire. The real fix is
+    # moving mutable records to a transactional store (Firestore/Cloud SQL) —
+    # SQLite does NOT count, because app.db is itself GCS-synced and has exactly
+    # the same clobber problem.
+    if os.environ.get("K_SERVICE"):
+        _max_inst = os.environ.get("MFI_EXPECTED_MAX_INSTANCES", "1")
+        log.info("[startup] state model: per-instance JSON + GCS; requires --max-instances 1 "
+                 "(expected=%s). Concurrent instances would silently drop writes.", _max_inst)
+
     # Nightly auto-prepare: ONE Fraud Brain lead per day gets steps 2-6 run
     # automatically (case opened, corroboration noted, packet attached). Date-
     # guarded state in auto_prep_state.json (GCS-synced) makes restarts safe.

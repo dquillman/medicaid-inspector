@@ -138,7 +138,10 @@ def _score_provider(row: dict, hcpcs: list, timeline: list, npi: str,
     s18 = sig["diagnosis_procedure_mismatch"](row, hcpcs, mup_row)
 
     signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17, s18]
-    risk_score = round(min(sum(s["score"] * s["weight"] for s in signals), 100.0), 1)
+    # Feedback-adjusted composite: signals the user keeps dismissing carry
+    # less weight (see feedback_tracker.composite_with_feedback).
+    from services.feedback_tracker import composite_with_feedback
+    risk_score = round(min(composite_with_feedback(signals), 100.0), 1)
     flags = [s for s in signals if s["flagged"]]
 
     return {

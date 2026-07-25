@@ -355,6 +355,28 @@ def set_queue_status(
         })
         result = dict(item)
     save_review_to_disk()
+
+    # ── Signal-level feedback (audit 2026-07-25, #4) ─────────────────────────
+    # A human labelling a case is the only ground truth this system gets:
+    # dismissed => the signals that fired were false positives; confirmed or
+    # reported => they were true positives. feedback_tracker turns that into a
+    # per-signal multiplier that both scoring paths apply. Recorded here, on the
+    # audited transition, so it can't be bypassed by a different call path.
+    # Idempotent + reversible inside _apply(), so re-labelling corrects rather
+    # than double-counts. Best-effort: feedback must never fail a status change.
+    try:
+        if new_status == "dismissed":
+            from services.feedback_tracker import record_dismissal
+            record_dismissal(npi)
+        elif new_status in ("confirmed", "tip_filed", "referred"):
+            from services.feedback_tracker import record_confirmation
+            record_confirmation(npi)
+        # NOTE: "archived" deliberately records nothing — archiving closes a case
+        # WITHOUT judgment (see the bulk stale-cleanup), so it is not a label.
+    except Exception:
+        import logging as _l
+        _l.getLogger(__name__).warning("feedback recording failed for %s", npi, exc_info=True)
+
     return result
 
 

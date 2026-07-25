@@ -25,11 +25,15 @@ _signal_fp_counts: dict[str, int] = {}  # signal -> false positive count
 _signal_tp_counts: dict[str, int] = {}  # signal -> true positive count
 _dismissals: list[dict] = []  # history of dismissed cases
 _weight_adjustments: dict[str, float] = {}  # signal -> multiplier (0.5–1.0)
+# npi -> "fp" | "tp": which direction this NPI has already been counted in.
+# Without it, re-labelling a case (or a bulk update touching the same NPI twice)
+# counts its signals again and again and quietly skews every multiplier.
+_counted: dict[str, str] = {}
 
 
 def _load() -> None:
     """Load feedback data from disk."""
-    global _signal_fp_counts, _signal_tp_counts, _dismissals, _weight_adjustments
+    global _signal_fp_counts, _signal_tp_counts, _dismissals, _weight_adjustments, _counted
     try:
         if not _FEEDBACK_FILE.exists():
             return
@@ -41,6 +45,7 @@ def _load() -> None:
         _signal_tp_counts = data.get("tp_counts", {})
         _dismissals = data.get("dismissals", [])
         _weight_adjustments = data.get("weight_adjustments", {})
+        _counted = data.get("counted", {})
         log.info("Loaded feedback data: %d FPs, %d TPs tracked",
                  sum(_signal_fp_counts.values()), sum(_signal_tp_counts.values()))
     except Exception as e:
@@ -55,6 +60,7 @@ def _save() -> None:
             "tp_counts": _signal_tp_counts,
             "dismissals": _dismissals,
             "weight_adjustments": _weight_adjustments,
+            "counted": _counted,
             "updated_at": time.time(),
         })
     except Exception as e:
@@ -62,80 +68,13 @@ def _save() -> None:
 
 
 def record_dismissal(npi: str) -> dict:
-    """
-    Record a dismissed case's active signals as false positives.
-    Recalculates weight adjustments after recording.
-    """
-    from core.store import get_provider_by_npi
-    from core.review_store import get_review_item
-
-    provider = get_provider_by_npi(npi)
-    review = get_review_item(npi)
-
-    # Get active signals from either source
-    signal_results = []
-    if provider and provider.get("signal_results"):
-        signal_results = provider["signal_results"]
-    elif review and review.get("signal_results"):
-        signal_results = review["signal_results"]
-
-    active_signals = [s.get("signal", "") for s in signal_results if s.get("flagged")]
-
-    if not active_signals:
-        return {"recorded": False, "reason": "No active signals found for dismissed NPI"}
-
-    # Record each active signal as a false positive
-    for sig in active_signals:
-        _signal_fp_counts[sig] = _signal_fp_counts.get(sig, 0) + 1
-
-    _dismissals.append({
-        "npi": npi,
-        "signals": active_signals,
-        "timestamp": time.time(),
-        "risk_score": (provider or {}).get("risk_score", 0),
-    })
-
-    # Recalculate weight adjustments
-    _recalculate_weights()
-    _save()
-
-    return {
-        "recorded": True,
-        "npi": npi,
-        "signals_recorded": active_signals,
-        "total_dismissals": len(_dismissals),
-    }
+    """Record a dismissed case's fired signals as false positives (idempotent)."""
+    return _apply(npi, "fp")
 
 
 def record_confirmation(npi: str) -> dict:
-    """
-    Record a confirmed fraud case's active signals as true positives.
-    """
-    from core.store import get_provider_by_npi
-    from core.review_store import get_review_item
-
-    provider = get_provider_by_npi(npi)
-    review = get_review_item(npi)
-
-    signal_results = []
-    if provider and provider.get("signal_results"):
-        signal_results = provider["signal_results"]
-    elif review and review.get("signal_results"):
-        signal_results = review["signal_results"]
-
-    active_signals = [s.get("signal", "") for s in signal_results if s.get("flagged")]
-
-    for sig in active_signals:
-        _signal_tp_counts[sig] = _signal_tp_counts.get(sig, 0) + 1
-
-    _recalculate_weights()
-    _save()
-
-    return {
-        "recorded": True,
-        "npi": npi,
-        "signals_recorded": active_signals,
-    }
+    """Record a confirmed/reported case's fired signals as true positives (idempotent)."""
+    return _apply(npi, "tp")
 
 
 def _recalculate_weights() -> None:
@@ -171,6 +110,75 @@ def get_weight_adjustment(signal_name: str) -> float:
     if not _weight_adjustments:
         _load()
     return _weight_adjustments.get(signal_name, 1.0)
+
+def _active_signals(npi: str) -> list[str]:
+    """The signals that fired for this NPI, from the scan cache or the case."""
+    from core.store import get_provider_by_npi
+    from core.review_store import get_review_item
+    provider = get_provider_by_npi(npi)
+    review = get_review_item(npi)
+    sr = (provider or {}).get("signal_results") or (review or {}).get("signal_results") or []
+    return [x.get("signal", "") for x in sr if x.get("flagged") and x.get("signal")]
+
+
+def _apply(npi: str, direction: str) -> dict:
+    """Count this NPI's fired signals as FP ('fp') or TP ('tp'), EXACTLY ONCE.
+
+    Idempotent and reversible:
+      - same direction again  -> no-op (a re-save or bulk update can't inflate counts)
+      - opposite direction    -> the previous counts are backed out first, so a
+                                 corrected label moves the evidence instead of
+                                 double-counting it.
+    """
+    assert direction in ("fp", "tp")
+    prior = _counted.get(npi)
+    if prior == direction:
+        return {"recorded": False, "reason": f"{npi} already counted as {direction}"}
+
+    signals = _active_signals(npi)
+    if not signals:
+        return {"recorded": False, "reason": "No active signals found for this NPI"}
+
+    if prior:  # reverse the earlier, now-superseded label
+        undo = _signal_fp_counts if prior == "fp" else _signal_tp_counts
+        for sig in signals:
+            if undo.get(sig):
+                undo[sig] -= 1
+                if undo[sig] <= 0:
+                    undo.pop(sig, None)
+
+    target = _signal_fp_counts if direction == "fp" else _signal_tp_counts
+    for sig in signals:
+        target[sig] = target.get(sig, 0) + 1
+    _counted[npi] = direction
+
+    if direction == "fp":
+        _dismissals.append({"npi": npi, "signals": signals, "timestamp": time.time()})
+
+    _recalculate_weights()
+    _save()
+    try:
+        from core.gcs_sync import upload_file
+        upload_file("feedback_data.json")
+    except Exception:
+        pass  # GCS optional; the local file is still written
+    return {"recorded": True, "npi": npi, "direction": direction,
+            "signals_recorded": signals, "corrected_from": prior}
+
+
+def composite_with_feedback(signals: list[dict]) -> float:
+    """Weighted composite with the learned per-signal multiplier applied.
+
+    THE single place the feedback multiplier is applied — both scoring paths
+    (scan_engine and risk_scorer) call this, so they cannot drift apart. Before
+    this, get_weight_adjustment() had no callers at all: the whole feedback loop
+    computed multipliers nothing ever used (audit 2026-07-25, #4).
+    """
+    return sum(
+        s.get("score", 0) * s.get("weight", 0) * get_weight_adjustment(s.get("signal", ""))
+        for s in signals
+    )
+
 
 
 def get_feedback_summary() -> dict:
