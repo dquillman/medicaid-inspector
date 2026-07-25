@@ -1821,12 +1821,21 @@ export interface MethodsResponse {
 
 // OIG Hotline tip export
 export interface OigTipIndicator { signal: string; label: string; finding: string; citations: string[] }
+export interface OigFilingGuide {
+  url: string
+  steps: [string, string][]
+  notes: string[]
+  subject_fields: Record<string, string>
+}
+
 export interface OigTipResponse {
   npi: string
   text: string
   // Condensed paragraph for state forms with a small "describe the fraud"
   // field — same underlying data as `text`, not a separate submission.
   short_narrative?: string
+  // Per-provider answer sheet for the OIG wizard (destination='oig' only).
+  filing_guide?: OigFilingGuide | null
   fields: Record<string, unknown>
   signal_count: number
 }

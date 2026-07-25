@@ -35,13 +35,26 @@ async def filed():
 
 
 @router.post("")
-async def add_tip(body: AddTipBody):
+async def add_tip(body: AddTipBody, user: dict = Depends(require_user)):
     if not (body.npi or "").strip():
         raise HTTPException(400, "npi is required")
-    return oig_tips_store.add_tip(
-        npi=body.npi.strip(), provider_name=body.provider_name,
+    npi = body.npi.strip()
+    tip = oig_tips_store.add_tip(
+        npi=npi, provider_name=body.provider_name,
         state=body.state, risk_score=body.risk_score, notes=body.notes,
     )
+    # Single source of truth, mirroring mfcu_referral.py's /submit: logging an
+    # OIG tip IS the case reaching "Reported: OIG". Before this, nothing in the
+    # codebase ever set queue_status to tip_filed — a human had to separately
+    # remember to flip it from the Review Queue, and the two could drift.
+    # Best-effort — the provider may not be in the review queue.
+    try:
+        from core.review_store import set_queue_status
+        set_queue_status(npi, "tip_filed", actor=user.get("username", "unknown"),
+                          actor_type="user", note="HHS-OIG Hotline tip logged as filed")
+    except Exception:
+        pass
+    return tip
 
 
 @router.patch("/{tip_id}")
