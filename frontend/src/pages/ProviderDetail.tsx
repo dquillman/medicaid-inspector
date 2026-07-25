@@ -575,8 +575,12 @@ export default function ProviderDetail() {
               <RiskScoreModal />
             </div>
           </div>
-          {/* ── Investigator Action Buttons ─────────────────────── */}
-          <div className="flex gap-2">
+          {/* ── Investigator Action Buttons ─────────────────────────
+              ONE wrapping row. These used to be a 3-button flex div followed by
+              loose siblings inside a `flex-col items-end` parent, so each extra
+              button landed on its own right-aligned line and they stair-stepped
+              down the page. */}
+          <div className="flex flex-wrap justify-end gap-2 max-w-2xl">
             <Link
               to={`/providers/${npi}/investigate`}
               className="px-4 py-2 bg-blue-700 hover:bg-blue-600 border border-blue-500 hover:border-blue-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-blue-900/30"
@@ -598,19 +602,6 @@ export default function ProviderDetail() {
             >
               <ExclamationTriangleIcon /> Refer to MFCU
             </Link>
-          </div>
-          <button
-            onClick={async () => {
-              setExportStatus('loading'); setExportError('')
-              try { await api.referralPacket(npi!); setExportStatus('idle') }
-              catch (e) { setExportStatus('error'); setExportError(e instanceof Error ? e.message : 'Failed') }
-            }}
-            disabled={exportStatus === 'loading'}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2 disabled:opacity-50"
-            title="Download the referral packet as an .html file (the evidence record)"
-          >
-            <DocumentTextIcon /> {exportStatus === 'loading' ? 'Generating...' : 'Referral Packet (HTML)'}
-          </button>
           {/* PDF is the ATTACHABLE form: OIG/MFCU intake accepts pdf but not
               .html. Opens the packet with the print dialog up — choose
               "Save as PDF" and attach the result. */}
@@ -628,26 +619,14 @@ export default function ProviderDetail() {
           </button>
           <button
             onClick={async () => {
-              setExportStatus('loading'); setExportError('')
-              try { await api.exportProvider(npi!); setExportStatus('idle') }
-              catch (e) { setExportStatus('error'); setExportError(e instanceof Error ? e.message : 'Failed') }
-            }}
-            disabled={exportStatus === 'loading'}
-            className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2 disabled:opacity-50"
-            title="Download all fraud evidence for this provider as a .tar.gz archive"
-          >
-            <ArrowDownTrayIcon /> {exportStatus === 'loading' ? 'Exporting...' : 'Export Fraud Package'}
-          </button>
-          <button
-            onClick={async () => {
               setOigTipLoading(true); setExportError('')
               try { const r = await api.oigTip(npi!); setOigTipText(r.text); setOigCopied(false) }
               catch (e) { setExportError(e instanceof Error ? e.message : 'Failed') }
               finally { setOigTipLoading(false) }
             }}
             disabled={oigTipLoading}
-            className="px-4 py-2 bg-filament-core/15 hover:bg-filament-core/25 border border-filament-dim hover:border-filament-core text-filament-core text-sm font-medium rounded transition-colors flex items-center gap-2 disabled:opacity-50"
-            title="Generate a copy-paste HHS-OIG Hotline tip for this provider"
+            className="px-4 py-2 bg-amber-600 hover:bg-amber-500 border border-amber-400 hover:border-amber-300 text-black text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-amber-900/30 disabled:opacity-50"
+            title="Generate the referral narrative — THIS is what you paste into the HHS-OIG hotline form. Includes a per-provider filing guide."
           >
             <DocumentTextIcon /> {oigTipLoading ? 'Drafting…' : 'OIG Hotline Tip'}
           </button>
@@ -722,6 +701,7 @@ export default function ProviderDetail() {
               <StarIcon /> Add to Watchlist
             </button>
           )}
+          </div>
           {watchlistMsg && (
             <span className="text-xs text-green-400">{watchlistMsg}</span>
           )}

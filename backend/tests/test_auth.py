@@ -40,11 +40,13 @@ def test_me_invalid_token(client):
     assert resp.status_code == 401
 
 
-def test_logout(client, auth_headers):
-    resp = client.post("/api/auth/logout", headers=auth_headers)
+def test_logout(client, throwaway_headers):
+    # MUST use its own token: logging out with the session-scoped `auth_headers`
+    # invalidated the shared session and 401'd every test that ran afterwards.
+    resp = client.post("/api/auth/logout", headers=throwaway_headers)
     assert resp.status_code == 200
     # After logout, /me should fail
-    resp2 = client.get("/api/auth/me", headers=auth_headers)
+    resp2 = client.get("/api/auth/me", headers=throwaway_headers)
     assert resp2.status_code == 401
 
 
