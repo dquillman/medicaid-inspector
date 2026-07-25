@@ -70,6 +70,21 @@ def _save_to_disk() -> None:
 
 # ── mutations ─────────────────────────────────────────────────────────────────
 
+def make_case_number(npi: str, when: float | None = None, channel: str = "MFCU") -> str:
+    """Mint the case number MFI assigns itself.
+
+    Neither HHS-OIG nor the state MFCUs hand back a tracking number (OIG
+    explicitly does not confirm receipt), so waiting for an external ID means
+    the field stays empty forever and there is nothing to quote in a follow-up.
+    MFI issues its own: MFI-<CHANNEL>-<NPI>-<YYYYMMDD>. Deterministic, unique
+    per provider per channel per day, and readable aloud on a phone call. If an
+    agency ever DOES supply a real number, it overwrites this.
+    """
+    import datetime
+    ts = datetime.datetime.fromtimestamp(when or time.time())
+    return f"MFI-{channel.upper()}-{npi}-{ts.strftime('%Y%m%d')}"
+
+
 def create_referral(
     npi: str,
     submitted_by: str,
@@ -90,7 +105,8 @@ def create_referral(
             "stage": "submitted",
             "mfcu_contact": mfcu_contact,
             "jurisdiction": jurisdiction,
-            "case_number": case_number,
+            # App-assigned when the agency gives us nothing (the normal case).
+            "case_number": case_number or make_case_number(npi, now, "MFCU"),
             "referral_date": now,
             "submitted_by": submitted_by,
             "outcome": None,

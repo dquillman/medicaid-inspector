@@ -81,6 +81,7 @@ export default function MFCUReferralPage() {
     staleTime: 5 * 60_000,
   })
   const autoNarrative = referralNarrative?.text ?? ''
+  const [narrativeCopied, setNarrativeCopied] = useState(false)
 
   // Prefill jurisdiction + narrative once the provider/MFCU data lands, unless
   // the analyst has already typed something.
@@ -90,9 +91,10 @@ export default function MFCUReferralPage() {
       setMfcuContact(mfcu.phone ? `${mfcu.office} — ${mfcu.phone}` : mfcu.office)
     }
   }, [mfcu])  // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (autoNarrative && !notes) setNotes(autoNarrative)
-  }, [autoNarrative])  // eslint-disable-line react-hooks/exhaustive-deps
+  // NOTE: the narrative deliberately does NOT prefill `notes` any more. It is
+  // the thing you SUBMIT, so it gets its own copy box below; `notes` is for
+  // your own commentary. Conflating them made the page read as a completed
+  // government form (see the copy box in the render).
 
   // ── Gate check queries ──────────────────────────────────────────────
   const { data: oigData } = useQuery({
@@ -375,12 +377,45 @@ export default function MFCUReferralPage() {
                 </div>
               )}
 
+              {/* THE SUBMISSION. Mirrors the OIG tip modal: the text you paste
+                  into the state's own intake form. Kept visually distinct from
+                  the app's record fields below so the two can't be confused. */}
+              {autoNarrative && (
+                <div className="mt-4 border-2 border-amber-500/60 rounded-lg bg-amber-950/20">
+                  <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-amber-500/30">
+                    <div>
+                      <h3 className="text-sm font-bold text-amber-300">
+                        Step 1 — Copy this. It is what you submit.
+                      </h3>
+                      <p className="text-[11px] text-amber-200/70 mt-0.5">
+                        Paste it into the state MFCU&rsquo;s own complaint form (linked above).
+                        This app does not send it.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(autoNarrative)
+                        setNarrativeCopied(true)
+                        setTimeout(() => setNarrativeCopied(false), 2000)
+                      }}
+                      className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-black rounded transition-colors"
+                    >
+                      {narrativeCopied ? 'Copied ✓' : 'Copy narrative'}
+                    </button>
+                  </div>
+                  <pre className="max-h-72 overflow-auto px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap">
+                    {autoNarrative}
+                  </pre>
+                </div>
+              )}
+
               {/* These are the APP'S OWN case-record fields, not the state's
                   intake form. Pre-filling them made the page look like a
                   government form that had completed itself — the reason a user
                   believed a referral had been transmitted. */}
               <div className="mt-6 mb-2 border-t border-gray-800 pt-4">
-                <h3 className="text-sm font-semibold text-gray-200">Your case record</h3>
+                <h3 className="text-sm font-semibold text-gray-200">Step 2 — Your case record</h3>
                 <p className="text-[11px] text-gray-500 mt-0.5">
                   Stays in this app. Nothing here is sent to the state &mdash; it records
                   what <em>you</em> filed, so the Review Queue matches reality.
@@ -416,13 +451,13 @@ export default function MFCUReferralPage() {
                 <div>
                   <label className="block text-gray-300 text-xs font-medium mb-1">
                     Case Number <span className="text-gray-600">(optional)</span>
-                  </label>
+                   <span className="text-gray-500 font-normal">(optional &mdash; MFI assigns one)</span></label>
                   <input
                     type="text"
                     className={inputClass}
                     value={caseNumber}
                     onChange={e => setCaseNumber(e.target.value)}
-                    placeholder="External case or tracking number"
+                    placeholder="Auto-assigned by MFI when you log this (e.g. MFI-MFCU-1234567890-20260725)"
                   />
                 </div>
 

@@ -70,6 +70,16 @@ def get_tip_by_npi(npi: str) -> dict | None:
     return None
 
 
+def _make_ref(npi: str, when: float) -> str:
+    """MFI-assigned reference for an OIG tip (see referral_workflow.make_case_number)."""
+    try:
+        from core.referral_workflow import make_case_number
+        return make_case_number(npi, when, "OIG")
+    except Exception:
+        import datetime
+        return f"MFI-OIG-{npi}-{datetime.datetime.fromtimestamp(when).strftime('%Y%m%d')}"
+
+
 def add_tip(npi: str, provider_name: str = "", state: str = "",
             risk_score: float = 0.0, notes: str = "") -> dict:
     """Idempotent per NPI — returns the existing tip if one is already logged."""
@@ -86,7 +96,9 @@ def add_tip(npi: str, provider_name: str = "", state: str = "",
             "state": state,
             "risk_score": round(float(risk_score or 0), 1),
             "status": "filed",
-            "reference_number": "",
+            # OIG never issues a receipt, so MFI assigns its own reference —
+            # same format as MFCU referrals. Overwritten if OIG ever supplies one.
+            "reference_number": _make_ref(npi, now),
             "notes": notes,
             "outcome_notes": "",
             "filed_at": now,
