@@ -388,6 +388,26 @@ export const api = {
     URL.revokeObjectURL(url)
   },
 
+  // Open the packet in a new tab with the print dialog already up, so it can be
+  // saved as PDF in one step. OIG/MFCU intake accepts pdf attachments but NOT
+  // .html, so PDF is the attachable form of the evidence record. (A true
+  // server-rendered PDF would need headless Chromium in the Cloud Run image —
+  // ~300MB and slower cold starts — which isn't worth it for this.)
+  referralPacketPdf: async (npi: string) => {
+    const res = await fetch(`${BASE}/providers/${npi}/referral-packet`, { headers: { ...authHeaders() } })
+    if (!res.ok) throw new Error(`Referral packet failed: ${res.status}`)
+    let html = await res.text()
+    // Give the print dialog a sensible default filename (browsers use the title).
+    html = html.replace(/<title>[^<]*<\/title>/i, `<title>referral_packet_${npi}</title>`)
+    const win = window.open('', '_blank', 'noopener,noreferrer')
+    if (!win) throw new Error('Pop-up blocked — allow pop-ups for this site to save the packet as PDF')
+    win.document.write(html)
+    win.document.close()
+    // The packet auto-prints when ?print=1 is present; we opened via document.write
+    // (no URL), so trigger it here once rendering settles.
+    setTimeout(() => { try { win.focus(); win.print() } catch { /* user can use the Save as PDF button */ } }, 400)
+  },
+
   addToReview: (data: { npi: string; status?: string; notes?: string; assigned_to?: string }) =>
     mutate<{ item: ReviewItem; already_existed: boolean }>('POST', '/review/add', data),
 

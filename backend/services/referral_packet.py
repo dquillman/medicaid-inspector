@@ -432,8 +432,39 @@ td{{padding:8px 12px;border-bottom:1px solid #e5e7eb;vertical-align:top}}
 .kpi .lbl{{font-size:10px;color:#9ca3af;text-transform:uppercase;margin-top:4px;letter-spacing:0.5px}}
 .risk-banner{{border-radius:8px;padding:20px;margin:16px 0;display:flex;justify-content:space-between;align-items:center}}
 .section-break{{page-break-before:always}}
-@media print{{body{{padding:20px;font-size:12px}}table{{font-size:11px}}td,th{{padding:5px 8px}}}}
+/* Save-as-PDF control — screen only; never appears in the printed/PDF output. */
+.pdfbar{{position:fixed;top:14px;right:14px;z-index:99;display:flex;gap:8px;align-items:center;
+  background:#111827;color:#fff;border-radius:8px;padding:8px 12px;box-shadow:0 4px 14px rgba(0,0,0,.28);
+  font-size:12px}}
+.pdfbar button{{background:#2563eb;color:#fff;border:0;border-radius:6px;padding:7px 14px;
+  font-size:12px;font-weight:600;cursor:pointer}}
+.pdfbar button:hover{{background:#1d4ed8}}
+.pdfbar .hint{{opacity:.75}}
+@media print{{
+  body{{padding:0;font-size:11.5px}}
+  table{{font-size:10.5px}}td,th{{padding:4px 8px}}
+  .pdfbar{{display:none !important}}
+  /* Keep a card, a signal block, or a table row from splitting across pages. */
+  h2{{break-after:avoid-page;page-break-after:avoid}}
+  tr,li{{break-inside:avoid;page-break-inside:avoid}}
+  a{{text-decoration:none;color:#111}}
+  .header-banner{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+  .confidential{{-webkit-print-color-adjust:exact;print-color-adjust:exact}}
+}}
+@page{{size:Letter;margin:14mm 12mm}}
 </style></head><body>
+<div class="pdfbar no-print">
+  <span class="hint">Attach to OIG/MFCU as PDF &rarr;</span>
+  <button onclick="window.print()">Save as PDF</button>
+</div>
+<script>
+  // Auto-open the print dialog when the packet is opened with ?print=1, so the
+  // app's "Referral Packet (PDF)" action is one click away from a saved file.
+  // OIG/MFCU intake accepts pdf but NOT .html, so a PDF is the attachable form.
+  if (new URLSearchParams(location.search).get('print') === '1') {{
+    window.addEventListener('load', function () {{ setTimeout(function () {{ window.print(); }}, 350); }});
+  }}
+</script>
 <div class="confidential">CONFIDENTIAL - MEDICAID FRAUD REFERRAL PACKET - FOR OFFICIAL USE ONLY</div>
 {slim_banner}
 <div class="header-banner">

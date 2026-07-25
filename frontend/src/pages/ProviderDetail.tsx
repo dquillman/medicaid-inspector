@@ -607,9 +607,24 @@ export default function ProviderDetail() {
             }}
             disabled={exportStatus === 'loading'}
             className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-gray-500 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2 disabled:opacity-50"
-            title="Generate a comprehensive HTML referral packet for this provider"
+            title="Download the referral packet as an .html file (the evidence record)"
           >
-            <DocumentTextIcon /> {exportStatus === 'loading' ? 'Generating...' : 'Generate Referral Packet'}
+            <DocumentTextIcon /> {exportStatus === 'loading' ? 'Generating...' : 'Referral Packet (HTML)'}
+          </button>
+          {/* PDF is the ATTACHABLE form: OIG/MFCU intake accepts pdf but not
+              .html. Opens the packet with the print dialog up — choose
+              "Save as PDF" and attach the result. */}
+          <button
+            onClick={async () => {
+              setExportStatus('loading'); setExportError('')
+              try { await api.referralPacketPdf(npi!); setExportStatus('idle') }
+              catch (e) { setExportStatus('error'); setExportError(e instanceof Error ? e.message : 'Failed') }
+            }}
+            disabled={exportStatus === 'loading'}
+            className="px-4 py-2 bg-blue-700 hover:bg-blue-600 border border-blue-500 hover:border-blue-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 disabled:opacity-50"
+            title="Open the packet with the print dialog up — choose 'Save as PDF'. This is the file OIG/MFCU will accept as an attachment (.html is not accepted)."
+          >
+            <DocumentTextIcon /> {exportStatus === 'loading' ? 'Preparing...' : 'Referral Packet (PDF)'}
           </button>
           <button
             onClick={async () => {
