@@ -584,21 +584,21 @@ export default function ProviderDetail() {
             <Link
               to={`/providers/${npi}/investigate`}
               className="px-4 py-2 bg-blue-700 hover:bg-blue-600 border border-blue-500 hover:border-blue-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-blue-900/30"
-              title="Generate a full investigation narrative with signals, statutes, and recommendations"
+              title="READ THE EVIDENCE — full narrative: every fired signal with its proof (claims/bene, peer mean, z-score), the statutes behind it, and recommended next actions. Start here to decide if a lead is real."
             >
               <MagnifyingGlassIcon /> Investigate
             </Link>
             <Link
               to={`/providers/${npi}/ownership`}
               className="px-4 py-2 bg-purple-700 hover:bg-purple-600 border border-purple-500 hover:border-purple-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-purple-900/30"
-              title="Trace ownership network, shared addresses, and co-located providers"
+              title="FIND THE RING — shared addresses, co-located providers, common authorized officials, sibling NPIs under one operator. A modest-looking NPI can sit inside a much larger cluster."
             >
               <LinkIcon /> Trace Ownership
             </Link>
             <Link
               to={`/providers/${npi}/referral`}
               className="px-4 py-2 bg-red-700 hover:bg-red-600 border border-red-500 hover:border-red-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-red-900/30"
-              title="Refer this provider to the Medicaid Fraud Control Unit"
+              title="STATE channel (separate from federal OIG) — auto-targets this provider's state MFCU and pre-fills the referral. If you file both, file OIG first, then MFCU."
             >
               <ExclamationTriangleIcon /> Refer to MFCU
             </Link>
@@ -613,7 +613,7 @@ export default function ProviderDetail() {
             }}
             disabled={exportStatus === 'loading'}
             className="px-4 py-2 bg-blue-700 hover:bg-blue-600 border border-blue-500 hover:border-blue-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 disabled:opacity-50"
-            title="Open the packet with the print dialog up — choose 'Save as PDF'. This is the file OIG/MFCU will accept as an attachment (.html is not accepted)."
+            title="THE EVIDENCE RECORD (not the submission) — full document: exec summary, all signals with methodology and citations, timeline, exclusion checks. Opens the print dialog; choose Save as PDF to attach or file. OIG accepts pdf, not .html."
           >
             <DocumentTextIcon /> {exportStatus === 'loading' ? 'Preparing...' : 'Referral Packet (PDF)'}
           </button>
@@ -626,7 +626,7 @@ export default function ProviderDetail() {
             }}
             disabled={oigTipLoading}
             className="px-4 py-2 bg-amber-600 hover:bg-amber-500 border border-amber-400 hover:border-amber-300 text-black text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-amber-900/30 disabled:opacity-50"
-            title="Generate the referral narrative — THIS is what you paste into the HHS-OIG hotline form. Includes a per-provider filing guide."
+            title="THE SUBMISSION — the narrative you paste into tips.oig.hhs.gov, plus a filing guide derived for THIS provider (which option to pick on each wizard screen). Auto-saves to the case. Paste from SUBJECT OF COMPLAINT down."
           >
             <DocumentTextIcon /> {oigTipLoading ? 'Drafting…' : 'OIG Hotline Tip'}
           </button>
@@ -696,7 +696,7 @@ export default function ProviderDetail() {
               onClick={() => addToWatchlistMutation.mutate()}
               disabled={addToWatchlistMutation.isPending}
               className="px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-600 hover:border-yellow-600 text-gray-200 text-sm font-medium rounded transition-colors flex items-center gap-2"
-              title="Add to watchlist for monitoring"
+              title="MONITOR, don't investigate — track this provider with an alert threshold so you hear about it if the risk climbs. For leads not worth working today."
             >
               <StarIcon /> Add to Watchlist
             </button>
