@@ -69,6 +69,27 @@ async def require_admin(request: Request) -> dict:
 
 
 # Roles that can run scans / analyst-level operations (analyst, investigator, admin)
+# Roles allowed to CHANGE case state (promote, set queue_status, write case
+# notes, file/track referrals). 'viewer' and 'analyst' are deliberately absent:
+# a viewer is read-only, and an analyst may run scans but not alter the case
+# ledger. Without this, every mutation route sat behind require_user only, so
+# any authenticated account — including an auto-provisioned Google viewer —
+# could confirm cases, write notes, and create referrals (audit 2026-07-25, P0).
+_INVESTIGATOR_ROLES = {"investigator", "admin"}
+
+
+async def require_investigator(request: Request) -> dict:
+    """FastAPI dependency — requires investigator role or above (investigator/admin)."""
+    user = await require_user(request)
+    if user["role"] not in _INVESTIGATOR_ROLES:
+        raise HTTPException(
+            403,
+            f"This action changes case state and requires the 'investigator' role "
+            f"(you are '{user['role']}'). Ask an admin to raise your role.",
+        )
+    return user
+
+
 _ANALYST_ROLES = {"analyst", "investigator", "admin"}
 
 

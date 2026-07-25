@@ -792,7 +792,8 @@ export default function ProviderExplorer() {
 
   // ── CSV export ────────────────────────────────────────────────────────────
   const handleExportCSV = () => {
-    window.open('/api/providers/export/csv', '_blank', 'noopener,noreferrer')
+    void api.exportCsv('/providers/export/csv', 'providers.csv')
+      .catch((e) => alert(e instanceof Error ? e.message : 'Export failed'))
   }
 
   // ── Saved searches ──────────────────────────────────────────────────────

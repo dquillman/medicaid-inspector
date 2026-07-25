@@ -21,7 +21,7 @@ from core.referral_workflow import (
 from core.store import get_provider_by_npi
 from core.audit_log import log_action
 from core.phi_logger import log_phi_access
-from routes.auth import require_user, require_admin
+from routes.auth import require_user, require_admin, require_investigator
 
 router = APIRouter(prefix="/api/referrals", tags=["referrals"], dependencies=[Depends(require_user)])
 
@@ -49,7 +49,7 @@ async def submit_referral(
     npi: str,
     body: SubmitReferralBody,
     request: Request,
-    user: dict = Depends(require_user),
+    user: dict = Depends(require_investigator),
 ):
     """Create a new MFCU referral for a provider."""
     username = user.get("username", "unknown")
@@ -144,7 +144,7 @@ async def update_referral_endpoint(
     referral_id: int,
     body: UpdateReferralBody,
     request: Request,
-    user: dict = Depends(require_user),
+    user: dict = Depends(require_investigator),
 ):
     """Update a referral's stage, outcome, or metadata."""
     username = user.get("username", "unknown")

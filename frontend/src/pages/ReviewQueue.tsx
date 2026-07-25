@@ -876,7 +876,10 @@ export default function ReviewQueue() {
           </div>
           <RunAutoPrepButton />
           <button
-            onClick={() => window.open('/api/review/export/csv', '_blank', 'noopener,noreferrer')}
+            onClick={async () => {
+              try { await api.exportCsv('/review/export/csv', 'review_queue.csv') }
+              catch (e) { alert(e instanceof Error ? e.message : 'Export failed') }
+            }}
             className="px-4 py-2 text-sm rounded transition-colors border font-medium flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-200 border-gray-600"
             aria-label="Export full review queue as CSV"
           >

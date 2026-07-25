@@ -29,7 +29,7 @@ from core.review_store import (
     STALE_CASE_DAYS,
 )
 from core.store import get_prescanned
-from routes.auth import require_user, require_admin
+from routes.auth import require_user, require_admin, require_investigator
 
 # Only-Brain-Top-10 rule: new additions to the review queue must be a provider
 # CURRENTLY on the Fraud Brain's visible top-10 board (the exact cards shown on
@@ -222,7 +222,7 @@ async def stale_cases(days: int = STALE_CASE_DAYS):
 
 
 @router.post("/backfill")
-async def backfill_review_queue():
+async def backfill_review_queue(user: dict = Depends(require_investigator)):
     """Populate review queue from the current Fraud Brain top-10. Safe to call
     multiple times — no duplicates added.
 
@@ -271,7 +271,7 @@ async def export_review_csv():
 
 
 @router.post("/add")
-async def add_single_review(body: AddReviewBody, user: dict = Depends(require_user)):
+async def add_single_review(body: AddReviewBody, user: dict = Depends(require_investigator)):
     """Add a single provider to the review queue (e.g. from watchlist). Returns the created/existing item.
 
     This is the explicit human promotion gate: an NPI enters the case ledger
@@ -343,7 +343,7 @@ async def add_single_review(body: AddReviewBody, user: dict = Depends(require_us
 # matches in declaration order, so the parameterized route must come last.
 
 @router.get("/prepare/status")
-async def auto_prep_status(user: dict = Depends(require_user)):
+async def auto_prep_status(user: dict = Depends(require_investigator)):
     """Nightly auto-prepare state: when it last ran, which single lead it
     prepared (one per day by design — Dave submits at most one/day)."""
     from services.case_prep import get_auto_prep_status
@@ -351,7 +351,7 @@ async def auto_prep_status(user: dict = Depends(require_user)):
 
 
 @router.get("/prepare/state/{npi}")
-async def prepare_state(npi: str, user: dict = Depends(require_user)):
+async def prepare_state(npi: str, user: dict = Depends(require_investigator)):
     """Lightweight, instant read of one case's preparation state — for the
     Prepare Case button to POLL. prepare itself can take 60–90s and 502s
     through Firebase Hosting's ~60s proxy timeout even though the BACKEND
@@ -382,7 +382,7 @@ async def run_nightly_now(force: bool = False, count: int = 2, user: dict = Depe
 
 
 @router.post("/prepare/{npi}")
-async def prepare_case_endpoint(npi: str, user: dict = Depends(require_user)):
+async def prepare_case_endpoint(npi: str, user: dict = Depends(require_investigator)):
     """One-click case preparation — automates workflow steps 2–6: opens the
     case at Under Review with the auto-note, corroborates (network ring ties,
     claim patterns, Brain evidence) into an AI-authored case note, and attaches
@@ -410,7 +410,7 @@ async def prepare_case_endpoint(npi: str, user: dict = Depends(require_user)):
 
 
 @router.post("/bulk-update")
-async def bulk_update_review(body: BulkUpdateBody):
+async def bulk_update_review(body: BulkUpdateBody, user: dict = Depends(require_investigator)):
     """Update status for multiple NPIs at once."""
     try:
         count = bulk_update_review_items(body.npis, body.status)
@@ -426,7 +426,7 @@ async def valid_queue_statuses():
 
 
 @router.post("/{npi}/queue-status")
-async def set_case_queue_status(npi: str, body: QueueStatusBody, user: dict = Depends(require_user)):
+async def set_case_queue_status(npi: str, body: QueueStatusBody, user: dict = Depends(require_investigator)):
     """Explicit, human-initiated case-ledger status change (the ledger write path).
 
     This is the deliberate counterpart to drafting a document: recording that a
@@ -489,7 +489,7 @@ async def list_case_notes(npi: str):
 
 
 @router.post("/{npi}/case-notes")
-async def append_case_note(npi: str, body: CaseNoteBody, user: dict = Depends(require_user)):
+async def append_case_note(npi: str, body: CaseNoteBody, user: dict = Depends(require_investigator)):
     """Append a note to the case log. Append-only by design — corrections are
     new notes, and only an admin redact (tombstoned) can remove text. The
     authenticated user is recorded as the author."""
@@ -564,7 +564,7 @@ async def review_history(npi: str):
 
 
 @router.patch("/{npi}")
-async def update_review(npi: str, body: UpdateReviewBody):
+async def update_review(npi: str, body: UpdateReviewBody, user: dict = Depends(require_investigator)):
     # Determine if assigned_to was actually sent in the request body
     raw = body.model_dump(exclude_unset=True)
     assigned_to_arg = raw["assigned_to"] if "assigned_to" in raw else ...

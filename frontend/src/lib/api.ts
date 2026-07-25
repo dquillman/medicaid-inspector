@@ -356,6 +356,25 @@ export const api = {
 
   reviewCounts: () => get<ReviewCounts>('/review/counts'),
 
+  // CSV exports MUST go through fetch + Blob, not window.open(): auth is a
+  // Bearer token from localStorage, and window.open cannot attach an
+  // Authorization header — both export buttons were returning 401 in
+  // production (audit 2026-07-25).
+  exportCsv: async (path: string, filename: string) => {
+    const res = await fetch(`${BASE}${path}`, { headers: { ...authHeaders() } })
+    if (res.status === 401) throw new Error('Session expired — sign in again to export')
+    if (!res.ok) throw new Error(`Export failed: ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  },
+
   exportProvider: async (npi: string) => {
     const res = await fetch(`${BASE}/providers/${npi}/export`, { headers: { ...authHeaders() } })
     if (!res.ok) throw new Error(`Export failed: ${res.status}`)
