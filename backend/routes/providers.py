@@ -2865,6 +2865,29 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         for ind in indicators
     ) or "  - (no individual signals fired; flagged on composite score)"
 
+    # ── Short-form summary — for form fields too small for the full narrative ──
+    # State intake forms (e.g. PA's "MA Provider Compliance Hotline") give a
+    # single small textarea, not OIG's one big free-text box. The full
+    # narrative above is written for that big box (and doubles as the evidence
+    # record); pasting all of it into a small field reads as a wall of text
+    # with instructions-to-the-filer mixed in. This is generated from the same
+    # structured fields as the full narrative (never hand-written per
+    # provider) — a short paragraph plus the top 2 flagged indicators' own
+    # finding text, which already carries each signal's peer-comparison numbers.
+    total_claims = float(cached.get("total_claims") or 0)
+    _lead = (
+        f"Analysis of public CMS T-MSIS Medicaid payment data ({first_m} to {last_m}) shows "
+        f"Medicaid paid this provider ${total_paid:,.0f} across {total_claims:,.0f} claims for "
+        f"{total_benes:,.0f} recipient(s)."
+    )
+    _top_findings = " ".join(f"{ind['finding']}." for ind in indicators[:2] if ind.get("finding"))
+    _close = (
+        "These are statistical indicators derived from public data — leads for investigation, "
+        "not proof of fraud. No individual recipient is identified"
+        + (f"; the pattern spans all {total_benes:,.0f} recipients." if total_benes else ".")
+    )
+    short_narrative = " ".join(x for x in [_lead, _top_findings, _close] if x)
+
     # Destination only changes the routing header/footer — the EVIDENCE body is
     # identical for OIG and MFCU (one narrative, two destinations).
     if dest == "mfcu":
@@ -3036,6 +3059,9 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         # per-provider wizard answer sheet above a COPY-FROM-HERE line.
         "text": text,
         "text_with_guide": text_with_guide,
+        # Condensed paragraph for small-textarea state forms — see comment
+        # above short_narrative's construction. Same underlying data as `text`.
+        "short_narrative": short_narrative,
         "filing_guide": filing_guide,
         "fields": {
             "subject_name": to_ascii(name),

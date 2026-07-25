@@ -1824,6 +1824,9 @@ export interface OigTipIndicator { signal: string; label: string; finding: strin
 export interface OigTipResponse {
   npi: string
   text: string
+  // Condensed paragraph for state forms with a small "describe the fraud"
+  // field — same underlying data as `text`, not a separate submission.
+  short_narrative?: string
   fields: Record<string, unknown>
   signal_count: number
 }

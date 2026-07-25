@@ -81,7 +81,9 @@ export default function MFCUReferralPage() {
     staleTime: 5 * 60_000,
   })
   const autoNarrative = referralNarrative?.text ?? ''
+  const shortNarrative = referralNarrative?.short_narrative ?? ''
   const [narrativeCopied, setNarrativeCopied] = useState(false)
+  const [shortCopied, setShortCopied] = useState(false)
 
   // Prefill jurisdiction + narrative once the provider/MFCU data lands, unless
   // the analyst has already typed something.
@@ -414,6 +416,41 @@ export default function MFCUReferralPage() {
                   <pre className="max-h-72 overflow-auto px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap">
                     {autoNarrative}
                   </pre>
+                </div>
+              )}
+
+              {/* Many state intake forms give ONE small textarea, not OIG's
+                  single big free-text box — the full narrative above reads as
+                  a wall of text there and starts with instructions written to
+                  the filer, not the caseworker. This is a condensed paragraph
+                  built from the same data for exactly that field. */}
+              {shortNarrative && (
+                <div className="mt-3 border border-amber-500/30 rounded-lg bg-amber-950/10">
+                  <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-amber-500/20">
+                    <div>
+                      <h3 className="text-xs font-bold text-amber-300/90">
+                        Short version — for a small &ldquo;describe the fraud&rdquo; field
+                      </h3>
+                      <p className="text-[11px] text-amber-200/60 mt-0.5">
+                        Same facts, condensed. Use this if the state form has no room for the
+                        full narrative above.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard?.writeText(shortNarrative)
+                        setShortCopied(true)
+                        setTimeout(() => setShortCopied(false), 2000)
+                      }}
+                      className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-700/70 hover:bg-amber-600 text-black rounded transition-colors"
+                    >
+                      {shortCopied ? 'Copied ✓' : 'Copy short version'}
+                    </button>
+                  </div>
+                  <p className="px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap">
+                    {shortNarrative}
+                  </p>
                 </div>
               )}
 
