@@ -121,14 +121,14 @@ const COMPONENT_LABELS: Record<string, string> = {
 }
 
 const WORKFLOW_STEPS: { title: string; body: string; where?: string }[] = [
-  { title: 'Work this list top-down', body: 'Score is a confidence level: 85+ is proven/near-proven (OIG-excluded or confirmed); ~40–60 are strong statistical leads worth investigating.', where: 'You are here — Fraud Brain' },
-  { title: 'Open the lead & read the evidence', body: 'Check Top Fraud Odds, then expand each fired flag to see its Proof box (claims/bene, peer mean, z-score) and the "bills Nx the specialty median per patient" line — that one sentence is your case.', where: 'Click the provider name' },
-  { title: 'Corroborate', body: 'Is it tied to other NPIs (a ring)? Confirm the specific abusive codes before you commit time.', where: 'Network · Fraud Rings · Claim Patterns' },
-  { title: 'Capture it', body: 'Open a case and set status to Under Review with a one-line note (the intensity multiple + the codes).', where: 'Add to Review button → Review Queue' },
-  { title: 'Build the case', body: 'Append case notes as you verify — each entry is timestamped, authored (you vs. HAL), and on the record. Move the status along — confirming here sharpens the Brain next time.', where: 'Review Queue → the case → History' },
-  { title: 'Generate the referral packet', body: 'Bundles every signal with its proof section, dollars at risk, and methodology — your submission document.', where: 'Referral Packet / Export button' },
-  { title: 'Report to HHS-OIG', body: 'Submit the packet with provider name + NPI, the scheme in one line, and the dollars at risk. Note: OIG never confirms receipt — keep your own record in OIG Tips.', where: 'TIPS.HHS.GOV · 1-800-HHS-TIPS · log in OIG Tips' },
-  { title: 'Close the loop', body: 'Mark the case Submitted/Confirmed so your board stays clean and the model learns from the outcome.', where: 'Review Queue' },
+  { title: 'Work this list top-down', body: 'Brain score is a confidence level: ~40–60 are strong statistical leads worth investigating. This board is FRESH, UNWORKED leads only — anything you Confirm, Report, or that goes stale/expired drops off automatically.', where: 'You are here — Fraud Brain' },
+  { title: 'Prepare the case (one click)', body: 'Opens the case at Investigating, runs the corroboration for you (ego-network ring ties, claim-level patterns, Brain evidence) into a timestamped case note, and attaches the referral packet. Takes 1–2 min. The top 2 fresh leads are prepared automatically every night, so a READY case is usually already waiting.', where: 'Prepare Case button → case shows READY' },
+  { title: 'Read what it found', body: 'The auto-investigation note names the intensity multiple ("bills Nx the specialty median per patient"), the codes, any ring ties, and says so honestly when a check could not be run. This is where you decide if it is real — the machine gathered, you judge.', where: 'Review Queue → the case → History' },
+  { title: 'Dig deeper if it is close', body: 'Expand each fired flag for its Proof box (claims/bene, peer mean, z-score). Check whether other NPIs share an owner, address, or authorized official.', where: 'Provider page · Network · Fraud Rings · Claim Patterns' },
+  { title: 'Confirm it', body: 'If the evidence holds up, set the case to Confirmed. This is human-only — the app cannot do it for you — and it both sharpens the model and drops the lead off this board.', where: 'Review Queue → status dropdown → Confirmed' },
+  { title: 'Generate the referral narrative — THIS is the submission', body: 'OIG and MFCU intake are online forms whose main field is a free-text allegation box, so the copy-paste NARRATIVE is what you actually submit. It carries the full address, dollars at risk, per-patient intensity, exclusion check, every fired signal and its regulatory citation — plus a filing guide, derived for THIS provider, telling you exactly which option to pick on each screen. It auto-saves to the case, so it is never lost.', where: 'OIG Tip button (destination: OIG or MFCU)' },
+  { title: 'File it', body: 'Follow the filing guide at the top of the tip, then paste everything below the COPY line into the allegation box. The referral packet is your EVIDENCE RECORD, not the submission — attach it only if you want (print it to PDF first; .html is not accepted). OIG never confirms receipt.', where: 'tips.oig.hhs.gov · 1-800-HHS-TIPS · or the state MFCU' },
+  { title: 'Close the loop', body: 'Log the tip so you have your own dated record, then set the case to Reported: OIG (or Reported: MFCU — file OIG first if you do both). The case leaves the board and the outcome trains the model.', where: 'OIG Tip → Log as filed · then status → Reported' },
 ]
 
 function WorkflowPanel() {
@@ -162,7 +162,7 @@ function WorkflowPanel() {
           <li className="pt-2 mt-1 border-t border-hairline">
             <p className="text-xs text-ink-secondary">
               <span className="font-mono uppercase tracking-wider text-filament-core">TL;DR </span>
-              Open #1 → expand the proof → Add to Review → Referral Packet → submit to HHS-OIG (1-800-HHS-TIPS) → mark it submitted.
+              Prepare Case on #1 (or take tonight's READY one) → read the auto-investigation note → Confirmed → OIG Tip → follow its filing guide and paste the narrative at tips.oig.hhs.gov → Log as filed → Reported: OIG.
             </p>
           </li>
         </ol>
