@@ -2776,9 +2776,25 @@ async def provider_oig_tip(npi: str):
     nppes = cached.get("nppes") or {}
     name = cached.get("provider_name") or nppes.get("name") or npi
     addr = nppes.get("address") or {}
+    # The slim Cloud Run cache usually stores only state+zip (so the tip showed
+    # e.g. "LA, 70114"). When the street line or city is missing, do a live
+    # NPPES lookup so the complaint carries a full, actionable street address.
+    if not (addr.get("line1") and addr.get("city")):
+        try:
+            from data.nppes_client import get_provider as _nppes_get
+            live = await _nppes_get(npi) or {}
+            laddr = live.get("address") or {}
+            merged = {**addr, **{k: v for k, v in laddr.items() if v}}
+            if merged.get("line1") or merged.get("city"):
+                addr = merged
+            if (not name or name == npi) and live.get("name"):
+                name = live["name"]
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("oig-tip: live NPPES lookup failed for %s", npi, exc_info=True)
     address_str = ", ".join(
         x for x in [
-            addr.get("line1"), addr.get("city"),
+            addr.get("line1"), addr.get("line2"), addr.get("city"),
             addr.get("state") or cached.get("state"),
             (addr.get("zip") or cached.get("zip") or "")[:5],
         ] if x
@@ -2788,6 +2804,27 @@ async def provider_oig_tip(npi: str):
     total_paid = float(cached.get("total_paid") or 0)
     first_m = cached.get("first_month") or "?"
     last_m = cached.get("last_month") or "?"
+    # Per-beneficiary intensity — the single most defensible dollar metric for a
+    # text-only submission, and OIG exclusion status (strongest evidence when set).
+    total_benes = float(cached.get("total_beneficiaries") or 0)
+    rev_per_bene = (total_paid / total_benes) if total_benes else 0.0
+    try:
+        from core.oig_store import is_excluded as _is_excl
+        oig_excluded = bool(_is_excl(npi)[0])
+    except Exception:
+        oig_excluded = False
+    intensity_line = (
+        f"  BILLING INTENSITY: ${rev_per_bene:,.0f} paid per beneficiary "
+        f"({total_benes:,.0f} distinct beneficiaries over the period)\n"
+        if total_benes else ""
+    )
+    exclusion_block = (
+        "  ** FEDERAL EXCLUSION: the subject NPI appears on the HHS-OIG LEIE exclusion\n"
+        "     list. Billing Medicaid while excluded is itself a violation (42 CFR 1001.1901)\n"
+        "     and the strongest indicator in this complaint. **\n\n"
+        if oig_excluded else
+        "  Federal exclusion check: NPI is not currently on the OIG LEIE (checked at generation).\n\n"
+    )
 
     flags = [f for f in (cached.get("signal_results") or cached.get("flags") or []) if f.get("flagged")]
     # Map fired signals to the OIG Hotline's accepted complaint categories so the
@@ -2834,9 +2871,11 @@ async def provider_oig_tip(npi: str):
         f"  indicator(s). The indicators below are statistical/anomaly findings consistent with\n"
         f"  patterns in OIG enforcement actions; they are leads for investigation, not proof of fraud.\n"
         "\n"
+        f"{exclusion_block}"
         f"  TIME PERIOD OF ACTIVITY: {first_m} to {last_m}\n"
         f"  TOTAL MEDICAID PAID TO SUBJECT (period): ${total_paid:,.0f}\n"
         f"    (basis for potential exposure; not an assertion that all payments are improper)\n"
+        f"{intensity_line}"
         "\n"
         f"SUPPORTING INDICATORS ({len(flags)})\n"
         f"{ind_lines}\n"
