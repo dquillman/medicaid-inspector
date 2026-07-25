@@ -55,7 +55,7 @@ export default function MFCUReferralPage() {
 
   // Brain score is the app's authority. It's undefined for providers not on the
   // current board (off-board or Reported→excluded), so fall back to raw risk.
-  const { brainScore } = useProviderFlags()
+  const { brainScore, brainLoaded } = useProviderFlags()
   const brainVal = brainScore(npi ?? '')
   const usingBrain = brainVal != null
   const eligibilityScore = brainVal ?? riskScore
@@ -120,10 +120,17 @@ export default function MFCUReferralPage() {
   if (allLoaded && phase === 'gate-loading' && gates.length === 0) {
     const flaggedCount = flaggedSignals.length
 
-    const scoreLabel = usingBrain ? 'Brain score' : 'Risk score (off board)'
+    // Don't render a verdict off a fetch that hasn't landed. Falling back to
+    // raw risk while membership loaded is what made a Brain #2 provider (47.0)
+    // show as "off board 34.4 — NOT ELIGIBLE".
+    const scoreLabel = usingBrain
+      ? 'Brain score'
+      : brainLoaded ? 'Risk score (off board)' : 'Risk score (checking board…)'
     const gate1: GateResult = {
       label: 'Fraud Brain Threshold',
-      passed: eligibilityScore >= BRAIN_REFERRAL_MIN,
+      // Treat "still loading" as not-yet-failed so the gate can't flash a
+      // false NOT ELIGIBLE before the board data arrives.
+      passed: eligibilityScore >= BRAIN_REFERRAL_MIN || (!usingBrain && !brainLoaded),
       detail: eligibilityScore >= BRAIN_REFERRAL_MIN
         ? `${scoreLabel} ${eligibilityScore.toFixed(1)} (minimum ${BRAIN_REFERRAL_MIN})`
         : `${scoreLabel} ${eligibilityScore.toFixed(1)} — must be ${BRAIN_REFERRAL_MIN} or above`,

@@ -12,9 +12,15 @@ interface Flags {
   brainRank: (npi: string) => number | undefined
   brainScore: (npi: string) => number | undefined
   isTipped: (npi: string) => boolean
+  /** False until the Brain membership fetch resolves. brainScore() returns
+   *  undefined BOTH while loading and when a provider is genuinely off-board;
+   *  without this, callers cannot tell "not on the board" from "don't know
+   *  yet" — the MFCU eligibility gate read a still-loading fetch as "off
+   *  board" and declared a #2-ranked provider NOT ELIGIBLE. */
+  brainLoaded: boolean
 }
 
-const Ctx = createContext<Flags>({ isWatched: () => false, brainRank: () => undefined, brainScore: () => undefined, isTipped: () => false })
+const Ctx = createContext<Flags>({ isWatched: () => false, brainRank: () => undefined, brainScore: () => undefined, isTipped: () => false, brainLoaded: false })
 
 export function ProviderFlagsProvider({ children }: { children: ReactNode }) {
   const { data: wl } = useQuery({
@@ -23,7 +29,7 @@ export function ProviderFlagsProvider({ children }: { children: ReactNode }) {
     staleTime: 5 * 60_000,
     retry: 1,
   })
-  const { data: brain } = useQuery({
+  const { data: brain, isSuccess: brainOk } = useQuery({
     queryKey: ['brain-membership'],
     // 500 (the backend cap) rather than 100 — Brain-flag parity (#2): analysis
     // pages like Claim Patterns / Billing Codes surface providers well past the
@@ -59,8 +65,9 @@ export function ProviderFlagsProvider({ children }: { children: ReactNode }) {
       brainRank: (npi) => ranks[npi],
       brainScore: (npi) => scores[npi],
       isTipped: (npi) => tipped.has(npi),
+      brainLoaded: brainOk,
     }
-  }, [wl, brain, tips])
+  }, [wl, brain, tips, brainOk])
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
