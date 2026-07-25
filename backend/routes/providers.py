@@ -2755,18 +2755,30 @@ async def provider_narrative(npi: str, enhance: str = "auto"):
 
 
 @router.get("/{npi}/oig-tip")
-async def provider_oig_tip(npi: str):
+async def provider_oig_tip(npi: str, destination: str = "oig"):
     """
-    Generate an HHS-OIG Hotline-ready tip packet for a provider.
+    Generate the referral narrative for a provider — the SUBMISSION ITSELF.
 
-    The MFCU referral packet is a long investigation document; the OIG Hotline
-    (oig.hhs.gov/fraud/report-fraud, 1-800-HHS-TIPS) wants short structured
-    intake fields. This emits both a copy-paste text block tuned to those
-    fields and the structured fields themselves. Honest by construction: it
-    frames findings as automated indicators from public data, never as proven
-    fraud, and never claims total paid == improper paid.
+    Dave's rule (2026-07-25): the reports are ALWAYS a referral narrative. The
+    OIG Hotline and the state MFCU intakes are both online, text-only forms
+    (no file attachment), so this copy-paste narrative — not the long HTML
+    referral packet — is what actually gets submitted. ONE generator serves
+    BOTH destinations so they never drift: same subject block (full street
+    address via live NPPES), same dollars + per-beneficiary intensity, same
+    federal-exclusion check, same per-signal findings with regulatory
+    citations. `destination` only swaps the header/footer routing text.
+
+    The long HTML referral packet remains the evidence RECORD (case file, or
+    what you send when a channel does accept documents) — not the submission.
+
+    Honest by construction: frames findings as automated indicators from
+    public data, never as proven fraud, and never claims total paid ==
+    improper paid.
     """
     npi = _validate_npi(npi)
+    dest = (destination or "oig").strip().lower()
+    if dest not in ("oig", "mfcu"):
+        raise HTTPException(400, "destination must be 'oig' or 'mfcu'")
     cached = get_provider_by_npi(npi)
     if not cached:
         raise HTTPException(404, f"Provider {npi} not in scan cache")
@@ -2853,9 +2865,22 @@ async def provider_oig_tip(npi: str):
         for ind in indicators
     ) or "  - (no individual signals fired; flagged on composite score)"
 
+    # Destination only changes the routing header/footer — the EVIDENCE body is
+    # identical for OIG and MFCU (one narrative, two destinations).
+    if dest == "mfcu":
+        _state_name = (addr.get("state") or cached.get("state") or "").strip()
+        _header = (
+            f"MEDICAID FRAUD CONTROL UNIT (MFCU) REFERRAL — Suspected Medicaid Provider Fraud\n"
+            f"Jurisdiction: {_state_name or '(state of the subject provider)'}\n"
+            "File with the state MFCU intake form (see the destination card in the app).\n"
+        )
+    else:
+        _header = (
+            "HHS-OIG HOTLINE COMPLAINT — Suspected Medicaid Provider Fraud\n"
+            "Submit at: https://oig.hhs.gov/fraud/report-fraud/ (or 1-800-HHS-TIPS)\n"
+        )
     text = (
-        "HHS-OIG HOTLINE COMPLAINT — Suspected Medicaid Provider Fraud\n"
-        "Submit at: https://oig.hhs.gov/fraud/report-fraud/ (or 1-800-HHS-TIPS)\n"
+        f"{_header}"
         "\n"
         "SUBJECT OF COMPLAINT\n"
         f"  Provider name: {name}\n"
@@ -2891,9 +2916,15 @@ async def provider_oig_tip(npi: str):
         "  aggregate provider-level data. (HIPAA/privacy concerns are out of OIG Hotline scope\n"
         "  and would route to HHS OCR — not applicable here.)\n"
         "\n"
-        "  Note: This complaint, once submitted, is a Privacy-Act record. OIG does not confirm\n"
-        "  receipt or report status; outcome may be sought only via a FOIA records request to\n"
-        "  the OIG FOIA officer no sooner than 6 months after submission.\n"
+        + (
+            "  Note: state MFCUs may contact the referrer for clarification. Detailed per-signal\n"
+            "  evidence (peer means, z-scores, procedure codes) and a full referral packet are\n"
+            "  available on request.\n"
+            if dest == "mfcu" else
+            "  Note: This complaint, once submitted, is a Privacy-Act record. OIG does not confirm\n"
+            "  receipt or report status; outcome may be sought only via a FOIA records request to\n"
+            "  the OIG FOIA officer no sooner than 6 months after submission.\n"
+        )
     )
 
     # HHS-OIG's submission form rejects non-ASCII typographic characters. The
@@ -2909,6 +2940,7 @@ async def provider_oig_tip(npi: str):
 
     return {
         "npi": npi,
+        "destination": dest,
         "text": text,
         "fields": {
             "subject_name": to_ascii(name),

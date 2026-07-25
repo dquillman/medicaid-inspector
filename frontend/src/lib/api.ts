@@ -915,7 +915,12 @@ export const api = {
 
   // Methodology (public) + OIG Hotline tip export
   methods: () => get<MethodsResponse>('/methods'),
-  oigTip: (npi: string) => get<OigTipResponse>(`/providers/${npi}/oig-tip`),
+  // ONE referral-narrative generator, two destinations (Dave's rule: the
+  // reports are ALWAYS a referral narrative — it IS the submission, since both
+  // OIG and MFCU intakes are text-only forms). 'mfcu' swaps only the routing
+  // header/footer; the evidence body is identical.
+  oigTip: (npi: string, destination: 'oig' | 'mfcu' = 'oig') =>
+    get<OigTipResponse>(`/providers/${npi}/oig-tip`, { destination }),
 
   // Scan & Data freshness strip
   dataFreshness: () => get<DataFreshness>('/admin/data-freshness'),
