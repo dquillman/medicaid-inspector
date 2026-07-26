@@ -3079,8 +3079,17 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
             "(most recent billed month; full period is in the narrative)\n"
             "Form answer — 'recipient/patient name' (if required): Unknown — "
             "provider-level billing analysis; no individual recipient identified\n"
-            "Leave blank what we don't hold: state provider/Medicaid ID, license "
-            "number, provider phone. Never guess on a government form.\n"
+            f"Form answer — 'victim': {_state_name or 'the state'} Medicaid Program "
+            "(first name = state, last name = \"Medicaid Program\"). Leave victim DOB, "
+            "sex, employer and address blank — the injured party is a program.\n"
+            # The leave-blank list must reflect what we ACTUALLY hold. It used to
+            # name the provider phone unconditionally, which contradicted the
+            # same document once the phone was added below (NC requires it).
+            + ("Leave blank what we don't hold: state provider/Medicaid ID, license "
+               "number. Never guess on a government form.\n"
+               if npp_phone else
+               "Leave blank what we don't hold: state provider/Medicaid ID, license "
+               "number, provider phone. Never guess on a government form.\n")
         )
     else:
         _header = (
