@@ -79,7 +79,8 @@ async def main():
     print(f"Reading NPI list from {_SLIM.name}…")
     with open(_SLIM, encoding="utf-8") as f:
         slim = json.load(f)
-    npis = [p["npi"] for p in slim.get("providers", []) if p.get("npi")]
+    slim_provs = slim.get("providers", [])
+    npis = [p["npi"] for p in slim_provs if p.get("npi")]
     scan_progress = slim.get("scan_progress", {})
     print(f"  {len(npis):,} NPIs")
     print()
@@ -182,32 +183,10 @@ async def main():
     print(f"  {len(timeline_rows):,} timeline rows in {time.time() - t0:.1f}s")
     print()
 
-    # ── Pre-load MUP rows for all target NPIs into a dict (one bulk query
-    # instead of 106k individual lookups during scoring). ──
-    print("Pre-loading MUP diagnosis data for all targets…")
-    t0 = time.time()
-    try:
-        from services import mup_cache
-        if mup_cache.is_local():
-            mup_path = str(mup_cache.get_local_path()).replace("\\", "/")
-            mup_rows = con.execute(f"""
-                SELECT m.*
-                FROM read_parquet('{mup_path}') m
-                INNER JOIN target_npis t ON m.Rndrng_NPI = t.npi
-            """).fetchall()
-            mup_cols = [d[0] for d in con.description]
-            mup_by_npi: dict = {}
-            npi_idx = mup_cols.index("Rndrng_NPI")
-            for row in mup_rows:
-                mup_by_npi[row[npi_idx]] = dict(zip(mup_cols, row))
-            print(f"  pre-loaded {len(mup_by_npi):,} MUP rows in {time.time() - t0:.1f}s")
-        else:
-            mup_by_npi = {}
-            print("  MUP cache not present — skipping")
-    except Exception as e:
-        print(f"  MUP pre-load failed (non-fatal, will fall back per-NPI): {e}")
-        mup_by_npi = {}
-    print()
+    # The MUP pre-load that used to sit here is gone: it existed solely to feed
+    # diagnosis_procedure_mismatch, retired 2026-07-26 (it fired on 2 of 106,660
+    # and was the only signal reading Medicare data to judge Medicaid claims).
+    # No scored signal reads MUP any more.
 
     # ── Score everything ─────────────────────────────────────────────────────
     print("Scoring all providers…")
@@ -233,22 +212,66 @@ async def main():
     peer_stats, cpb_stats, spend_mean, spend_std = _build_peer_stats(
         list(agg_by_npi.values()), peer_rpb, peer_cpb, all_spend
     )
-    cluster_sizes = sig["compute_address_clusters"]()
-    auth_clusters = sig["compute_auth_official_clusters"]()
 
-    # Monkey-patch mup_lookup_sync so the scoring loop uses our pre-loaded
-    # dict instead of hitting DuckDB once per provider (which was the bottleneck).
-    from services import mup_client
-    original_lookup = mup_client.lookup_sync
-    mup_client.lookup_sync = lambda npi: mup_by_npi.get(npi)
-    sig["mup_lookup_sync"] = mup_client.lookup_sync
+    # ── Cluster sizes, computed from the SLIM cache's NPPES enrichment ───────
+    # compute_address_clusters()/compute_auth_official_clusters() read
+    # core.store.get_prescanned(), which is empty on a workstation that has no
+    # populated prescan_cache.json — so they would silently return {} and every
+    # provider would score 0 on both cluster signals. That is precisely how
+    # address_cluster_risk and corporate_shell_risk came to be dark. Build them
+    # from the slim enrichment we already loaded instead.
+    def _clusters(path_fn) -> dict:
+        groups: dict[str, list[str]] = {}
+        key: dict[str, str] = {}
+        for sp in slim_provs:
+            k = path_fn(sp)
+            if not k:
+                continue
+            groups.setdefault(k, []).append(sp["npi"])
+            key[sp["npi"]] = k
+        return {n: len(groups[k]) for n, k in key.items()}
+
+    def _addr_key(sp: dict) -> str:
+        a = (sp.get("nppes") or {}).get("address") or {}
+        z = (a.get("zip") or "")[:5].strip()
+        s = (a.get("line1") or "").strip().upper()
+        return f"{z}|{s}" if z and s else ""
+
+    def _ao_key(sp: dict) -> str:
+        ao = (sp.get("nppes") or {}).get("authorized_official") or {}
+        return (ao.get("name") or "").strip().upper()
+
+    cluster_sizes = _clusters(_addr_key)
+    auth_clusters = _clusters(_ao_key)
+    print(f"  address clusters: {len(cluster_sizes):,} providers placed, "
+          f"{sum(1 for v in cluster_sizes.values() if v >= 3):,} in a cluster of 3+")
+    print(f"  official clusters: {len(auth_clusters):,} providers placed, "
+          f"{sum(1 for v in auth_clusters.values() if v >= 3):,} in a cluster of 3+")
+
+    # NPPES/identity enrichment, keyed by NPI. Five signals READ these fields —
+    # specialty_mismatch (specialty/taxonomy), new_provider_explosion
+    # (nppes.enumeration_date), geographic_impossibility (state) and both cluster
+    # signals. The row used to be `{**agg}` — DuckDB aggregates only — so those
+    # fields were absent at scoring time and every one of those signals returned
+    # "no data available" for all 106,660 providers. Enrichment lands in the
+    # cache AFTER scoring, which is why they were dark from day one rather than
+    # by any single bug. Merge it in BEFORE scoring, and carry it through to the
+    # output so a rebuild no longer discards identity data.
+    _ENRICH_KEYS = ("nppes", "specialty", "state", "city", "zip", "provider_name")
+    enrich = {
+        sp["npi"]: {k: sp[k] for k in _ENRICH_KEYS if sp.get(k) is not None}
+        for sp in slim_provs if sp.get("npi")
+    }
+    _with_spec = sum(1 for e in enrich.values() if e.get("specialty"))
+    _with_enum = sum(1 for e in enrich.values() if (e.get("nppes") or {}).get("enumeration_date"))
+    print(f"  enrichment available: {_with_spec:,} with specialty, {_with_enum:,} with enumeration date")
 
     scored: list[dict] = []
     for i, (npi, agg) in enumerate(agg_by_npi.items()):
         hl = hcpcs_by_npi.get(npi, [])
         tl = timeline_by_npi.get(npi, [])
         top = hl[0]["hcpcs_code"] if hl else ""
-        row = {**agg, "top_hcpcs": top}
+        row = {**agg, "top_hcpcs": top, **enrich.get(npi, {})}
         scored.append(_score_provider(
             row, hl, tl, npi, top,
             peer_stats, cpb_stats, spend_mean, spend_std,
@@ -259,7 +282,6 @@ async def main():
             eta = (len(agg_by_npi) - i - 1) / rate
             print(f"  scored {i+1:,}/{len(agg_by_npi):,}  ({rate:.0f}/s, ETA {eta:.0f}s)")
     print(f"  scored {len(scored):,} providers in {time.time() - t0:.1f}s")
-    mup_client.lookup_sync = original_lookup  # restore
     print()
 
     # ── Write final cache ────────────────────────────────────────────────────
@@ -279,19 +301,27 @@ async def main():
     print()
 
     flagged = sum(1 for p in scored if p.get("risk_score", 0) >= 50)
-    with_new = sum(
-        1 for p in scored
-        if any(s.get("signal") == "diagnosis_procedure_mismatch" for s in p.get("signal_results", []))
-    )
-    new_flagged = sum(
-        1 for p in scored
-        if any(s.get("signal") == "diagnosis_procedure_mismatch" and s.get("flagged")
-               for s in p.get("signal_results", []))
-    )
     print(f"DONE: {len(scored):,} providers rebuilt")
-    print(f"  high-risk (score≥50): {flagged:,}")
-    print(f"  with diagnosis_procedure_mismatch evaluated: {with_new:,}")
-    print(f"  flagged by diagnosis_procedure_mismatch: {new_flagged:,}")
+    print(f"  high-risk (score>=50): {flagged:,}")
+    print()
+
+    # Per-signal fire rate. A signal at 0.0% here is DARK — its inputs were
+    # missing at scoring time. That is exactly how five signals went unnoticed
+    # for months (audit 2026-07-26), so the rebuild now reports it every run
+    # instead of leaving it to be discovered.
+    from collections import Counter as _C
+    fired, evaluated = _C(), _C()
+    for p in scored:
+        for s in p.get("signal_results", []):
+            evaluated[s["signal"]] += 1
+            if s.get("flagged"):
+                fired[s["signal"]] += 1
+    n = len(scored) or 1
+    print("  signal fire rates:")
+    for name in sorted(evaluated, key=lambda k: -fired[k]):
+        pct = 100 * fired[name] / n
+        mark = "   <-- DARK" if fired[name] == 0 else ""
+        print(f"    {fired[name]:7,}  ({pct:5.2f}%)  {name}{mark}")
 
 
 if __name__ == "__main__":

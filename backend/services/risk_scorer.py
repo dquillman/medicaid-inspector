@@ -1,10 +1,10 @@
 """
 Composite risk scorer (live, single-NPI path).
-Fetches all required data for a provider from DuckDB, runs 15 detectors, and
+Fetches all required data for a provider from DuckDB, runs 13 detectors, and
 returns a composite score (0–100) + list of active flags.
 
-NOTE (2026-07-26): this path runs 15 detectors; the bulk prescan path
-(services/scan_engine._score_provider) runs 17. total_spend_outlier and
+NOTE (2026-07-26): this path runs 13 detectors; the bulk prescan path
+(services/scan_engine._score_provider) runs 15. total_spend_outlier and
 billing_consistency are wired into the scan path only, so a provider scored
 live can land on a different composite than the same provider in the prescan
 cache. Pre-existing drift, documented here rather than silently "fixed" —
@@ -27,11 +27,9 @@ from services.anomaly_detector import (
     oig_excluded,
     compute_address_clusters,
     specialty_mismatch,
-    corporate_shell_risk,
     compute_auth_official_clusters,
     dead_npi_billing,
     new_provider_explosion,
-    geographic_impossibility,
     SignalResult,
 )
 # diagnosis_procedure_mismatch is RETIRED (2026-07-26) — deliberately not
@@ -76,10 +74,8 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
         address_cluster_risk(provider_agg, cluster_sizes.get(npi, 0)),
         oig_excluded(npi, provider_agg),
         specialty_mismatch(provider_agg, hcpcs_rows),
-        corporate_shell_risk(provider_agg, auth_clusters.get(npi, 0)),
         dead_npi_billing(provider_agg),
         new_provider_explosion(provider_agg),
-        geographic_impossibility(provider_agg),
     ]
 
     # Same feedback-adjusted composite as the scan path — one implementation

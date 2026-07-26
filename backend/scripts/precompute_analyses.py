@@ -173,6 +173,16 @@ def rebuild_slim_scores(providers: list[dict]) -> int:
         rec["state"] = p.get("state") or addr.get("state") or prev.get("state", "")
         rec["city"] = p.get("city") or addr.get("city") or prev.get("city", "")
         rec["zip"] = p.get("zip") or addr.get("zip") or prev.get("zip", "")
+        # PRESERVE the nppes sub-dict. This function rebuilds each record from
+        # scratch, and until 2026-07-26 it silently dropped nppes — which is not
+        # cosmetic: nppes.authorized_official powers the ownership tracer and
+        # corporate_shell_risk, nppes.address powers address_cluster_risk, and
+        # nppes.enumeration_date powers new_provider_explosion. Running a refresh
+        # would have deleted all three and re-darkened the signals this release
+        # just fixed. Prefer the freshly-scored record, fall back to the old slim.
+        _nppes = nppes or (prev.get("nppes") if isinstance(prev.get("nppes"), dict) else None)
+        if _nppes:
+            rec["nppes"] = _nppes
         out.append(rec)
 
     out.sort(key=lambda r: r.get("total_paid") or 0, reverse=True)

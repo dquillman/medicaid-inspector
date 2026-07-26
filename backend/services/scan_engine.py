@@ -73,11 +73,9 @@ def _import_signals():
         oig_excluded,
         compute_address_clusters,
         specialty_mismatch,
-        corporate_shell_risk,
         compute_auth_official_clusters,
         dead_npi_billing,
         new_provider_explosion,
-        geographic_impossibility,
     )
     # diagnosis_procedure_mismatch + its MUP lookup are RETIRED (2026-07-26) —
     # deliberately not imported. See anomaly_detector for the reasoning.
@@ -96,11 +94,9 @@ def _import_signals():
         "oig_excluded": oig_excluded,
         "compute_address_clusters": compute_address_clusters,
         "specialty_mismatch": specialty_mismatch,
-        "corporate_shell_risk": corporate_shell_risk,
         "compute_auth_official_clusters": compute_auth_official_clusters,
         "dead_npi_billing": dead_npi_billing,
         "new_provider_explosion": new_provider_explosion,
-        "geographic_impossibility": geographic_impossibility,
     }
 
 
@@ -109,7 +105,7 @@ def _score_provider(row: dict, hcpcs: list, timeline: list, npi: str,
                     spend_mean: float, spend_std: float,
                     cluster_sizes: dict, auth_clusters: dict,
                     sig) -> dict:
-    """Run all 17 signals on a single provider and return enriched result."""
+    """Run all 15 active signals on a single provider and return enriched result."""
     s1 = sig["billing_concentration"](row, hcpcs)
     pm, ps = peer_stats.get(top_code, (0.0, 0.0))
     s2 = sig["revenue_per_bene_outlier"](row, pm, ps)
@@ -125,14 +121,19 @@ def _score_provider(row: dict, hcpcs: list, timeline: list, npi: str,
     s11 = sig["address_cluster_risk"](row, cluster_sizes.get(npi, 0))
     s12 = sig["oig_excluded"](npi, row)
     s13 = sig["specialty_mismatch"](row, hcpcs)
-    s14 = sig["corporate_shell_risk"](row, auth_clusters.get(npi, 0))
     s15 = sig["dead_npi_billing"](row)
     s16 = sig["new_provider_explosion"](row)
-    s17 = sig["geographic_impossibility"](row)
-    # s18 (diagnosis_procedure_mismatch, MUP-based) RETIRED 2026-07-26 — it fired
-    # on 2 of 106,660 providers and was the only cross-payer proxy in the set.
+    # RETIRED / PARKED 2026-07-26 — see each detector's docstring:
+    #   s14 corporate_shell_risk    PARKED: fires 30.2%, and the top clusters are
+    #                               DaVita/Fresenius corporate officers, not shells.
+    #   s17 geographic_impossibility RETIRED: needs a per-provider billing state,
+    #                               and this dataset has no state column at all
+    #                               (7 columns: NPIs, HCPCS, month, benes,
+    #                               claims, paid). Not computable, ever.
+    #   s18 diagnosis_procedure_mismatch RETIRED: fired on 2 of 106,660 and was
+    #                               the only cross-payer proxy in the set.
 
-    signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17]
+    signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s15, s16]
     # Feedback-adjusted composite: signals the user keeps dismissing carry
     # less weight (see feedback_tracker.composite_with_feedback).
     from services.feedback_tracker import composite_with_feedback

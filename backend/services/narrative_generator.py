@@ -168,6 +168,11 @@ _SIGNAL_META: dict[str, dict] = {
     },
     "corporate_shell_risk": {
         "label": "Corporate Shell Risk",
+        # See anomaly_detector.corporate_shell_risk for the measured evidence.
+        "parked": "2026-07-26",
+        "parked_reason": (
+            "Fires for 30.2% of providers once its cluster input works, and the largest clusters are corporate officers of national chains (DaVita 1,222 NPIs, Fresenius 893) rather than shell operators. Parked pending a redesign that discriminates on something other than cluster size."
+        ),
         "explanation": (
             "A single authorized official controls multiple billing NPIs. While "
             "legitimate corporate structures exist, concentrated control of multiple "
@@ -208,6 +213,11 @@ _SIGNAL_META: dict[str, dict] = {
     },
     "geographic_impossibility": {
         "label": "Geographic Impossibility",
+        # See anomaly_detector.geographic_impossibility for the measured evidence.
+        "retired": "2026-07-26",
+        "retired_reason": (
+            "Requires the state whose Medicaid program paid each claim. The public dataset has no state column at all (7 columns: billing NPI, servicing NPI, HCPCS, month, beneficiaries, claims, paid), so cross-state billing is not computable from it."
+        ),
         "explanation": (
             "The provider's NPPES-registered practice location is in a different "
             "state from where Medicaid claims are being submitted. While telemedicine "

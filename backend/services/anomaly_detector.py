@@ -546,6 +546,11 @@ def upcoding_pattern(provider: dict, hcpcs_rows: list[dict]) -> SignalResult:
 
 
 # ── 11. Address cluster risk ────────────────────────────────────────────
+# At/above this many NPIs at one street address, co-location is a medical campus
+# rather than a shell cluster — see the damping note in address_cluster_risk.
+CAMPUS_CLUSTER_SIZE = 15
+
+
 def address_cluster_risk(provider: dict, address_cluster_size: int) -> SignalResult:
     """
     Flag providers sharing a physical address with 3+ other providers.
@@ -574,6 +579,23 @@ def address_cluster_risk(provider: dict, address_cluster_size: int) -> SignalRes
             f"{address_cluster_size} providers share this address — "
             f"multi-entity cluster (OIG co-location flag)"
         )
+        # Past a point, "many NPIs at one address" stops meaning a strip-mall
+        # shell cluster and starts meaning a hospital campus, where it is the
+        # normal and expected arrangement. Measured 2026-07-26: every address
+        # with 15+ NPIs in the scanned population is a medical centre — 1500 E
+        # Medical Center Dr (40, U-Michigan), 2799 W Grand Blvd (29, Henry
+        # Ford), 601 Elmwood Ave (23, U-Rochester), two children's hospitals.
+        # Without this they score MAXIMUM on a co-location fraud signal, which
+        # is backwards. Damped rather than zeroed: a 20-NPI address is not proof
+        # of innocence either, and the strip-mall band (3-5 NPIs, 80% of all
+        # firings here) is untouched.
+        if address_cluster_size >= CAMPUS_CLUSTER_SIZE:
+            score *= 0.4
+            reason = (
+                f"{address_cluster_size} providers share this address — large "
+                f"co-location, consistent with a hospital/medical campus rather "
+                f"than a shell cluster (score damped; verify the site type)"
+            )
     else:
         score = 0.0
         reason = (
@@ -597,6 +619,31 @@ def corporate_shell_risk(row: dict, auth_cluster_size: int) -> SignalResult:
     networks of 5–20+ shell entities under one person, collectively billing
     millions. Grouping NPIs by their NPPES authorized official name reveals
     these hidden networks.
+
+    PARKED 2026-07-26 — unwired from both scoring paths pending a redesign.
+    Not retired: the pattern is real and the data is now present (97,926 of
+    106,660 providers carry an authorized official). The SCORING is what is
+    wrong.
+
+    Measured the moment the cluster input started working: it fires for 32,211
+    providers — 30.2%, which would make it the highest-firing signal in the
+    entire set. The reason is that the biggest clusters are corporate chains,
+    not shell networks:
+
+        1,222 NPIs  DaVita        (ESRD clinics, median NPI bills $1.8M)
+          893 NPIs  Fresenius     (ESRD clinics across 46 states, median $2.2M)
+          295 NPIs  Founders      (DME, 8 states)
+          170 NPIs  a home health chain (median NPI bills $18.2M)
+
+    A corporate officer signing for every facility in a national chain is not a
+    shell operator, and raising the threshold does not help — even at 25+ NPIs
+    the rate is 8.7%, because those chains CONTAIN the providers being counted.
+
+    The redesign needs a discriminator other than cluster size — the OIG shell
+    pattern is one person controlling several SMALL, similar entities (often at
+    a shared address), which is now checkable since address data landed in the
+    cache. Until that exists, a 30%-firing size proxy would repeat the
+    institutional-giant problem the Fraud Brain already had to solve.
 
     The cluster size is pre-computed by the caller from NPPES authorized
     official data in the prescan cache.
@@ -1002,17 +1049,39 @@ def new_provider_explosion(row: dict) -> SignalResult:
             False,
         )
 
-    today = date.today()
-    age_days = (today - enum_date).days
+    # Age is measured at the END OF THE BILLING PERIOD, not at wall-clock today.
+    # This used to be date.today(), which quietly broke the signal as the dataset
+    # aged: the data spans 2018-2024, so an NPI enumerated in 2023 that billed
+    # $1M in its first year is ~3 years old by today's calendar and returned
+    # "established provider, not flagged" — precisely the case the signal exists
+    # to catch. Asking "how old was this NPI when it had billed this much?" is
+    # both correct and stable over time. Same wall-clock-vs-dataset problem the
+    # Fraud Brain already solved with dataset_newest_month_index().
+    ref_month = row.get("last_month") or row.get("first_month") or ""
+    ref_date = _parse_date_flexible(f"{ref_month}-01") if ref_month else None
+    if ref_date is None:
+        ref_date = date.today()  # no billing period on the row — fall back
+    age_days = (ref_date - enum_date).days
     age_months = age_days / 30.44  # average days per month
 
     total_paid = float(row.get("total_paid") or 0)
 
+    if age_months < 0:
+        # Billing predates the NPI's own enumeration date. Not an age question —
+        # it means the NPI was billing before it existed, which is its own
+        # (stronger) problem, but this signal is not the place to score it.
+        return _result(
+            "new_provider_explosion", 0.0, 7,
+            f"NPI enumerated {enum_date_str} but billing starts earlier "
+            f"({ref_month}) — cannot assess provider age",
+            False,
+        )
+
     if age_months > 24:
         return _result(
             "new_provider_explosion", 0.0, 7,
-            f"NPI enumerated {enum_date_str} ({age_months:.0f} months ago) "
-            f"— established provider, not flagged",
+            f"NPI enumerated {enum_date_str} ({age_months:.0f} months old at "
+            f"{ref_month}) — established provider, not flagged",
             False,
         )
 
@@ -1091,6 +1160,42 @@ SPECIALTY_HCPCS_MAP: dict[str, list[str]] = {
         "S9152",           # speech therapy per visit
     ],
     "occupational therap": ["970", "971", "972", "973", "97"],
+
+    # ── Added 2026-07-26, after this signal was found dark for every provider.
+    # Prefixes are derived from what these specialties ACTUALLY bill in the
+    # scanned population (top codes by provider count), not from recall.
+    #
+    # Home health and in-home supportive care are one service family — T1019
+    # (attendant care) and S5125 (homemaker) are the top code for both — so they
+    # share a prefix list.
+    "home health": [
+        "T10",    # T1000-T1022 nursing/attendant care (T1019 = 3,257 providers)
+        "S512", "S513",  # S5125/S5126 homemaker, S5130-S5136 chore/home care
+        "S91",    # S9122-S9129 home health aide / nursing per hour or visit
+        "G015", "G016",  # G0151-G0162 therapy + skilled nursing in the home
+        "G029",   # G0299/G0300 RN/LPN direct skilled nursing
+        "9950",   # 99500-99509 home visit services
+        "H201",   # H2015/H2016 comprehensive community support
+        "T20",    # T2025-T2029 waiver services
+    ],
+    "in home supportive": [
+        "T10", "S512", "S513", "S91", "G015", "G016", "G029", "9950", "H201", "T20",
+    ],
+    "behavioral health": [
+        "H0", "H2",       # H0001-H0048, H2000-H2037 behavioral/community codes
+        "908", "909",     # 90832-90899 psychotherapy and psychiatric services
+        "961",            # 96105-96146 psych/neuropsych testing
+        "T10",            # T1015/T1016/T1017 encounter + case management
+    ],
+    # DELIBERATELY NOT MAPPED — these specialties legitimately bill broadly, so a
+    # "billing outside your specialty" test is meaningless for them and would
+    # generate false positives by construction:
+    #   Federally Qualified Health Center — primary care + dental + behavioral
+    #     + pharmacy is the DEFINITION of an FQHC (T1015 encounter, 99213, D0999).
+    #   Pediatrics/Family/Internal Medicine — general E&M across all of primary
+    #     care (99213 alone is the top code for 2,086 of 3,126 pediatricians).
+    # Leaving them unmatched makes the signal abstain, which is the correct
+    # answer, not a gap to close.
 }
 
 
@@ -1133,6 +1238,14 @@ def specialty_mismatch(row: dict, hcpcs: list[dict]) -> SignalResult:
     # Fallback: top-level taxonomy_description (some enrichment paths)
     if not taxonomy_desc:
         taxonomy_desc = row.get("taxonomy_description") or ""
+
+    # Fallback: row["specialty"] — the taxonomy description the SCAN CACHE
+    # actually stores. Measured 2026-07-26: the three paths above are populated
+    # for 0 of 106,660 cached providers while row["specialty"] is populated for
+    # 104,587 (98.1%), so this signal reported "no taxonomy available" for every
+    # provider in the dataset while the value sat one key away.
+    if not taxonomy_desc:
+        taxonomy_desc = row.get("specialty") or ""
 
     if not taxonomy_desc:
         return _result(
