@@ -10,6 +10,9 @@ from fastapi import APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from data.duckdb_client import query_async, provider_aggregate_sql, get_parquet_path
 from services.slim_cache_enricher import parquet_is_local
+# Module-level: government intake forms reject non-ASCII typographic
+# characters, and BOTH the narrative and the short description need this.
+from core.text_sanitize import to_ascii
 
 
 # ── Input validation helpers (prevent SQL injection in DuckDB queries) ────────
@@ -2759,6 +2762,11 @@ async def provider_narrative(npi: str, enhance: str = "auto"):
 # in a short field is built to fit this; the answer sheet flags overruns.
 _SHORT_FIELD_CAP = 100
 
+# Conservative ceiling for a state form's "describe the fraud" textarea. PA's
+# holds roughly 2,000 characters (Dave measured it by filling the box); other
+# states vary, so stay under the smallest one we've seen rather than probe each.
+_DESC_FIELD_CAP = 1800
+
 
 @router.get("/{npi}/oig-tip")
 async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool = True):
@@ -2885,14 +2893,50 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         f"Analysis of public CMS T-MSIS Medicaid payment data ({first_m} to {last_m}) shows "
         f"Medicaid paid this provider ${total_paid:,.0f} across {total_claims:,.0f} claims for "
         f"{total_benes:,.0f} recipient(s)."
+        + (f" Payment per recipient is ${rev_per_bene:,.0f}." if total_benes else "")
     )
-    _top_findings = " ".join(f"{ind['finding']}." for ind in indicators[:2] if ind.get("finding"))
     _close = (
-        "These are statistical indicators derived from public data — leads for investigation, "
+        "These are statistical indicators derived from public data - leads for investigation, "
         "not proof of fraud. No individual recipient is identified"
         + (f"; the pattern spans all {total_benes:,.0f} recipients." if total_benes else ".")
     )
-    short_narrative = " ".join(x for x in [_lead, _top_findings, _close] if x)
+    if oig_excluded:
+        _close = ("The subject NPI also appears on the HHS-OIG LEIE exclusion list; billing "
+                  "Medicaid while excluded violates 42 CFR 1001.1901. ") + _close
+
+    # Use the space the field actually gives us. This started as top-2-signals
+    # only, which spent ~530 of PA's ~2,000 characters and silently dropped
+    # evidence that would have fit (Dave: "why doesn't the descr take up more of
+    # the allowed chars"). Now: include EVERY flagged signal, then drop findings
+    # from the end one at a time until it fits under the cap, so a provider with
+    # many signals degrades gracefully instead of overrunning.
+    #
+    # ASCII-only on purpose: this is pasted into state forms that mangle the
+    # em-dashes and sigma the full narrative uses.
+    # Strongest evidence first, so trimming removes the weakest signal, not a
+    # load-bearing one. `flags` carries score*weight; indicators mirrors its order.
+    _ranked = sorted(
+        [i for i in indicators if i.get("finding")],
+        key=lambda i: next((float(f.get("score") or 0) * float(f.get("weight") or 0)
+                            for f in flags if f.get("signal") == i["signal"]), 0.0),
+        reverse=True,
+    )
+    def _ascii_finding(txt: str) -> str:
+        # to_ascii DROPS unmapped symbols, which silently turned "10.8σ above
+        # peers" into "10.8 above peers" — a meaningless claim in a document
+        # going to a fraud unit. Spell the statistics out before stripping.
+        txt = _re.sub(r"\s*σ", " standard deviations", txt)
+        txt = txt.replace("≥", "at least ").replace("≤", "at most ")
+        return to_ascii(txt).rstrip(".")
+
+    _findings = [_ascii_finding(i["finding"]) for i in _ranked]
+    while True:
+        body = " ".join(f"{f}." for f in _findings)
+        candidate = " ".join(x for x in [to_ascii(_lead), body, to_ascii(_close)] if x)
+        if len(candidate) <= _DESC_FIELD_CAP or not _findings:
+            short_narrative = candidate
+            break
+        _findings.pop()          # drop the least-weighted finding and retry
 
     # Single "date of service": most recent billed month, day 01 (the dataset is
     # monthly, so a specific day is not knowable). Shared by the answer sheet
@@ -3065,11 +3109,8 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
             import logging as _logging
             _logging.getLogger(__name__).warning("oig-tip: filing guide failed for %s", npi, exc_info=True)
 
-    # HHS-OIG's submission form rejects non-ASCII typographic characters. The
-    # narrative (and the free-text fields the caller may paste) must be plain
-    # 7-bit ASCII so the packet is submittable without manual editing.
-    from core.text_sanitize import to_ascii
-
+    # HHS-OIG's submission form rejects non-ASCII typographic characters, so the
+    # narrative must be plain 7-bit ASCII (to_ascii imported at module level).
     # `text` stays the PASTEABLE body; the guide rides above the copy line.
     text = to_ascii(text)
     text_with_guide = to_ascii(guide_block) + text if guide_block else text
