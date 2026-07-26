@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, get, mutate } from '../lib/api'
 import { fmt } from '../lib/format'
 import CopyBlock from '../components/CopyBlock'
+import FormAnswerSheet from '../components/FormAnswerSheet'
 import type { MFCUReferral } from '../lib/types'
 import { useProviderFlags } from '../hooks/useProviderFlags'
 
@@ -83,6 +84,7 @@ export default function MFCUReferralPage() {
   })
   const autoNarrative = referralNarrative?.text ?? ''
   const shortNarrative = referralNarrative?.short_narrative ?? ''
+  const formFields = referralNarrative?.form_fields ?? []
 
   // Prefill jurisdiction + narrative once the provider/MFCU data lands, unless
   // the analyst has already typed something.
@@ -394,7 +396,7 @@ export default function MFCUReferralPage() {
                   tone="primary"
                   rows={16}
                   buttonLabel="Copy narrative"
-                  title={<>Step 1 &mdash; Copy this. It is what you submit.</>}
+                  title={<>Step 1 &mdash; The description field</>}
                   subtitle={<>Paste it into the state MFCU&rsquo;s own complaint form (linked above). This app does not send it.</>}
                 />
               )}
@@ -410,6 +412,16 @@ export default function MFCUReferralPage() {
                   title={<>Short version &mdash; for a small &ldquo;describe the fraud&rdquo; field</>}
                   subtitle={<>Same facts, condensed. Use this if the state form has no room for the full narrative.</>}
                 />
+              )}
+
+              {/* Dave: don't make me mine the narrative for field values. */}
+              {formFields.length > 0 && (
+                <div className="mt-1">
+                  <h3 className="text-sm font-semibold text-gray-200 mb-2">
+                    Step 2 &mdash; Every other field on the state&rsquo;s form
+                  </h3>
+                  <FormAnswerSheet fields={formFields} />
+                </div>
               )}
 
               {/* These are the APP'S OWN case-record fields, not the state's

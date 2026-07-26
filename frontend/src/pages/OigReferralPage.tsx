@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import CopyBlock from '../components/CopyBlock'
+import FormAnswerSheet from '../components/FormAnswerSheet'
 
 /**
  * Dedicated OIG Hotline referral page — the federal counterpart to
@@ -49,6 +50,7 @@ export default function OigReferralPage() {
   const autoNarrative = tip?.text ?? ''
   const shortNarrative = tip?.short_narrative ?? ''
   const guide = tip?.filing_guide
+  const formFields = tip?.form_fields ?? []
 
   const handleLog = async () => {
     if (!window.confirm(
@@ -200,6 +202,15 @@ export default function OigReferralPage() {
                   title={<>Short version &mdash; for a small description field</>}
                   subtitle={<>Same facts, condensed. Use this if space is tight.</>}
                 />
+              )}
+
+              {formFields.length > 0 && (
+                <div className="mt-1">
+                  <h3 className="text-sm font-semibold text-gray-200 mb-2">
+                    Subject fields &mdash; copy each straight into the wizard
+                  </h3>
+                  <FormAnswerSheet fields={formFields} />
+                </div>
               )}
 
               {/* Case record — stays in the app. Logging IS marking Reported: OIG. */}

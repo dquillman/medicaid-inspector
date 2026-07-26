@@ -1828,12 +1828,21 @@ export interface OigFilingGuide {
   subject_fields: Record<string, string>
 }
 
+export interface FormAnswerField {
+  label: string
+  value: string
+  note?: string
+}
+
 export interface OigTipResponse {
   npi: string
   text: string
   // Condensed paragraph for state forms with a small "describe the fraud"
   // field — same underlying data as `text`, not a separate submission.
   short_narrative?: string
+  // Field-by-field answers for the destination's intake form, so values never
+  // have to be dug out of the narrative prose.
+  form_fields?: FormAnswerField[]
   // Per-provider answer sheet for the OIG wizard (destination='oig' only).
   filing_guide?: OigFilingGuide | null
   fields: Record<string, unknown>

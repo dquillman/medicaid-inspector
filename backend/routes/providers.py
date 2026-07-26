@@ -2888,6 +2888,62 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     )
     short_narrative = " ".join(x for x in [_lead, _top_findings, _close] if x)
 
+    # Single "date of service": most recent billed month, day 01 (the dataset is
+    # monthly, so a specific day is not knowable). Shared by the answer sheet
+    # and the MFCU routing header below.
+    if last_m and "-" in str(last_m):
+        _y1, _m1 = str(last_m).split("-")[:2]
+        _dos_single = f"{_m1}/01/{_y1}"
+    else:
+        _dos_single = ""
+    npp_phone = (nppes.get("phone") or addr.get("phone") or "").strip()
+    _extra_info = (
+        f"NPI {npi}"
+        + (f" ({'individual' if (nppes.get('entity_type') or '').lower() == 'npi-1' else 'organization'})")
+        + (f". Taxonomy: {specialty}" if specialty and specialty != "(unknown)" else "")
+        + (". Not on the OIG LEIE or SAM.gov exclusion lists as of this filing."
+           if not oig_excluded else
+           ". APPEARS ON the HHS-OIG LEIE exclusion list.")
+    )
+
+    # ── Per-field answer sheet ────────────────────────────────────────────
+    # Dave: "the step 2 area needs to have all info to copy and paste to the
+    # form so I don't need to search the narrative for it." State intake forms
+    # ask for discrete fields (name, street, city, ZIP, date of service, a
+    # required recipient name) and the values were only ever available buried
+    # in the narrative prose. Each entry is individually copyable in the UI.
+    #
+    # `value` empty means WE DO NOT HOLD IT — the UI renders those as
+    # "leave blank", because guessing on a government form is worse than a gap.
+    _zip5 = (addr.get("zip") or cached.get("zip") or "")[:5]
+    _ent = (nppes.get("entity_type") or "").strip()
+    form_fields = [
+        {"label": "Provider / business name", "value": name},
+        {"label": "Street address", "value": addr.get("line1") or ""},
+        {"label": "City", "value": addr.get("city") or ""},
+        {"label": "State", "value": addr.get("state") or cached.get("state") or ""},
+        {"label": "ZIP", "value": _zip5},
+        {"label": "NPI", "value": npi},
+        {"label": "Provider type / taxonomy", "value": specialty},
+        {"label": "Business or individual", "value": "Individual" if _ent.lower() == "npi-1" else "Business"},
+        {"label": "Date of service (single date)", "value": _dos_single,
+         "note": "Most recent billed month. The data is monthly, so no specific day is knowable."},
+        {"label": "Date range (if the form allows one)",
+         "value": f"{first_m} to {last_m}" if first_m != "?" else ""},
+        {"label": "Recipient / patient name",
+         "value": "Unknown - provider-level billing analysis; no individual recipient identified",
+         "note": "Often a REQUIRED field. We hold no recipient names — this is the honest answer, never invent one."},
+        {"label": "Additional provider info", "value": _extra_info},
+        {"label": "Describe the suspected fraud", "value": short_narrative,
+         "note": "Use this short version — state fields cap length and reject an over-long paste."},
+        {"label": "Provider Medicaid / Medical ID", "value": "",
+         "note": "Not held — this is the state's own provider ID."},
+        {"label": "License number", "value": "", "note": "Not held."},
+        {"label": "Recipient ID", "value": "", "note": "Not held."},
+        {"label": "Provider telephone", "value": npp_phone,
+         "note": "" if npp_phone else "Not on file in NPPES."},
+    ]
+
     # Destination only changes the routing header/footer — the EVIDENCE body is
     # identical for OIG and MFCU (one narrative, two destinations).
     if dest == "mfcu":
@@ -2897,11 +2953,7 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         # "when did the activity occur": most recent billed month, day 01 — the
         # dataset is monthly, so a specific day is not knowable. The full range
         # stays in the body's TIME PERIOD OF ACTIVITY line.
-        if last_m and "-" in str(last_m):
-            _y, _mo = str(last_m).split("-")[:2]
-            _dos = f"{_mo}/01/{_y}"
-        else:
-            _dos = "(use the last month in TIME PERIOD OF ACTIVITY below, day 01)"
+        _dos = _dos_single or "(use the last month in TIME PERIOD OF ACTIVITY below, day 01)"
         _header = (
             f"MEDICAID FRAUD CONTROL UNIT (MFCU) REFERRAL — Suspected Medicaid Provider Fraud\n"
             f"Jurisdiction: {_state_name or '(state of the subject provider)'}\n"
@@ -3062,6 +3114,9 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         # Condensed paragraph for small-textarea state forms — see comment
         # above short_narrative's construction. Same underlying data as `text`.
         "short_narrative": short_narrative,
+        # Field-by-field answers for the destination's intake form, so values
+        # never have to be dug out of the narrative prose.
+        "form_fields": form_fields,
         "filing_guide": filing_guide,
         "fields": {
             "subject_name": to_ascii(name),
