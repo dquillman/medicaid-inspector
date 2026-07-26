@@ -447,6 +447,37 @@ export default function FraudBrain() {
         </p>
       )}
 
+      {/* Per-se leads can never appear on this board — they need filing, not
+          investigating, and most bill under the $1M scan cutoff so they are not
+          scored at all. Point at them rather than letting them sit unfound. */}
+      {data?.perse_waiting?.available && data.perse_waiting.provable > 0 && (
+        <Link
+          to="/excluded"
+          className="card block border-threat-critical/50 bg-threat-critical/5 hover:border-threat-critical transition-colors"
+        >
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm text-ink-primary font-semibold">
+                {data.perse_waiting.provable.toLocaleString()} provable leads are waiting, and none of them can rank here
+              </p>
+              <p className="text-xs text-ink-tertiary mt-1 leading-relaxed">
+                Providers billing while OIG-excluded or under a deactivated NPI
+                {data.perse_waiting.paid_while_barred
+                  ? <> — <span className="text-threat-high font-mono">{fmt(data.perse_waiting.paid_while_barred)}</span> paid while barred</>
+                  : null}
+                . This board ranks statistical suspicion; those are per-se findings that need filing, not investigation.
+                {data.perse_waiting.below_cutoff > 0 && (
+                  <> <span className="text-filament-core">{data.perse_waiting.below_cutoff.toLocaleString()}</span> of them bill under the $1M scan cutoff, so the risk model never sees them.</>
+                )}
+              </p>
+            </div>
+            <span className="shrink-0 text-xs font-mono uppercase tracking-wider text-threat-high self-center">
+              Open →
+            </span>
+          </div>
+        </Link>
+      )}
+
       <WorkflowPanel />
 
       {isLoading && (

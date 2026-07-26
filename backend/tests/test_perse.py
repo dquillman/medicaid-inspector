@@ -108,6 +108,27 @@ def test_excluded_page_serves_the_full_universe_sweep(client, auth_headers, swee
     assert any(p["in_scan_cache"] is False for p in body["providers"])
 
 
+def test_brain_counts_only_PROVABLE_unworked_leads(sweep):
+    """The board's banner must not overstate. recovery_lead (billing that
+    predates the exclusion) is a clawback, not billing-while-barred, so it is
+    counted separately — never behind the 'provable' number."""
+    from services.fraud_brain import _perse_waiting_summary
+    s = _perse_waiting_summary()
+    assert s["available"] is True
+    assert s["provable"] == 2          # the two active_exclusion rows
+    assert s["recovery"] == 1          # counted, but kept out of 'provable'
+    assert s["below_cutoff"] == 1      # only the out-of-cache provable one
+    assert s["paid_while_barred"] == 1_500_000.0
+
+
+def test_brain_banner_hides_itself_without_a_sweep(tmp_path, monkeypatch):
+    from services.fraud_brain import _perse_waiting_summary
+    monkeypatch.setattr(perse_store, "_PATH", tmp_path / "absent.json")
+    perse_store.reload()
+    assert _perse_waiting_summary() == {
+        "available": False, "provable": 0, "recovery": 0, "below_cutoff": 0}
+
+
 def test_excluded_page_falls_back_when_no_sweep_exists(client, auth_headers, tmp_path, monkeypatch):
     """A fresh checkout has no sweep — the page must still work and must SAY
     that its coverage is limited rather than silently under-reporting."""

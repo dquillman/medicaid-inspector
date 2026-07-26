@@ -326,11 +326,48 @@ def _corroboration_index() -> dict[str, list[str]]:
     return by_npi
 
 
+def _perse_waiting_summary() -> dict:
+    """Unworked per-se leads — the provable findings the board cannot rank.
+
+    'Provable' here means the two kinds that carry a per-se claim on their face:
+    billing DURING an OIG exclusion, and billing under a deactivated NPI.
+    recovery_lead is deliberately left out of the headline count — billing that
+    PREDATES an exclusion is a clawback, not billing-while-barred, and putting
+    it behind the same number would overstate what is provable.
+    """
+    from core import perse_store
+    from core.review_store import get_queue_statuses
+
+    summary = perse_store.get_summary()
+    if not summary.get("available"):
+        return {"available": False, "provable": 0, "recovery": 0, "below_cutoff": 0}
+
+    rows = perse_store.list_leads(limit=100_000)["leads"]
+    statuses = get_queue_statuses([r["npi"] for r in rows])
+    _worked = {"confirmed", "referred", "tip_filed", "archived", "dismissed"}
+    open_rows = [r for r in rows if statuses.get(r["npi"]) not in _worked]
+
+    provable = [r for r in open_rows
+                if r.get("kind") in ("active_exclusion", "deactivated_billing", "deactivated_window")]
+    return {
+        "available": True,
+        "provable": len(provable),
+        "recovery": len([r for r in open_rows if r.get("kind") == "recovery_lead"]),
+        # The reason the sweep exists: these are invisible to the risk model.
+        "below_cutoff": len([r for r in provable if r.get("in_scan_cache") is False]),
+        "paid_while_barred": round(sum(
+            (r.get("paid_after_exclusion") or r.get("paid_after_deactivation")
+             or r.get("paid_during_deactivation") or 0) for r in provable), 2),
+        "generated_at": summary.get("generated_at"),
+    }
+
+
 def compute_top_frauds(limit: int = 10) -> dict:
     """Score every scanned provider across all sources; return the top N."""
     from core.store import get_prescanned
     from core.oig_store import is_excluded
     from core.deactivation_store import get_deactivation
+    from core import perse_store
     from services.ml_scorer import get_ml_score, get_ml_status
 
     t0 = time.time()
@@ -420,6 +457,19 @@ def compute_top_frauds(limit: int = 10) -> dict:
         # OIG-excluded providers belong on the Excluded page, not the candidate
         # ranking. This is a federal-LEIE *data* filter, independent of any
         # review-queue decision (which must not steer the candidate engine).
+        #
+        # Why exclusion REMOVES a provider but deactivation does not (decided
+        # 2026-07-26, after the two were found to be treated differently):
+        #   * An OIG exclusion is a LEGAL BAR on the party. They may not bill at
+        #     all, so there is no statistical question left to rank — the finding
+        #     is already complete and belongs on the Excluded page.
+        #   * An NPPES deactivation invalidates an IDENTIFIER, not the party, and
+        #     the NPPES data is known-unreliable. A provider carrying a
+        #     deactivation date can still be an ordinary provider whose other
+        #     signals are worth ranking. Removing them would discard real
+        #     statistical evidence to enforce a false symmetry.
+        # Both contribute ZERO points either way — no per-se finding drives this
+        # ranking. Deactivation only annotates the evidence list (see below).
         oig = is_excluded(npi)[0]
         if oig:
             continue
@@ -588,18 +638,38 @@ def compute_top_frauds(limit: int = 10) -> dict:
             })
 
         if deact_date:
-            # NO score boost. NPPES "deactivation" is NOT provable fraud: NPIs get
-            # reactivated/replaced without the file tracking it, and ~70% of
-            # matches billed only BEFORE deactivation (legitimate prior activity).
-            # It is a LEAD TO VERIFY, never proof — so it informs the flag with an
-            # honest caveat but does not drive the ranking.
-            evidence.append({
-                "source": "Deactivated-NPI lead (UNVERIFIED)",
-                "detail": f"NPPES shows this NPI deactivated {deact_date} — verify against "
-                          "current NPPES before relying on it; NPPES deactivation is "
-                          "unreliable here and is NOT proof of fraud",
-                "points": 0,
-            })
+            # Still NO score boost — a per-se finding does not belong in a
+            # statistical ranking, and the Excluded page is its home.
+            #
+            # But the blanket "UNVERIFIED / not proof" caveat is no longer the
+            # honest description in every case. Both reasons it was written have
+            # since been addressed (v3.52.0): reactivated NPIs are no longer in
+            # this store at all, and the per-se sweep separately confirms whether
+            # billing actually reaches past the deactivation date. Where the
+            # sweep HAS confirmed it, say so with the dollar figure; where it has
+            # not, keep the caveat, because there it is still correct.
+            _lead = perse_store.get_lead(npi)
+            _kind = (_lead or {}).get("kind")
+            if _kind in ("deactivated_billing", "deactivated_window"):
+                _amt = (_lead.get("paid_after_deactivation")
+                        or _lead.get("paid_during_deactivation") or 0)
+                evidence.append({
+                    "source": "Billing under a deactivated NPI (CONFIRMED)",
+                    "detail": (
+                        f"NPI deactivated {deact_date}; ${_amt:,.0f} was paid on claims dated "
+                        f"on or after that date. Per-se unauthorized billing — file it from the "
+                        f"Excluded page rather than investigating it further."
+                    ),
+                    "points": 0,
+                })
+            else:
+                evidence.append({
+                    "source": "Deactivated-NPI lead (UNVERIFIED)",
+                    "detail": f"NPPES shows this NPI deactivated {deact_date}, but no billing "
+                              "on or after that date has been confirmed — prior activity may be "
+                              "legitimate. Verify against current NPPES; not proof of fraud.",
+                    "points": 0,
+                })
 
         scored.append({
             "npi": npi,
@@ -653,6 +723,13 @@ def compute_top_frauds(limit: int = 10) -> dict:
     return {
         "top": scored[:limit],
         "providers_evaluated": len(scored),
+        # Per-se leads are NOT ranked here (they need filing, not investigating)
+        # and most sit below the $1M scan cutoff, so they can never reach this
+        # board. Without a pointer they are only found by remembering to open
+        # the Excluded page — so surface the count of UNWORKED ones. Already
+        # filed/confirmed/archived leads are subtracted, or the banner would
+        # nag forever and get ignored.
+        "perse_waiting": _perse_waiting_summary(),
         # Membership gates (not score inputs): providers excluded from the
         # ranking entirely — reported (work done), stale (not active), expired
         # (past the recovery window). They receive no brain rank.

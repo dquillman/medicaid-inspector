@@ -1761,6 +1761,17 @@ export interface FraudBrainResponse {
   // Membership gates: providers excluded from the ranking entirely (no brain
   // rank) — reported (work done), stale (not active), expired (past recovery).
   excluded?: { confirmed: number; reported: number; stale: number; expired: number }
+  /** Unworked per-se leads. Not rankable here (they need filing, not
+   *  investigating) and mostly below the $1M scan cutoff, so the board points
+   *  at them instead of hiding them. */
+  perse_waiting?: {
+    available: boolean
+    provable: number
+    recovery: number
+    below_cutoff: number
+    paid_while_barred?: number
+    generated_at?: string
+  }
   ml_model_used: boolean
   supervised_model_used?: boolean
   corroborated_providers: number
