@@ -59,6 +59,7 @@ import type {
   LicenseVerification,
   LicenseFlagsResponse,
   FraudBrainResponse,
+  MissingProvidersPreview,
   ExcludedProvidersResponse,
   MethodsResponse,
   OigTipResponse,
@@ -350,6 +351,15 @@ export const api = {
 
   rescoreAll: () =>
     mutate<{ status: string }>('POST', '/prescan/rescore'),
+
+  // Providers that belong in the scan cache but are not in it — the dollar-rank
+  // gap left when the dataset grew and the scan's stored total went stale, plus
+  // per-se leads below the old cutoff.
+  missingProviders: () =>
+    get<MissingProvidersPreview>('/prescan/missing'),
+
+  scanMissingProviders: () =>
+    mutate<{ started: boolean; mode: string; task_id: string }>('POST', '/prescan/scan-missing'),
 
   reviewQueue: (params: { status?: string; page?: number; limit?: number }) =>
     get<{ items: ReviewItem[]; total: number; page: number }>('/review', params as Record<string, string | number>),

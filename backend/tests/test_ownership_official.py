@@ -192,6 +192,10 @@ def test_async_wrapper_uses_live_fallback(monkeypatch):
     import data.nppes_client as nc
     monkeypatch.setattr(nc, "get_provider", fake_live)
 
-    result = asyncio.get_event_loop().run_until_complete(
+    # asyncio.run, not get_event_loop().run_until_complete: the latter inherits
+    # whatever loop the previous test left behind — and any earlier test that
+    # used asyncio.run leaves a CLOSED loop, failing this test only when the
+    # suite runs in a particular order.
+    result = asyncio.run(
         OT.trace_ownership_network_async("1111111111"))
     assert result["authorized_official"]["name"].upper() == "BRANDY LEONHARDT"

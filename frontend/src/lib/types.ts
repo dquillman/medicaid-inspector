@@ -1755,6 +1755,18 @@ export interface FraudBrainProvider {
   evidence: FraudBrainEvidence[]
 }
 
+/** Providers that belong in the scan cache but are not in it. */
+export interface MissingProvidersPreview {
+  missing: number
+  /** Unscanned but already inside today's top-N by spend. */
+  rank_gap: number
+  /** Per-se leads (OIG-excluded / deactivated NPI) below the old scan cutoff. */
+  perse: number
+  cached: number
+  scan_active: boolean
+  note?: string | null
+}
+
 export interface FraudBrainResponse {
   top: FraudBrainProvider[]
   providers_evaluated: number

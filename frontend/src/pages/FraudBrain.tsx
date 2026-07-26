@@ -316,6 +316,78 @@ function Stat({ label, value }: { label: string; value: string }) {
   )
 }
 
+/** Adds the providers that belong in the scan cache but are not in it.
+ *
+ *  The prescan walks providers in total_paid order with a persisted offset and
+ *  stopped when its stored provider count — written in Feb 2026, when the
+ *  dataset held 106,660 NPIs — said it was finished. The dataset now holds
+ *  617,503. This button closes the resulting gap without scanning the whole
+ *  tail, which was measured and rejected. */
+function AddMissingProvidersButton() {
+  const qc = useQueryClient()
+  const [state, setState] = useState<'idle' | 'running' | 'done' | 'error'>('idle')
+  const [msg, setMsg] = useState('')
+
+  const { data } = useQuery({
+    queryKey: ['missing-providers'],
+    queryFn: () => api.missingProviders(),
+    staleTime: 5 * 60_000,
+    // Poll while a top-up is running so the count winds down to zero and the
+    // button retires itself when the work is actually finished.
+    refetchInterval: state === 'running' ? 10_000 : false,
+  })
+
+  // Nothing missing (or no cache yet) — render nothing rather than a dead button.
+  if (!data || data.missing === 0) return null
+
+  const run = async () => {
+    if (state === 'running') return
+    setState('running')
+    setMsg('')
+    try {
+      await api.scanMissingProviders()
+      setMsg(`Scanning ${data.missing.toLocaleString()} providers…`)
+      // The scan runs in the background; when the count reaches zero the poll
+      // above unmounts this button. Refresh the board so new providers can rank.
+      window.setTimeout(() => {
+        void qc.invalidateQueries({ queryKey: ['fraud-brain'] })
+        void qc.invalidateQueries({ queryKey: ['brain-membership'] })
+        void qc.invalidateQueries({ queryKey: ['missing-providers'] })
+      }, 15_000)
+    } catch (e) {
+      setState('error')
+      setMsg(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const busy = state === 'running' || data.scan_active
+  return (
+    <div className="relative">
+      <button
+        onClick={run}
+        disabled={busy}
+        title={
+          `${data.rank_gap.toLocaleString()} providers already rank inside the top ` +
+          `${data.cached.toLocaleString()} by Medicaid dollars but were never scanned; ` +
+          `${data.perse.toLocaleString()} are OIG-excluded or billing under a dead NPI ` +
+          `and sit below the old scan cutoff. Scoring them lets them reach this board.`
+        }
+        className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-filament-core/10 hover:bg-filament-core/20 border border-filament-core/50 hover:border-filament-core rounded text-filament-core transition-colors disabled:opacity-50"
+      >
+        {busy ? 'Scanning…' : `+ Add ${data.missing.toLocaleString()} missing`}
+      </button>
+      {msg && (
+        <p className={`absolute right-0 top-full mt-1 text-[10px] whitespace-nowrap ${
+          state === 'error' ? 'text-threat-high' : 'text-ink-tertiary'
+        }`}>
+          {msg}
+        </p>
+      )}
+    </div>
+  )
+}
+
+
 export default function FraudBrain() {
   const boardRef = useRef<HTMLDivElement>(null)
   const qc = useQueryClient()
@@ -408,22 +480,24 @@ export default function FraudBrain() {
         <div>
           <h1 className="text-xl font-display font-bold text-ink-primary tracking-tight">Fraud Brain</h1>
           <p className="text-sm text-ink-tertiary mt-1 max-w-3xl leading-relaxed">
-            Cross-source meta-analysis: fuses the 18 rule-based signals, ML anomaly detection,
+            Cross-source meta-analysis: fuses the 15 rule-based signals, ML anomaly detection,
             claim-level pattern analyses (unbundling, duplicates, impossible volume), pharmacy/DME
-            findings, doctor-shopping overlap, diagnosis mismatches, and financial exposure into
-            one ranked list of the most probable frauds. Review-Queue confirmed frauds are
-            boosted onto the board. OIG-excluded providers are omitted — they're already barred
-            and live on the Excluded page — unless they're confirmed fraud, which brings them
-            back with their exclusion stacked as evidence.
+            findings, doctor-shopping overlap, and financial exposure into one ranked list of the
+            most probable frauds. Confirmed and reported cases drop off the board — the work is
+            done — and OIG-excluded providers are omitted entirely, since they're already barred
+            and live on the Excluded page.
           </p>
         </div>
-        <button
-          onClick={recompute}
-          disabled={isFetching}
-          className="shrink-0 px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-surface-2 hover:bg-hairline border border-hairline hover:border-filament-dim rounded text-ink-secondary hover:text-filament-core transition-colors disabled:opacity-50"
-        >
-          {isFetching ? 'Re-acquiring…' : 'Recompute'}
-        </button>
+        <div className="shrink-0 flex items-center gap-2">
+          <AddMissingProvidersButton />
+          <button
+            onClick={recompute}
+            disabled={isFetching}
+            className="px-3 py-1.5 text-xs font-mono uppercase tracking-wider bg-surface-2 hover:bg-hairline border border-hairline hover:border-filament-dim rounded text-ink-secondary hover:text-filament-core transition-colors disabled:opacity-50"
+          >
+            {isFetching ? 'Re-acquiring…' : 'Recompute'}
+          </button>
+        </div>
       </div>
 
       {data && (

@@ -483,6 +483,44 @@ async def smart_scan_endpoint(body: SmartScanRequest = None):
     return {"started": True, "mode": "smart", "task_id": task_id}
 
 
+@app.get("/api/prescan/missing", dependencies=[Depends(require_analyst)])
+async def missing_providers_preview():
+    """How many providers belong in the scan cache but are not in it.
+
+    Read-only; powers the Fraud Brain button's label so the user sees what a
+    click will actually do before making it.
+    """
+    from services.scan_engine import compute_missing_npis
+    plan = await compute_missing_npis()
+    return {
+        "missing": len(plan["npis"]),
+        "rank_gap": len(plan["rank_gap"]),
+        "perse": len(plan["perse"]),
+        "cached": plan["cached"],
+        "scan_active": is_scan_active(),
+        "note": plan.get("note"),
+    }
+
+
+@app.post("/api/prescan/scan-missing", dependencies=[Depends(require_analyst)])
+async def scan_missing_providers():
+    """Scan the providers that belong in the cache but are not in it.
+
+    Two populations, both artifacts of the scan's stored provider count going
+    stale when the dataset was replaced (see scan_engine.compute_missing_npis):
+    the dollar-rank gap, and per-se leads below the old cutoff. Runs as a
+    background task; poll /api/prescan/status.
+    """
+    from services.scan_engine import start_missing_scan
+    if is_scan_active():
+        raise HTTPException(409, "A scan is already in progress")
+    try:
+        task_id = start_missing_scan()
+    except RuntimeError as e:
+        raise HTTPException(409, str(e))
+    return {"started": True, "mode": "missing-topup", "task_id": task_id}
+
+
 @app.post("/api/prescan/reset", dependencies=[Depends(require_admin)])
 async def reset_scan_endpoint():
     if is_scan_active():

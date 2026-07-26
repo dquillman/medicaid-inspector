@@ -168,6 +168,19 @@ INSTITUTIONAL_DAMPEN = 0.45         # multiplier applied to a size-only giant
 _lock = threading.Lock()
 _cache: dict = {"result": None, "computed_at": 0.0}
 
+
+def invalidate_cache() -> None:
+    """Drop the cached board so the next read recomputes.
+
+    Called after a scan ADDS providers (the missing-provider top-up). Without
+    it, newly scanned providers cannot appear on the board until the 15-minute
+    TTL lapses — the user clicks a button that says it added providers, then
+    sees an unchanged board and reasonably concludes it did nothing.
+    """
+    with _lock:
+        _cache["result"] = None
+        _cache["computed_at"] = 0.0
+
 # Precomputed-section name -> (label shown in evidence, points per hit)
 _ANALYSIS_SOURCES = {
     "unbundling":  ("Unbundling pattern (claim-level)", 25),

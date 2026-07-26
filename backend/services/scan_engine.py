@@ -804,3 +804,198 @@ def start_smart_scan(state_filter: Optional[str]) -> str:
     _scan_running = True
     from core.task_queue import enqueue_task
     return enqueue_task("smart_scan", run_smart_scan, state_filter)
+
+
+# ── Missing-provider top-up ──────────────────────────────────────────────────
+# The prescan walks providers in total_paid DESC order with a persisted offset,
+# and considers itself finished when a batch comes back empty. Its stored
+# total_provider_count was written on 2026-02-26, when the dataset held 106,660
+# distinct billing NPIs; the dataset has since been replaced with one holding
+# 617,503, and nothing ever told the scan. Two populations fell through:
+#
+#   1. THE RANK GAP — providers inside today's top-N by spend that were never
+#      scanned, because the cached set also holds low-value NPIs scanned back in
+#      February. Measured 2026-07-26: 10,467 providers, $9.38B, each billing
+#      $802k-$999k. By the tool's own criteria these belong in the cache.
+#   2. PER-SE LEADS below the cutoff — the OIG-excluded and deactivated-NPI
+#      providers the per-se sweep found (845 outside the cache). Scanning them
+#      gives them real risk scores and full profiles for a referral. The
+#      OIG-excluded ones still will not reach the Brain board (that filter is
+#      deliberate); the deactivated ones can.
+#
+# Deliberately NOT "scan the remaining 510,843". That was measured and rejected:
+# no provider in the scanned population reaches the HIGH band on statistical
+# signals alone, and the tail cannot fire bene_concentration at all (its maximum
+# claims/bene is 10.4 against a threshold of 15).
+
+async def compute_missing_npis() -> dict:
+    """Which providers belong in the cache but are not in it. Read-only."""
+    cached = {p.get("npi") for p in get_prescanned() if p.get("npi")}
+    if not cached:
+        return {"rank_gap": [], "perse": [], "npis": [], "cached": 0,
+                "note": "Scan cache is empty - run a normal scan first."}
+
+    # Top-N by spend, N = current cache size. Anything in there we have not
+    # scanned is the rank gap.
+    rows = await query_async(provider_aggregate_sql(limit=len(cached), offset=0), ())
+    rank_gap = [r["npi"] for r in rows if r.get("npi") and r["npi"] not in cached]
+
+    perse: list[str] = []
+    try:
+        from core import perse_store
+        perse = [
+            r["npi"] for r in perse_store.list_leads(limit=100_000)["leads"]
+            if r.get("in_scan_cache") is False and r.get("npi")
+        ]
+    except Exception as e:  # noqa: BLE001 - a missing sweep must not block the top-up
+        log.warning("[missing] per-se sweep unavailable: %s", e)
+
+    npis = list(dict.fromkeys([*rank_gap, *perse]))  # dedupe, keep rank-gap order
+    npis = [n for n in npis if n not in cached]
+    return {
+        "rank_gap": rank_gap,
+        "perse": [n for n in perse if n not in cached],
+        "npis": npis,
+        "cached": len(cached),
+    }
+
+
+async def run_missing_scan(chunk_size: int = 400):
+    """Score the providers compute_missing_npis() identifies, and append them.
+
+    Chunked because the aggregate/HCPCS/timeline queries bind one parameter per
+    NPI, and an IN clause of 11k placeholders is not something to hand DuckDB in
+    a single statement. Each chunk persists as it completes, so a failure part
+    way through leaves the cache larger, never corrupt.
+    """
+    global _scan_running
+    sig = _import_signals()
+    try:
+        set_prescan_status(1, "Working out which providers are missing...")
+        plan = await compute_missing_npis()
+        npis = plan["npis"]
+        if not npis:
+            set_prescan_status(0, "Idle - no missing providers to add")
+            return {"added": 0, "message": "Nothing missing - the cache already covers them."}
+
+        log.info("[missing] %d providers to add (%d rank-gap, %d per-se)",
+                 len(npis), len(plan["rank_gap"]), len(plan["perse"]))
+        total = len(npis)
+        added = 0
+        flagged_total = 0
+        started = _time_mod.time()
+
+        # Peer stats come from the EXISTING cache, matching what run_scan_batch
+        # does - these providers are judged against the population already
+        # scored, not against each other.
+        peer_rpb: dict[str, list[float]] = _dd(list)
+        peer_cpb: dict[str, list[float]] = _dd(list)
+        all_spend: list[float] = []
+        for c in get_prescanned():
+            code = c.get("top_hcpcs") or ""
+            if code and (c.get("revenue_per_beneficiary") or 0) > 0:
+                peer_rpb[code].append(float(c["revenue_per_beneficiary"]))
+            if code and (c.get("claims_per_beneficiary") or 0) > 0:
+                peer_cpb[code].append(float(c["claims_per_beneficiary"]))
+            if (c.get("total_paid") or 0) > 0:
+                all_spend.append(float(c["total_paid"]))
+        peer_stats, cpb_stats, spend_mean, spend_std = _build_peer_stats(
+            [], peer_rpb, peer_cpb, all_spend)
+        cluster_sizes = sig["compute_address_clusters"]()
+        auth_clusters = sig["compute_auth_official_clusters"]()
+
+        src = f"read_parquet('{get_parquet_path()}')"
+        for start in range(0, total, chunk_size):
+            chunk = npis[start:start + chunk_size]
+            ph = ", ".join("?" for _ in chunk)
+            params = tuple(chunk)
+            set_prescan_status(2, f"Adding missing providers - {start:,} of {total:,}...")
+
+            agg_rows = await query_async(
+                provider_aggregate_sql(
+                    where=f"BILLING_PROVIDER_NPI_NUM IN ({ph})", limit=None), params)
+            if not agg_rows:
+                continue
+            hcpcs_rows = await query_async(
+                "SELECT BILLING_PROVIDER_NPI_NUM AS npi, HCPCS_CODE AS hcpcs_code, "
+                "SUM(TOTAL_PAID) AS total_paid, SUM(TOTAL_CLAIMS) AS total_claims "
+                f"FROM {src} WHERE BILLING_PROVIDER_NPI_NUM IN ({ph}) "
+                "GROUP BY npi, hcpcs_code ORDER BY npi, total_paid DESC", params)
+            timeline_rows = await query_async(
+                "SELECT BILLING_PROVIDER_NPI_NUM AS npi, CLAIM_FROM_MONTH AS month, "
+                "SUM(TOTAL_PAID) AS total_paid, SUM(TOTAL_CLAIMS) AS total_claims, "
+                "SUM(TOTAL_UNIQUE_BENEFICIARIES) AS total_unique_beneficiaries "
+                f"FROM {src} WHERE BILLING_PROVIDER_NPI_NUM IN ({ph}) "
+                "GROUP BY npi, month ORDER BY npi, month", params)
+
+            hcpcs_by: dict[str, list] = _dd(list)
+            for r in hcpcs_rows:
+                hcpcs_by[r["npi"]].append(r)
+            timeline_by: dict[str, list] = _dd(list)
+            for r in timeline_rows:
+                timeline_by[r["npi"]].append(r)
+
+            results = []
+            for row in agg_rows:
+                npi = row["npi"]
+                hl = hcpcs_by.get(npi, [])
+                top = hl[0]["hcpcs_code"] if hl else ""
+                row["top_hcpcs"] = top
+                results.append(_score_provider(
+                    row, hl, timeline_by.get(npi, []), npi, top,
+                    peer_stats, cpb_stats, spend_mean, spend_std,
+                    cluster_sizes, auth_clusters, sig))
+
+            append_prescanned(results, save=False)
+            record_batch_snapshots(results)
+            added += len(results)
+            flagged_total += sum(
+                1 for r in results if r["risk_score"] > settings.RISK_THRESHOLD)
+            from services.nppes_enricher import enrich_batch_with_nppes
+            asyncio.create_task(enrich_batch_with_nppes([r["npi"] for r in results]))
+
+        from core.gcs_sync import sync_after_scan
+        asyncio.create_task(sync_after_scan())
+
+        # The Brain caches for 15 minutes; drop it so the new providers can rank
+        # immediately instead of after the TTL.
+        try:
+            from services import fraud_brain as _fb
+            _fb.invalidate_cache()
+        except Exception:  # noqa: BLE001
+            pass
+
+        dur = round(_time_mod.time() - started, 1)
+        record_scan_run(
+            dataset_url=get_parquet_path(),
+            dataset_date=None,
+            provider_count=added,
+            total_claims=0,
+            scan_type="missing_topup",
+            duration_sec=dur,
+            state_filter=None,
+            details={"rank_gap": len(plan["rank_gap"]), "perse": len(plan["perse"])},
+        )
+        set_prescan_status(0, f"Idle - added {added:,} missing providers")
+        log.info("[missing] added %d providers (%d flagged) in %.1fs",
+                 added, flagged_total, dur)
+        return {"added": added, "flagged": flagged_total, "duration_sec": dur,
+                "rank_gap": len(plan["rank_gap"]), "perse": len(plan["perse"])}
+
+    except Exception as exc:
+        log.error("[missing] top-up failed: %s", exc, exc_info=True)
+        set_prescan_status(0, f"Error: {exc}")
+        raise
+    finally:
+        _scan_running = False
+        release_scan_lock()
+
+
+def start_missing_scan() -> str:
+    """Acquire lock, enqueue the missing-provider top-up. Returns task_id."""
+    global _scan_running
+    if not acquire_scan_lock():
+        raise RuntimeError("A scan is already in progress (another worker)")
+    _scan_running = True
+    from core.task_queue import enqueue_task
+    return enqueue_task("missing_scan", run_missing_scan)
