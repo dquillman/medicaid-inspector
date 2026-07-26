@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, get, mutate } from '../lib/api'
 import { fmt } from '../lib/format'
-import { copyText } from '../lib/clipboard'
+import CopyBlock from '../components/CopyBlock'
 import type { MFCUReferral } from '../lib/types'
 import { useProviderFlags } from '../hooks/useProviderFlags'
 
@@ -83,10 +83,6 @@ export default function MFCUReferralPage() {
   })
   const autoNarrative = referralNarrative?.text ?? ''
   const shortNarrative = referralNarrative?.short_narrative ?? ''
-  // null = untouched, true = verified on the clipboard, false = copy FAILED
-  // (tell the user to select manually rather than claiming success).
-  const [narrativeCopied, setNarrativeCopied] = useState<boolean | null>(null)
-  const [shortCopied, setShortCopied] = useState<boolean | null>(null)
 
   // Prefill jurisdiction + narrative once the provider/MFCU data lands, unless
   // the analyst has already typed something.
@@ -393,81 +389,27 @@ export default function MFCUReferralPage() {
                   into the state's own intake form. Kept visually distinct from
                   the app's record fields below so the two can't be confused. */}
               {autoNarrative && (
-                <div className="mt-4 border-2 border-amber-500/60 rounded-lg bg-amber-950/20">
-                  <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-amber-500/30">
-                    <div>
-                      <h3 className="text-sm font-bold text-amber-300">
-                        Step 1 — Copy this. It is what you submit.
-                      </h3>
-                      <p className="text-[11px] text-amber-200/70 mt-0.5">
-                        Paste it into the state MFCU&rsquo;s own complaint form (linked above).
-                        This app does not send it.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const ok = await copyText(autoNarrative)
-                        setNarrativeCopied(ok)
-                        if (ok) setTimeout(() => setNarrativeCopied(null), 2000)
-                      }}
-                      className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-black rounded transition-colors"
-                    >
-                      {narrativeCopied === true ? 'Copied ✓'
-                        : narrativeCopied === false ? 'Copy failed' : 'Copy narrative'}
-                    </button>
-                  </div>
-                  {narrativeCopied === false && (
-                    <p className="px-4 pt-2 text-[11px] text-red-400">
-                      The browser blocked the copy. Click inside the text below, press
-                      Ctrl+A then Ctrl+C.
-                    </p>
-                  )}
-                  <pre className="max-h-72 overflow-auto px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap select-all">
-                    {autoNarrative}
-                  </pre>
-                </div>
+                <CopyBlock
+                  text={autoNarrative}
+                  tone="primary"
+                  rows={16}
+                  buttonLabel="Copy narrative"
+                  title={<>Step 1 &mdash; Copy this. It is what you submit.</>}
+                  subtitle={<>Paste it into the state MFCU&rsquo;s own complaint form (linked above). This app does not send it.</>}
+                />
               )}
 
               {/* Many state intake forms give ONE small textarea, not OIG's
-                  single big free-text box — the full narrative above reads as
-                  a wall of text there and starts with instructions written to
-                  the filer, not the caseworker. This is a condensed paragraph
-                  built from the same data for exactly that field. */}
+                  single big free-text box. Same data, condensed. */}
               {shortNarrative && (
-                <div className="mt-3 border border-amber-500/30 rounded-lg bg-amber-950/10">
-                  <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-amber-500/20">
-                    <div>
-                      <h3 className="text-xs font-bold text-amber-300/90">
-                        Short version — for a small &ldquo;describe the fraud&rdquo; field
-                      </h3>
-                      <p className="text-[11px] text-amber-200/60 mt-0.5">
-                        Same facts, condensed. Use this if the state form has no room for the
-                        full narrative above.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const ok = await copyText(shortNarrative)
-                        setShortCopied(ok)
-                        if (ok) setTimeout(() => setShortCopied(null), 2000)
-                      }}
-                      className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-700/70 hover:bg-amber-600 text-black rounded transition-colors"
-                    >
-                      {shortCopied === true ? 'Copied ✓'
-                        : shortCopied === false ? 'Copy failed' : 'Copy short version'}
-                    </button>
-                  </div>
-                  {shortCopied === false && (
-                    <p className="px-4 pt-2 text-[11px] text-red-400">
-                      The browser blocked the copy. Click the text below, press Ctrl+A then Ctrl+C.
-                    </p>
-                  )}
-                  <p className="px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap select-all">
-                    {shortNarrative}
-                  </p>
-                </div>
+                <CopyBlock
+                  text={shortNarrative}
+                  tone="secondary"
+                  rows={7}
+                  buttonLabel="Copy short version"
+                  title={<>Short version &mdash; for a small &ldquo;describe the fraud&rdquo; field</>}
+                  subtitle={<>Same facts, condensed. Use this if the state form has no room for the full narrative.</>}
+                />
               )}
 
               {/* These are the APP'S OWN case-record fields, not the state's

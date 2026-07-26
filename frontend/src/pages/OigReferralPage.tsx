@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
-import { copyText } from '../lib/clipboard'
+import CopyBlock from '../components/CopyBlock'
 
 /**
  * Dedicated OIG Hotline referral page — the federal counterpart to
@@ -19,9 +19,6 @@ export default function OigReferralPage() {
   const { npi } = useParams<{ npi: string }>()
   const queryClient = useQueryClient()
 
-  // null = untouched, true = verified on the clipboard, false = copy FAILED.
-  const [narrativeCopied, setNarrativeCopied] = useState<boolean | null>(null)
-  const [shortCopied, setShortCopied] = useState<boolean | null>(null)
   const [notes, setNotes] = useState('')
   const [logged, setLogged] = useState(false)
   const [logging, setLogging] = useState(false)
@@ -184,75 +181,25 @@ export default function OigReferralPage() {
 
               {/* THE SUBMISSION */}
               {autoNarrative && (
-                <div className="border-2 border-amber-500/60 rounded-lg bg-amber-950/20">
-                  <div className="flex items-center justify-between gap-3 px-4 py-2.5 border-b border-amber-500/30">
-                    <div>
-                      <h3 className="text-sm font-bold text-amber-300">
-                        Copy this. It is what you submit.
-                      </h3>
-                      <p className="text-[11px] text-amber-200/70 mt-0.5">
-                        Paste into the wizard&rsquo;s &ldquo;describe the fraudulent action&rdquo; field.
-                        This app does not send it.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const ok = await copyText(autoNarrative)
-                        setNarrativeCopied(ok)
-                        if (ok) setTimeout(() => setNarrativeCopied(null), 2000)
-                      }}
-                      className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-black rounded transition-colors"
-                    >
-                      {narrativeCopied === true ? 'Copied ✓'
-                        : narrativeCopied === false ? 'Copy failed' : 'Copy narrative'}
-                    </button>
-                  </div>
-                  {narrativeCopied === false && (
-                    <p className="px-4 pt-2 text-[11px] text-red-400">
-                      The browser blocked the copy. Click inside the text below, press Ctrl+A then Ctrl+C.
-                    </p>
-                  )}
-                  <pre className="max-h-72 overflow-auto px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap select-all">
-                    {autoNarrative}
-                  </pre>
-                </div>
+                <CopyBlock
+                  text={autoNarrative}
+                  tone="primary"
+                  rows={16}
+                  buttonLabel="Copy narrative"
+                  title={<>Copy this. It is what you submit.</>}
+                  subtitle={<>Paste into the wizard&rsquo;s &ldquo;describe the fraudulent action&rdquo; field. This app does not send it.</>}
+                />
               )}
 
               {shortNarrative && (
-                <div className="border border-amber-500/30 rounded-lg bg-amber-950/10">
-                  <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-amber-500/20">
-                    <div>
-                      <h3 className="text-xs font-bold text-amber-300/90">
-                        Short version — for a small description field
-                      </h3>
-                      <p className="text-[11px] text-amber-200/60 mt-0.5">
-                        Same facts, condensed. OIG&rsquo;s box is usually large enough for the full
-                        narrative above, but use this if space is tight.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        const ok = await copyText(shortNarrative)
-                        setShortCopied(ok)
-                        if (ok) setTimeout(() => setShortCopied(null), 2000)
-                      }}
-                      className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-700/70 hover:bg-amber-600 text-black rounded transition-colors"
-                    >
-                      {shortCopied === true ? 'Copied ✓'
-                        : shortCopied === false ? 'Copy failed' : 'Copy short version'}
-                    </button>
-                  </div>
-                  {shortCopied === false && (
-                    <p className="px-4 pt-2 text-[11px] text-red-400">
-                      The browser blocked the copy. Click the text below, press Ctrl+A then Ctrl+C.
-                    </p>
-                  )}
-                  <p className="px-4 py-3 text-[11px] font-mono text-gray-300 whitespace-pre-wrap select-all">
-                    {shortNarrative}
-                  </p>
-                </div>
+                <CopyBlock
+                  text={shortNarrative}
+                  tone="secondary"
+                  rows={7}
+                  buttonLabel="Copy short version"
+                  title={<>Short version &mdash; for a small description field</>}
+                  subtitle={<>Same facts, condensed. Use this if space is tight.</>}
+                />
               )}
 
               {/* Case record — stays in the app. Logging IS marking Reported: OIG. */}
