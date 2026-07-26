@@ -1842,9 +1842,14 @@ export interface MethodSignal {
   false_positives?: number
   sample_size?: number
   weight_adjustment?: number
-  // Present only on retired signals (kept so historical flags still explain themselves).
+  // Present only on retired/parked signals (kept so historical flags still explain
+  // themselves). 'retired' = not computable from public data at all; 'parked' =
+  // the pattern is real but current scoring is too noisy to trust.
+  status?: 'retired' | 'parked'
   retired?: string
   retired_reason?: string
+  parked?: string
+  parked_reason?: string
 }
 export interface MethodsProvenance {
   core_dataset: string

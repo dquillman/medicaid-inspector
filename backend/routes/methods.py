@@ -100,12 +100,20 @@ async def get_methods(request: Request) -> dict:
             "explanation": meta.get("explanation", ""),
             "citations": meta.get("citations", []),
         }
-        # A retired signal keeps its entry (historical flags must still explain
-        # themselves) but must never be counted as active — signal_count is a
-        # public claim about what this tool currently does.
-        if meta.get("retired"):
-            entry["retired"] = meta["retired"]
-            entry["retired_reason"] = meta.get("retired_reason", "")
+        # A retired OR PARKED signal keeps its entry (historical flags must still
+        # explain themselves) but must never be counted as active — signal_count
+        # is a public claim about what this tool currently does. Parked was
+        # missed on the first pass, which published corporate_shell_risk as a
+        # live scored signal while it contributed nothing.
+        if meta.get("retired") or meta.get("parked"):
+            if meta.get("retired"):
+                entry["status"] = "retired"
+                entry["retired"] = meta["retired"]
+                entry["retired_reason"] = meta.get("retired_reason", "")
+            else:
+                entry["status"] = "parked"
+                entry["parked"] = meta["parked"]
+                entry["parked_reason"] = meta.get("parked_reason", "")
             retired.append(entry)
             continue
         if authed:

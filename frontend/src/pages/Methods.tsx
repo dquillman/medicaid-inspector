@@ -109,10 +109,13 @@ export default function Methods() {
               is part of the methodology, and cached flags still reference it. */}
           {data.retired_signals?.length > 0 && (
             <div>
-              <h2 className="text-base font-display font-semibold text-ink-primary mb-1">Retired Signals</h2>
+              <h2 className="text-base font-display font-semibold text-ink-primary mb-1">Retired &amp; Parked Signals</h2>
               <p className="text-xs text-ink-tertiary mb-3 leading-relaxed">
-                No longer scored. Listed because older cases may still carry these flags, and because
-                what a detector stopped believing is as much a part of the method as what it believes.
+                No longer scored. <span className="text-ink-secondary">Retired</span> means the finding
+                is not computable from public data at all; <span className="text-ink-secondary">parked</span> means
+                the pattern is real but the current scoring produces too many false positives to trust.
+                Listed because older cases may still carry these flags, and because what a detector
+                stopped believing is as much a part of the method as what it believes.
               </p>
               <div className="space-y-3">
                 {data.retired_signals.map((s) => (
@@ -120,11 +123,13 @@ export default function Methods() {
                     <div className="flex items-start justify-between gap-4">
                       <h3 className="text-sm font-semibold text-ink-secondary line-through decoration-ink-tertiary/60">{s.label}</h3>
                       <span className="shrink-0 text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full border border-ink-tertiary/40 text-ink-tertiary">
-                        retired {s.retired}
+                        {s.status === 'parked' ? `parked ${s.parked}` : `retired ${s.retired}`}
                       </span>
                     </div>
-                    {s.retired_reason && (
-                      <p className="text-xs text-threat-medium mt-1.5 leading-relaxed">{s.retired_reason}</p>
+                    {(s.retired_reason || s.parked_reason) && (
+                      <p className="text-xs text-threat-medium mt-1.5 leading-relaxed">
+                        {s.retired_reason || s.parked_reason}
+                      </p>
                     )}
                     <p className="text-xs text-ink-tertiary mt-1.5 leading-relaxed">{s.explanation}</p>
                   </div>
