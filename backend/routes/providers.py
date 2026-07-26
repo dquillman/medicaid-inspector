@@ -2967,6 +2967,12 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     # `value` empty means WE DO NOT HOLD IT — the UI renders those as
     # "leave blank", because guessing on a government form is worse than a gap.
     _zip5 = (addr.get("zip") or cached.get("zip") or "")[:5]
+    _st_abbr = (addr.get("state") or cached.get("state") or "").strip().upper()
+    try:
+        from core.mfcu_directory import _STATE_NAMES as _SN
+        _state_full = _SN.get(_st_abbr, "")
+    except Exception:
+        _state_full = ""
     _ent = (nppes.get("entity_type") or "").strip()
     form_fields = [
         {"label": "Provider / business name", "value": name},
@@ -2981,6 +2987,23 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
          "note": "Most recent billed month. The data is monthly, so no specific day is knowable."},
         {"label": "Date range (if the form allows one)",
          "value": f"{first_m} to {last_m}" if first_m != "?" else ""},
+        # NC (and other states) ask who the VICTIM is. These intakes are built
+        # for patient abuse/neglect complaints, where a person was harmed. In a
+        # billing-fraud referral built from aggregate payment data the injured
+        # party is the PAYER, not a patient — and we hold no beneficiary
+        # identities, so naming an individual would be both false and unprovable.
+        # NC splits the victim name into First/Middle/Last inputs, so give both
+        # the combined answer and the two halves — otherwise the value has to be
+        # cut by hand at the form.
+        {"label": "Victim name - First", "value": _state_full or "State",
+         "note": "For forms that split the name. Leave Middle blank."},
+        {"label": "Victim name - Last", "value": "Medicaid Program",
+         "note": "Leave DOB, sex, employer, alias, title and address BLANK - "
+                 "the injured party is a program, not a person. Never invent one."},
+        {"label": "Victim / who was harmed",
+         "value": (f"{_state_full or 'The state'} Medicaid program - the payer that bore the "
+                   f"financial loss. No individual patient victim identified."),
+         "note": "Financial case, not abuse/neglect. Leave any abuse/neglect section blank."},
         {"label": "Recipient / patient name",
          "value": "Unknown - provider-level billing analysis; no individual recipient identified",
          "note": "Often a REQUIRED field. We hold no recipient names — this is the honest answer, never invent one."},
