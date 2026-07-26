@@ -1832,6 +1832,9 @@ export interface FormAnswerField {
   label: string
   value: string
   note?: string
+  /** Length of `value`. State fields cap silently — a long paste is truncated
+   *  mid-word or rejected, which is how the full narrative failed on PA's form. */
+  chars?: number
 }
 
 export interface OigTipResponse {

@@ -4,6 +4,7 @@ export interface FormField {
   label: string
   value: string
   note?: string
+  chars?: number
 }
 
 /**
@@ -81,11 +82,23 @@ export default function FormAnswerSheet({ fields }: { fields: FormField[] }) {
                 <p className="text-[11px] text-gray-400 leading-snug">{f.label}</p>
                 {f.note && <p className="text-[10px] text-gray-600 leading-snug mt-0.5">{f.note}</p>}
               </div>
-              <p className={`flex-1 text-[11px] font-mono leading-snug break-words ${
-                empty ? 'text-gray-600 italic' : 'text-amber-300'
-              }`}>
-                {empty ? 'leave blank' : f.value}
-              </p>
+              <div className="flex-1 min-w-0">
+                <p className={`text-[11px] font-mono leading-snug break-words ${
+                  empty ? 'text-gray-600 italic' : 'text-amber-300'
+                }`}>
+                  {empty ? 'leave blank' : f.value}
+                </p>
+                {/* Length matters: state fields cap silently. Flag anything long
+                    enough to be at risk so it's caught HERE, not at the form. */}
+                {!empty && (f.chars ?? 0) > 0 && (
+                  <p className={`text-[10px] mt-0.5 ${
+                    (f.chars ?? 0) > 1000 ? 'text-amber-500/80' : 'text-gray-600'
+                  }`}>
+                    {f.chars} characters
+                    {(f.chars ?? 0) > 1000 && ' — if the field rejects it, it has a length cap'}
+                  </p>
+                )}
+              </div>
               {!empty && (
                 <button
                   type="button"

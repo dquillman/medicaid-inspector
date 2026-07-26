@@ -2754,6 +2754,12 @@ async def provider_narrative(npi: str, enhance: str = "auto"):
         raise HTTPException(status_code=404, detail=str(e))
 
 
+# State intake forms put "additional provider info" in a single-line <input>.
+# PA's caps at 100 characters and truncates silently, mid-word. Anything we put
+# in a short field is built to fit this; the answer sheet flags overruns.
+_SHORT_FIELD_CAP = 100
+
+
 @router.get("/{npi}/oig-tip")
 async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool = True):
     """
@@ -2897,14 +2903,15 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     else:
         _dos_single = ""
     npp_phone = (nppes.get("phone") or addr.get("phone") or "").strip()
-    _extra_info = (
-        f"NPI {npi}"
-        + (f" ({'individual' if (nppes.get('entity_type') or '').lower() == 'npi-1' else 'organization'})")
-        + (f". Taxonomy: {specialty}" if specialty and specialty != "(unknown)" else "")
-        + (". Not on the OIG LEIE or SAM.gov exclusion lists as of this filing."
-           if not oig_excluded else
-           ". APPEARS ON the HHS-OIG LEIE exclusion list.")
-    )
+    # "Additional provider info" on state intakes is usually a single-line
+    # <input>, and PA's caps at 100 chars — a longer value is silently truncated
+    # mid-word (Dave hit this: his ended at "...SAM.gov exclus"). Build a
+    # compact form that fits, and let the UI flag anything over the cap.
+    _excl_note = "LEIE/SAM clear" if not oig_excluded else "ON OIG LEIE"
+    _spec_short = (specialty or "").replace(" Physician", "").strip()
+    _extra_info = f"NPI {npi}, {_spec_short}, {_excl_note}"
+    if len(_extra_info) > _SHORT_FIELD_CAP:          # degrade gracefully
+        _extra_info = f"NPI {npi}, {_excl_note}"
 
     # ── Per-field answer sheet ────────────────────────────────────────────
     # Dave: "the step 2 area needs to have all info to copy and paste to the
@@ -2943,6 +2950,16 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         {"label": "Provider telephone", "value": npp_phone,
          "note": "" if npp_phone else "Not on file in NPPES."},
     ]
+    # Length is not cosmetic here: an over-long paste is either truncated
+    # mid-word or rejected outright, which is exactly how Dave lost the full
+    # narrative on PA's form. Ship the count so the UI can warn BEFORE filing.
+    for _f in form_fields:
+        _f["chars"] = len(_f["value"])
+    for _f in form_fields:
+        if _f["label"] == "Additional provider info":
+            _f["note"] = (_f.get("note") or "") + (
+                " Kept under 100 chars — state forms often cap this single-line field."
+            ).strip()
 
     # Destination only changes the routing header/footer — the EVIDENCE body is
     # identical for OIG and MFCU (one narrative, two destinations).
