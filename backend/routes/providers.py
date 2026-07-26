@@ -3049,6 +3049,18 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
                 " Kept under 100 chars — state forms often cap this single-line field."
             ).strip()
 
+    # Dave: "always include the business phone in the submission pages." NC
+    # requires it on the form, and it belongs in the narrative too — it is how
+    # an investigator makes first contact. Practice-location number (where the
+    # provider operates), not the mailing one. Built as its own string because
+    # the block below is implicit string concatenation: a bare `+` mid-sequence
+    # is a SyntaxError.
+    _contact_lines = ""
+    if npp_phone:
+        _contact_lines += f"  Business phone (NPPES practice location): {npp_phone}\n"
+    if _other_tax:
+        _contact_lines += f"  Additional taxonomies on file: {', '.join(_other_tax)}\n"
+
     # Destination only changes the routing header/footer — the EVIDENCE body is
     # identical for OIG and MFCU (one narrative, two destinations).
     if dest == "mfcu":
@@ -3083,6 +3095,7 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         f"  NPI: {npi}\n"
         f"  Provider type / taxonomy: {specialty}\n"
         f"  Address of record (NPPES): {address_str}\n"
+        f"{_contact_lines}"
         f"  Program: Medicaid (Title XIX)\n"
         f"  Complaint category: {category}\n"
         "\n"
