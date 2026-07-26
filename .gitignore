@@ -102,3 +102,9 @@ deploy-tmp/
 
 # Operational data — real NPIs/notes; lives in GCS, never in git
 backend/watchlist.json
+# real filings + agency acks — evidentiary, GCS is source of truth
+backend/referrals.json
+# nightly case-prep run state
+backend/auto_prep_state.json
+# signal FP/TP counts + learned weight multipliers
+backend/feedback_data.json
