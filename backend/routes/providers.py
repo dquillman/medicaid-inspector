@@ -2947,6 +2947,24 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     else:
         _dos_single = ""
     npp_phone = (nppes.get("phone") or addr.get("phone") or "").strip()
+    _all_tax = nppes.get("taxonomies") or []
+    if not npp_phone or not _all_tax:
+        # NC's intake REQUIRES the business phone. The slim Cloud Run cache
+        # carries no phone and only the primary taxonomy, so pull them live —
+        # the address backfill above already proves the lookup is cheap here.
+        try:
+            from data.nppes_client import get_provider as _npg
+            _live = await _npg(npi) or {}
+            npp_phone = npp_phone or (_live.get("phone") or "").strip()
+            _all_tax = _all_tax or _live.get("taxonomies") or []
+        except Exception:
+            import logging as _lg
+            _lg.getLogger(__name__).warning("oig-tip: live NPPES phone lookup failed for %s", npi, exc_info=True)
+    # A second taxonomy can be the material one (1235540212 shows as "Foster
+    # Care Agency" but is ALSO a Psychiatric Residential Treatment Facility —
+    # the higher-reimbursement category, and the one its billing matches).
+    _other_tax = [t.get("description", "") for t in _all_tax
+                  if t.get("description") and t.get("description") != specialty]
     # "Additional provider info" on state intakes is usually a single-line
     # <input>, and PA's caps at 100 chars — a longer value is silently truncated
     # mid-word (Dave hit this: his ended at "...SAM.gov exclus"). Build a
@@ -2982,6 +3000,9 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         {"label": "ZIP", "value": _zip5},
         {"label": "NPI", "value": npi},
         {"label": "Provider type / taxonomy", "value": specialty},
+        {"label": "All NPPES taxonomies", "value": ", ".join(
+            [specialty] + _other_tax) if _other_tax else "",
+         "note": "A secondary taxonomy can be the material one — name it if the form has room."},
         {"label": "Business or individual", "value": "Individual" if _ent.lower() == "npi-1" else "Business"},
         {"label": "Date of service (single date)", "value": _dos_single,
          "note": "Most recent billed month. The data is monthly, so no specific day is knowable."},
