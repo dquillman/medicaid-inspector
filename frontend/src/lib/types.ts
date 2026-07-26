@@ -511,7 +511,11 @@ export interface ExclusionFreshness {
   sources: ExclusionFreshnessSource[]
 }
 
-export interface ExcludedProvider {
+// Row shape from the batch exclusion SCAN (routes/exclusions batch endpoint).
+// Named distinctly from the ExcludedProvider below: two interfaces of the same
+// name in one module silently declaration-merge, which quietly made both
+// shapes require the other's fields.
+export interface BatchExcludedProvider {
   npi: string
   provider_name: string
   state: string
@@ -529,7 +533,7 @@ export interface BatchExclusionResults {
   total_excluded: number
   oig_list_loaded: boolean
   oig_list_size: number
-  excluded_providers: ExcludedProvider[]
+  excluded_providers: BatchExcludedProvider[]
   scanned_at: string | null
   never_scanned?: boolean
 }
@@ -1767,7 +1771,14 @@ export interface FraudBrainResponse {
   note?: string
 }
 
-// Excluded providers (OIG LEIE)
+// Barred-and-billing providers — OIG LEIE exclusions AND deactivated NPIs,
+// served from the per-se sweep across the full 617k billing universe.
+export type PerSeKind =
+  | 'active_exclusion'      // billed DURING an exclusion — per-se fraud
+  | 'deactivated_billing'   // billed under an NPI CMS killed
+  | 'deactivated_window'    // billed while deactivated; NPI later reactivated
+  | 'recovery_lead'         // billing predates the exclusion — a clawback, not active fraud
+
 export interface ExcludedProvider {
   npi: string
   provider_name: string
@@ -1778,12 +1789,34 @@ export interface ExcludedProvider {
   flag_count: number
   excl_type: string
   excl_date: string
+  kind?: PerSeKind
+  /** false = below the $1M scan cutoff, so absent from the risk model entirely. */
+  in_scan_cache?: boolean | null
+  total_claims?: number
+  total_beneficiaries?: number
+  first_month?: string | null
+  last_month?: string | null
+  exclusion_date?: string
+  exclusion_type?: string
+  deactivation_date?: string
+  reactivation_date?: string
+  /** Dollars paid while the provider was barred — the figure a referral needs. */
+  paid_after_exclusion?: number
+  paid_after_deactivation?: number
+  paid_during_deactivation?: number
+  citation?: string
 }
 
 export interface ExcludedProvidersResponse {
   providers: ExcludedProvider[]
   total: number
   total_paid: number
+  /** 'perse_sweep' = full universe; 'prescan_only' = no sweep built yet. */
+  source?: 'perse_sweep' | 'prescan_only'
+  generated_at?: string
+  by_kind?: Record<string, { count: number; total_paid: number; outside_scan_cache: number; outside_scan_cache_paid: number }>
+  kind_labels?: Record<string, string>
+  universe_note?: string | null
 }
 
 // Methodology page (/methods)

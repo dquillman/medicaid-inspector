@@ -55,6 +55,7 @@ _STATE_MODULES = [
     "core.phi_logger", "core.saved_searches", "core.alert_rules",
     "core.store", "core.history_store", "core.lineage",
     "core.database",   # app.db — users/sessions/audit live here too
+    "core.perse_store",  # perse_leads.json — read-only, but a test must not read the real sweep
 ]
 
 

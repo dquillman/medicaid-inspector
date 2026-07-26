@@ -1,5 +1,55 @@
 # MFI Bug Log
 
+## 2026-07-26 — coverage: per-se leads below the scan cutoff (FIXED, v3.52.0)
+
+### 11. The $1M scan cutoff hid provable fraud — FIXED
+**Was:** The prescan scores every NPI with $1M+ in lifetime Medicaid payments —
+106,660 of 617,503 billing NPIs (17.3% of NPIs, 94.6% of dollars). That is the
+right trade for the statistical signals, which need peer stats to mean anything.
+It was the wrong trade for the two PER-SE signals: 42 CFR § 1001.1901 has no
+dollar threshold, so an OIG-excluded provider billing $200k is exactly as
+referable as one billing $2M. Measured: **506 OIG-excluded providers billing
+$64.2M were invisible to MFI purely because each billed under $1M.**
+**Fix:** `scripts/build_perse_sweep.py` runs the two per-se checks across the
+FULL universe (one parquet scan — they need no peer statistics), writing
+`perse_leads.json`. Served by `core/perse_store.py` + `routes/perse.py`, and
+`/exclusions/excluded` now reads the sweep instead of walking the scan cache.
+845 of 1,081 leads sit outside the scan cache.
+
+### 12. `build_deactivations.py` ignored NPPES reactivations — FIXED
+**Was:** The builder kept any NPI with a deactivation date, ignoring the
+adjacent "NPI Reactivation Date" column. **1,655 of 10,968 (15.1%) had been
+reactivated** — many within days (a 2006 NPPES cleanup artifact: deactivated
+03/17/2006, reactivated 03/23/2006). Those NPIs are alive, and every one of them
+was feeding `dead_npi_billing` as permanently dead.
+**Fix:** currently-dead NPIs stay in `npi_deactivations.json`; reactivated ones
+move to `npi_deactivation_windows.json` as `{npi: [deact, react]}`, where billing
+INSIDE the closed window is still a finding but a narrower one. Combined with
+dropping NPIs that billed only *before* deactivation, the raw sweep fell from
+10,846 to 1,081 leads — a 90% noise cut.
+
+### 13. LEIE placeholder NPI produced a phantom $4.4M lead — FIXED
+**Was:** LEIE writes `0000000000` when it has no NPI for an excluded person. The
+Medicaid file has a same-named catch-all bucket, so joining them surfaced a
+phantom "$4.4M billed while excluded" lead — ranked **second**. The billing file
+also carries state-assigned IDs (e.g. `A430617100`, $139M) that are not NPIs.
+**Fix:** the sweep validates `^[12]\d{9}$` before joining.
+
+### 14. Two `ExcludedProvider` interfaces silently merged — FIXED
+**Was:** `frontend/src/lib/types.ts` declared `ExcludedProvider` twice. TypeScript
+declaration-merges same-named interfaces in a module, so each shape silently
+required the other's fields; it only compiled because both are produced by
+`get<T>()` casts rather than constructed.
+**Fix:** the batch-scan row is now `BatchExcludedProvider`.
+
+### 15. `perse_store` was missing from the test-state redirect — FIXED
+**Was:** `tests/conftest.py::_STATE_MODULES` is a hand-maintained list, despite
+its own comment claiming a new store "can't quietly start writing real state."
+A new store not on the list reads the developer's real files.
+**Fix:** added `core.perse_store`. The list remains hand-maintained — a real fix
+would enumerate `core.*` instead.
+
+
 ## 2026-07-08 — Referral Packet / export batch (FIXED, v3.7.11)
 
 Reported by Dave via JARVIS/MFI session. Repro NPI: `1720390115`.

@@ -43,6 +43,31 @@ bash deploy-frontend.sh
 bash deploy-backend.sh
 ```
 
+## Data artifacts are NOT shipped by a code deploy
+
+Several files are **GCS-synced state**, not code. `main.py`'s lifespan downloads
+them from `gs://medicaid-inspector-data/` at startup and **overwrites whatever is
+on disk** — locally as well as in prod. A code deploy does not update them, and
+rebuilding one locally is undone by the next local backend restart.
+
+Rebuild → upload → deploy, in that order:
+
+```bash
+cd backend
+G:/Python311/python.exe -X utf8 scripts/build_deactivations.py   # NPPES -> deactivations + windows
+G:/Python311/python.exe -X utf8 scripts/build_perse_sweep.py     # OIG + deactivations -> per-se leads
+gsutil cp npi_deactivations.json npi_deactivation_windows.json perse_leads.json \
+          gs://medicaid-inspector-data/
+```
+
+Skipping the upload leaves prod serving the previous sweep with no error — the
+page still renders, just with stale counts. Observed 2026-07-26: a freshly built
+9,313-entry `npi_deactivations.json` was silently replaced by the bucket's
+1,025-entry copy on the next local restart.
+
+`build_deactivations.py` needs the extracted NPPES bulk CSV at
+`G:/temp/nppes_extract/` (produced by `scripts/backfill_nppes_bulk.py`).
+
 ## Architecture
 - **Frontend**: Firebase Hosting serves the React SPA from `frontend/dist/`
 - **Backend**: Cloud Run runs the FastAPI backend (2GB memory, auto-scaling 0-3 instances)

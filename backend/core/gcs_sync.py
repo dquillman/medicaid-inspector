@@ -39,6 +39,8 @@ _SYNC_FILES = [
     "supervised_model.json",  # trained supervised-ML metrics + per-NPI predictions
     "ml_scores.json",         # Isolation Forest anomaly scores
     "npi_deactivations.json", # deactivated-NPI lookup (dead_npi_billing signal)
+    "npi_deactivation_windows.json",  # deactivated-then-reactivated NPIs {npi: [deact, react]}
+    "perse_leads.json",       # per-se sweep over ALL 617k billing NPIs, not just the scanned 106k
     "notifications.json",
     "saved_searches.json",
     "referrals.json",

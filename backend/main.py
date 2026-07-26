@@ -51,6 +51,7 @@ from routes import related
 from routes import fraud_brain as fraud_brain_routes
 from routes import methods as methods_routes
 from routes import oig_tips as oig_tips_routes
+from routes import perse as perse_routes
 from routes import watchlist
 from routes import rings
 from routes import specialty
@@ -400,6 +401,7 @@ app.include_router(billing_codes.router)
 app.include_router(fraud_brain_routes.router)
 app.include_router(methods_routes.router)
 app.include_router(oig_tips_routes.router)
+app.include_router(perse_routes.router)
 app.include_router(phi_admin.router)
 app.include_router(hal_routes.router)
 app.add_middleware(PHIAccessMiddleware)

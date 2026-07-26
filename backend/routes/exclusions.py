@@ -48,15 +48,66 @@ async def scan_all_exclusions():
 
 @router.get("/excluded")
 async def excluded_providers():
-    """All scanned providers that are on the OIG LEIE exclusion list.
+    """Every provider barred from billing that billed anyway — across the FULL
+    617k-NPI billing universe, not just the ~106k the prescan scores.
 
-    These are filtered out of the Providers list, Anomalies, Review Queue, and
-    Fraud Brain — they're already barred from the program, so this page is
-    their single home in the app.
+    This used to walk get_prescanned(), so it only ever saw providers above the
+    $1M scan cutoff. That cutoff is right for the statistical signals and wrong
+    here: 42 CFR 1001.1901 has no dollar threshold, and an excluded provider
+    billing $200k is exactly as referable as one billing $2M. Measured
+    2026-07-26, the old query missed 845 leads it could not see at all.
+
+    Now served from the per-se sweep (scripts/build_perse_sweep.py), which also
+    covers deactivated NPIs. Falls back to the old prescan walk if no sweep has
+    been built yet, so the page is never empty on a fresh checkout.
     """
     import asyncio
+    from core import perse_store
 
-    def _build() -> dict:
+    def _from_sweep() -> dict | None:
+        summary = perse_store.get_summary()
+        if not summary.get("available"):
+            return None
+        rows = perse_store.list_leads(limit=100_000)["leads"]
+        # Enrich with the scan cache where we have it — name/risk/flags only
+        # exist for providers the prescan actually scored.
+        from core.store import get_prescanned
+        cached = {p.get("npi"): p for p in get_prescanned()}
+        out = []
+        for r in rows:
+            p = cached.get(r["npi"]) or {}
+            out.append({
+                **r,
+                "provider_name": r.get("provider_name")
+                                 or p.get("provider_name")
+                                 or (p.get("nppes") or {}).get("name", ""),
+                "state": r.get("state")
+                         or p.get("state")
+                         or ((p.get("nppes") or {}).get("address") or {}).get("state", ""),
+                "specialty": r.get("specialty") or p.get("specialty", ""),
+                "risk_score": round(float(p.get("risk_score") or 0), 1),
+                "flag_count": int(p.get("flag_count")
+                                  or len([f for f in (p.get("flags") or []) if f.get("flagged")])),
+                # Back-compat with the old response shape the page already reads.
+                "excl_type": r.get("exclusion_type", ""),
+                "excl_date": r.get("exclusion_date", ""),
+            })
+        return {
+            "providers": out,
+            "total": len(out),
+            "total_paid": round(sum(r["total_paid"] for r in out), 2),
+            "source": "perse_sweep",
+            "generated_at": summary.get("generated_at"),
+            "by_kind": summary.get("by_kind", {}),
+            "kind_labels": perse_store.KIND_LABELS,
+            "universe_note": (
+                "Swept across every NPI that bills Medicaid, not only the "
+                f"{summary.get('scanned_npis'):,} the risk model scores."
+                if summary.get("scanned_npis") else None
+            ),
+        }
+
+    def _from_prescan() -> dict:
         from core.store import get_prescanned
         from core.oig_store import is_excluded
         rows = []
@@ -70,6 +121,7 @@ async def excluded_providers():
             total_paid += paid
             rows.append({
                 "npi": npi,
+                "kind": "active_exclusion",
                 "provider_name": p.get("provider_name")
                                  or (p.get("nppes") or {}).get("name")
                                  or (record or {}).get("name", ""),
@@ -83,13 +135,23 @@ async def excluded_providers():
                                   or len([f for f in (p.get("flags") or []) if f.get("flagged")])),
                 "excl_type": (record or {}).get("excl_type", ""),
                 "excl_date": (record or {}).get("excl_date", ""),
+                "in_scan_cache": True,
             })
         rows.sort(key=lambda r: -r["total_paid"])
         return {
             "providers": rows,
             "total": len(rows),
             "total_paid": round(total_paid, 2),
+            "source": "prescan_only",
+            "universe_note": (
+                "No per-se sweep has been built, so this only covers providers the "
+                "prescan scored. Run backend/scripts/build_perse_sweep.py to sweep "
+                "the full billing universe."
+            ),
         }
+
+    def _build() -> dict:
+        return _from_sweep() or _from_prescan()
 
     return await asyncio.to_thread(_build)
 
