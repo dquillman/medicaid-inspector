@@ -1398,25 +1398,32 @@ def diagnosis_procedure_mismatch(
     hcpcs_rows: list[dict],
     mup_row: dict | None,
 ) -> SignalResult:
-    """
-    Flag when a provider's top-billed condition-specific HCPCS code is paired
-    with a Medicare chronic-condition prevalence near zero for that condition.
+    """RETIRED 2026-07-26 — no longer wired into either scoring path.
 
-    Example: provider bills $200k of A4253 (diabetic test strips) but
-    Bene_CC_PH_Diabetes_V2_Pct = 0% — they have no diabetic Medicare patients.
-    Either they treat exclusively non-diabetics (implausible for diabetic
-    supplies) or the claims are fabricated.
+    Do not re-wire this without new evidence. It is kept callable only so the
+    2 historical flags in the cache still explain themselves, and so
+    scripts/sweep_diagnosis_mismatch.py can re-measure if the case changes.
 
-    OIG basis: Diagnosis-procedure consistency is the foundational medical
-    necessity test (42 CFR § 440.230). The MUP-by-Provider dataset
-    (Medicare beneficiary chronic-condition prevalence) is a public proxy
-    for the diagnosis denominator the Medicaid claims data lacks.
+    Why it was retired:
+      * It fired on 2 of 106,660 scanned providers (0.002%). Measured, not
+        estimated — counted from the flags in prescan_slim.json.
+      * It was the ONLY cross-payer signal in the set. Every other detector
+        reasons over real Medicaid billing; this one asked a *Medicare*
+        chronic-condition denominator to vouch for Medicaid claims.
+      * Its own reason text told the analyst not to rely on it ("verify against
+        Medicaid diagnosis data before relying") — a signal that disclaims
+        itself in the narrative is not carrying weight, it is adding noise.
+      * It is structurally dead for MFI's actual targets. It requires a
+        Medicare panel of 100+ beneficiaries, which the Medicaid-heavy
+        providers MFI hunts (home health, PCA, behavioral, NEMT) do not have.
+        Retiring it removes the last place where a referral could rest on
+        another payer's data.
 
-    Limitations:
-      * Only fires when the provider has Medicare patients (MUP coverage).
-        Pure Medicaid-only providers will return score=0 (no signal).
-      * The condition map is intentionally narrow — only HCPCS codes whose
-        medical necessity tightly maps to one chronic condition.
+    Original behaviour: flag when a provider's top-billed condition-specific
+    HCPCS code is paired with a Medicare chronic-condition prevalence near zero
+    for that condition — e.g. $200k of A4253 (diabetic test strips) against
+    Bene_CC_PH_Diabetes_V2_Pct = 0%. OIG basis: diagnosis-procedure consistency
+    is the foundational medical-necessity test (42 CFR § 440.230).
     """
     if mup_row is None:
         return _result("diagnosis_procedure_mismatch", 0.0, 8,

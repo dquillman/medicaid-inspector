@@ -78,9 +78,9 @@ def _import_signals():
         dead_npi_billing,
         new_provider_explosion,
         geographic_impossibility,
-        diagnosis_procedure_mismatch,
     )
-    from services.mup_client import lookup_sync as mup_lookup_sync
+    # diagnosis_procedure_mismatch + its MUP lookup are RETIRED (2026-07-26) —
+    # deliberately not imported. See anomaly_detector for the reasoning.
     return {
         "billing_concentration": billing_concentration,
         "revenue_per_bene_outlier": revenue_per_bene_outlier,
@@ -101,8 +101,6 @@ def _import_signals():
         "dead_npi_billing": dead_npi_billing,
         "new_provider_explosion": new_provider_explosion,
         "geographic_impossibility": geographic_impossibility,
-        "diagnosis_procedure_mismatch": diagnosis_procedure_mismatch,
-        "mup_lookup_sync": mup_lookup_sync,
     }
 
 
@@ -131,13 +129,10 @@ def _score_provider(row: dict, hcpcs: list, timeline: list, npi: str,
     s15 = sig["dead_npi_billing"](row)
     s16 = sig["new_provider_explosion"](row)
     s17 = sig["geographic_impossibility"](row)
-    # New: diagnosis-procedure mismatch via local MUP cache. lookup_sync
-    # returns None when the cache is absent or the NPI has no Medicare data,
-    # and the detector returns score=0 in that case (no false positives).
-    mup_row = sig["mup_lookup_sync"](npi)
-    s18 = sig["diagnosis_procedure_mismatch"](row, hcpcs, mup_row)
+    # s18 (diagnosis_procedure_mismatch, MUP-based) RETIRED 2026-07-26 — it fired
+    # on 2 of 106,660 providers and was the only cross-payer proxy in the set.
 
-    signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17, s18]
+    signals = [s1, s2, s3, s4, s5, s6, s7, s8, s9, s10, s11, s12, s13, s14, s15, s16, s17]
     # Feedback-adjusted composite: signals the user keeps dismissing carry
     # less weight (see feedback_tracker.composite_with_feedback).
     from services.feedback_tracker import composite_with_feedback

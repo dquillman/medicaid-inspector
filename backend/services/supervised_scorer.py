@@ -115,7 +115,9 @@ FEATURE_COLS = [
     "avg_per_claim",
     "flag_count",
     "risk_score",
-    # Individual signal scores (17 signals)
+    # Individual signal scores — all 17 active signals. This list never carried
+    # diagnosis_procedure_mismatch, so retiring it (2026-07-26) made the feature
+    # matrix and the scan path agree for the first time.
     "sig_billing_concentration",
     "sig_revenue_per_bene_outlier",
     "sig_claims_per_bene_anomaly",

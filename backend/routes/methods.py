@@ -2,11 +2,12 @@
 Public methodology endpoint — powers the /methods transparency page.
 
 A solo public-data tipster lives on credibility: this publishes, with no auth,
-exactly how the 18 signals work (label + plain-English explanation + the CFR/USC
-citations behind each), the measured per-signal precision from analyst feedback
-(true/false-positive counts → precision, the numbers feedback_tracker already
-computes), an honest data-provenance statement, and how the composite score is
-formed. Nothing here is PHI or provider-identifying.
+exactly how the active signals work (label + plain-English explanation + the
+CFR/USC citations behind each), which signals have been RETIRED and why, what
+this tool structurally cannot detect, the measured per-signal precision from
+analyst feedback (true/false-positive counts → precision, the numbers
+feedback_tracker already computes), an honest data-provenance statement, and how
+the composite score is formed. Nothing here is PHI or provider-identifying.
 """
 from fastapi import APIRouter, Request
 
@@ -26,12 +27,41 @@ _PROVENANCE = {
         "Rows missing a billing or servicing NPI are excluded (they carry inflated capitation).",
     ],
     "medicare_proxy_note": (
-        "One signal — diagnosis_procedure_mismatch — uses the CMS Medicare MUP file as a "
-        "diagnosis denominator (Medicaid claims carry no diagnoses). It is a supplementary "
-        "proxy that only applies to providers with a Medicare panel and abstains (contributes "
-        "nothing) otherwise. All other signals run on the real Medicaid data above."
+        "None. Every active signal runs on the real Medicaid data above. The one signal that "
+        "used a Medicare proxy (diagnosis_procedure_mismatch, which read chronic-condition "
+        "prevalence from the CMS Medicare MUP file as a stand-in for the diagnoses Medicaid "
+        "claims omit) was RETIRED on 2026-07-26: it fired on 2 of 106,660 scanned providers, "
+        "and no MFI finding should rest on another payer's population."
+    ),
+    "all_data_public": True,
+    "public_data_note": (
+        "Every dataset behind this tool is public, free, and requires no data-use agreement. "
+        "MFI holds no PHI and no beneficiary-level records — all analysis is provider-level "
+        "aggregate. Any finding here can be re-derived by anyone from the same public files."
     ),
     "enrichment_sources": ["NPPES (provider identity/taxonomy)", "OIG LEIE exclusions", "SAM.gov exclusions", "CMS Open Payments"],
+}
+
+# What this tool structurally CANNOT see. Published for the same reason the
+# signals are: a tipster's credibility depends on being explicit about the
+# limits of the evidence, and a reviewer should not have to infer them.
+_OUT_OF_SCOPE = {
+    "note": (
+        "These fraud types are not unimplemented — they are undetectable from public data. "
+        "The public Medicaid file is pre-aggregated to billing NPI x HCPCS x month, so "
+        "within-claim detail (line items, modifiers, service dates, ordering/referring NPI) "
+        "does not exist in any dataset MFI can lawfully obtain. The only line-level source "
+        "(T-MSIS/TAF via ResDAC) requires IRB approval, a HIPAA waiver and an institutional "
+        "signatory. MFI detects provider-level patterns and claims nothing beyond that."
+    ),
+    "cannot_detect": [
+        "Unbundling — billing component codes separately instead of the bundled code.",
+        "Duplicate billing — the same service billed twice on one or more claims.",
+        "Line-item upcoding — a single service billed at a higher-intensity code.",
+        "Modifier abuse (e.g. -25, -59) — modifiers are not published in this dataset.",
+        "Phantom referrals — no ordering or referring NPI is published.",
+        "Anything requiring a diagnosis — Medicaid claims here carry no diagnosis codes.",
+    ],
 }
 
 _COMPOSITE_NOTE = (
@@ -62,6 +92,7 @@ async def get_methods(request: Request) -> dict:
     precision_by_signal = {s["signal"]: s for s in fb.get("signal_stats", [])}
 
     signals = []
+    retired = []
     for sig, meta in _SIGNAL_META.items():
         entry = {
             "signal": sig,
@@ -69,6 +100,14 @@ async def get_methods(request: Request) -> dict:
             "explanation": meta.get("explanation", ""),
             "citations": meta.get("citations", []),
         }
+        # A retired signal keeps its entry (historical flags must still explain
+        # themselves) but must never be counted as active — signal_count is a
+        # public claim about what this tool currently does.
+        if meta.get("retired"):
+            entry["retired"] = meta["retired"]
+            entry["retired_reason"] = meta.get("retired_reason", "")
+            retired.append(entry)
+            continue
         if authed:
             stats = precision_by_signal.get(sig) or {}
             # measured-precision block (None until enough analyst dispositions exist)
@@ -80,10 +119,13 @@ async def get_methods(request: Request) -> dict:
         signals.append(entry)
 
     signals.sort(key=lambda s: s["label"])
+    retired.sort(key=lambda s: s["label"])
     result = {
         "signal_count": len(signals),
         "signals": signals,
+        "retired_signals": retired,
         "provenance": _PROVENANCE,
+        "out_of_scope": _OUT_OF_SCOPE,
         "composite_methodology": _COMPOSITE_NOTE,
     }
     if authed:

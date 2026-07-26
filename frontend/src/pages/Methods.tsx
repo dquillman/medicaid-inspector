@@ -43,10 +43,28 @@ export default function Methods() {
               </ul>
             </div>
             <p className="text-xs text-ink-tertiary border-l-2 border-filament-dim pl-3">{data.provenance.medicare_proxy_note}</p>
+            {data.provenance.public_data_note && (
+              <p className="text-xs text-ink-secondary border-l-2 border-threat-clear/50 pl-3">
+                <span className="text-threat-clear font-semibold">All data is public. </span>
+                {data.provenance.public_data_note}
+              </p>
+            )}
             <p className="text-xs text-ink-tertiary">
               <span className="text-ink-secondary">Enrichment:</span> {data.provenance.enrichment_sources.join(' · ')}
             </p>
           </div>
+
+          {/* What this tool cannot detect — published for the same credibility
+              reason as the signals themselves. */}
+          {data.out_of_scope && (
+            <div className="card space-y-3">
+              <h2 className="text-base font-display font-semibold text-ink-primary">What This Tool Cannot Detect</h2>
+              <p className="text-sm text-ink-secondary leading-relaxed">{data.out_of_scope.note}</p>
+              <ul className="text-xs text-ink-tertiary space-y-1 list-disc pl-5">
+                {data.out_of_scope.cannot_detect.map((c, i) => <li key={i}>{c}</li>)}
+              </ul>
+            </div>
+          )}
 
           {/* Composite methodology */}
           <div className="card">
@@ -69,15 +87,15 @@ export default function Methods() {
                         precision <span className="text-threat-clear font-semibold">{(s.precision * 100).toFixed(0)}%</span>
                         <span className="text-ink-tertiary"> (n={s.sample_size})</span>
                       </span>
-                    ) : (
+                    ) : 'precision' in s ? (
                       <span className="shrink-0 text-[10px] font-mono uppercase tracking-wider text-ink-tertiary">precision: not yet measured</span>
-                    )}
+                    ) : null}
                   </div>
                   <p className="text-xs text-ink-tertiary mt-1.5 leading-relaxed">{s.explanation}</p>
                   {s.citations.length > 0 && (
                     <p className="text-[11px] font-mono text-filament-dim mt-2">{s.citations.join(' · ')}</p>
                   )}
-                  {s.weight_adjustment < 1 && (
+                  {s.weight_adjustment != null && s.weight_adjustment < 1 && (
                     <p className="text-[10px] text-threat-medium mt-1.5">
                       Auto-dampened to {(s.weight_adjustment * 100).toFixed(0)}% weight (low measured precision)
                     </p>
@@ -87,11 +105,41 @@ export default function Methods() {
             </div>
           </div>
 
-          <p className="text-[11px] text-ink-tertiary">
-            Precision figures derive from {data.feedback_totals.dispositions.toLocaleString()} analyst dispositions
-            ({data.feedback_totals.true_positive_signal_hits.toLocaleString()} confirmed / {data.feedback_totals.false_positive_signal_hits.toLocaleString()} cleared signal hits).
-            Scores are a relative ranking, not a calibrated fraud probability.
-          </p>
+          {/* Retired signals — listed, not hidden. A signal we stopped trusting
+              is part of the methodology, and cached flags still reference it. */}
+          {data.retired_signals?.length > 0 && (
+            <div>
+              <h2 className="text-base font-display font-semibold text-ink-primary mb-1">Retired Signals</h2>
+              <p className="text-xs text-ink-tertiary mb-3 leading-relaxed">
+                No longer scored. Listed because older cases may still carry these flags, and because
+                what a detector stopped believing is as much a part of the method as what it believes.
+              </p>
+              <div className="space-y-3">
+                {data.retired_signals.map((s) => (
+                  <div key={s.signal} className="card opacity-70">
+                    <div className="flex items-start justify-between gap-4">
+                      <h3 className="text-sm font-semibold text-ink-secondary line-through decoration-ink-tertiary/60">{s.label}</h3>
+                      <span className="shrink-0 text-[10px] font-mono uppercase tracking-wider px-2 py-0.5 rounded-full border border-ink-tertiary/40 text-ink-tertiary">
+                        retired {s.retired}
+                      </span>
+                    </div>
+                    {s.retired_reason && (
+                      <p className="text-xs text-threat-medium mt-1.5 leading-relaxed">{s.retired_reason}</p>
+                    )}
+                    <p className="text-xs text-ink-tertiary mt-1.5 leading-relaxed">{s.explanation}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {data.feedback_totals && (
+            <p className="text-[11px] text-ink-tertiary">
+              Precision figures derive from {data.feedback_totals.dispositions.toLocaleString()} analyst dispositions
+              ({data.feedback_totals.true_positive_signal_hits.toLocaleString()} confirmed / {data.feedback_totals.false_positive_signal_hits.toLocaleString()} cleared signal hits).
+              Scores are a relative ranking, not a calibrated fraud probability.
+            </p>
+          )}
         </>
       )}
     </div>

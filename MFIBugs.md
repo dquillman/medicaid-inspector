@@ -68,7 +68,33 @@ Handoff spec of 6 items reviewed and actioned.
 - **Severity:** medium
 - **Area:** Fraud Brain / data
 - **Detail:** Brain reasons only over provider-summary and HCPCS-summary aggregates; no raw claim-line data exists in MFI. Build a pipeline to ingest claim-level detail to enable finer patterns (unbundling, duplicate billing, line-item upcoding). Large roadmap item - requires a claim-line data source MFI does not currently have. Not buildable without a source extract.
-- **Status:** OPEN (roadmap — blocked on data source)
+- **Status:** **WONTFIX (2026-07-26)** — closed as permanently blocked, not deferred.
+
+  **Why this is not a roadmap item.** MFI is built entirely on public, DUA-free data
+  (see `/methods`). Claim-line detail is not withheld from MFI by effort or priority —
+  it does not exist in any dataset MFI can lawfully obtain:
+
+  * **HHS Medicaid Provider Spending** (the payment backbone, 227M rows) is published
+    pre-aggregated to `billing NPI × HCPCS × month`. There is no line detail, no
+    modifier field, no ordering/referring NPI, no service date, no beneficiary key.
+    Unbundling, duplicate-line billing and line-item upcoding are all *within-claim*
+    patterns — the grain needed to see them was collapsed before publication.
+  * **T-MSIS/TAF RIF via ResDAC** does carry line detail, and is the only real source.
+    It requires an IRB approval, a HIPAA waiver, an organizational signatory and
+    five-figure fees. It is not obtainable by an individual, at any price.
+  * **Verified dead ends** (researched 2026-06-13, do not re-propose): SDUD is
+    state × NDC × quarter with no NPI; state "checkbook" portals exclude Medicaid
+    provider payments by statute (SSA 1902(a)(7), 42 CFR Part 431); APCDs cover about
+    half the states and are DUA/fee-gated.
+
+  **Consequence, stated plainly:** unbundling, duplicate billing and line-item
+  upcoding are permanently out of scope for MFI. The app detects *provider-level*
+  patterns — concentration, ramp, ghost billing, bust-out, per-se exclusion — and
+  should not imply otherwise in narratives or marketing.
+
+  Reopen only if a genuinely public, line-level Medicaid extract is released. Acquiring
+  restricted data would forfeit the property that makes every MFI referral verifiable by
+  the recipient against the same public files.
 
 ### Brain flag / high-risk parity on Claim Patterns + Billing Codes
 - **Logged:** 2026-07-09 16:08 UTC (via HAL)

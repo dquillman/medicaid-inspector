@@ -222,6 +222,15 @@ _SIGNAL_META: dict[str, dict] = {
     },
     "diagnosis_procedure_mismatch": {
         "label": "Diagnosis-Procedure Mismatch",
+        # RETIRED 2026-07-26 — kept so the 2 historical flags in the cache still
+        # render a label, citation and explanation. /methods lists it under
+        # retired signals, not active ones. See anomaly_detector for the why.
+        "retired": "2026-07-26",
+        "retired_reason": (
+            "Fired on 2 of 106,660 scanned providers and was the only signal that "
+            "leaned on Medicare data to judge Medicaid claims. Retired so every "
+            "active signal reasons over real Medicaid billing."
+        ),
         "explanation": (
             "A condition-specific procedure code drives a material share of this "
             "provider's Medicaid billing, but the provider's Medicare beneficiary "

@@ -1792,11 +1792,15 @@ export interface MethodSignal {
   label: string
   explanation: string
   citations: string[]
-  precision: number | null
-  true_positives: number
-  false_positives: number
-  sample_size: number
-  weight_adjustment: number
+  // Precision block is authed-only — absent for public callers.
+  precision?: number | null
+  true_positives?: number
+  false_positives?: number
+  sample_size?: number
+  weight_adjustment?: number
+  // Present only on retired signals (kept so historical flags still explain themselves).
+  retired?: string
+  retired_reason?: string
 }
 export interface MethodsProvenance {
   core_dataset: string
@@ -1805,14 +1809,23 @@ export interface MethodsProvenance {
   free_and_dua_free: boolean
   known_limits: string[]
   medicare_proxy_note: string
+  all_data_public: boolean
+  public_data_note: string
   enrichment_sources: string[]
+}
+export interface MethodsOutOfScope {
+  note: string
+  cannot_detect: string[]
 }
 export interface MethodsResponse {
   signal_count: number
   signals: MethodSignal[]
+  retired_signals: MethodSignal[]
   provenance: MethodsProvenance
+  out_of_scope: MethodsOutOfScope
   composite_methodology: string
-  feedback_totals: {
+  // Authed-only — /methods is a public endpoint and omits this for anonymous callers.
+  feedback_totals?: {
     dispositions: number
     true_positive_signal_hits: number
     false_positive_signal_hits: number

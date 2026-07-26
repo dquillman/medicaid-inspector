@@ -274,7 +274,8 @@ function MupCacheCard() {
           </button>
         </div>
         <p className="text-xs text-ink-tertiary ml-5">
-          Powers the diagnosis_procedure_mismatch signal during batch scans.
+          Optional. Feeds no risk score — the signal it powered was retired 2026-07-26.
+          Backs only the advisory Medicare diagnosis-mix lookup on a provider page.
         </p>
       </div>
     )

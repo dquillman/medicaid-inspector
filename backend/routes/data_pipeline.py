@@ -233,7 +233,9 @@ async def mup_status():
 async def mup_refresh():
     """Download CMS MUP-by-Provider CSV → parquet (background task).
 
-    Powers the diagnosis_procedure_mismatch signal during batch scans.
+    No longer feeds any scored signal — diagnosis_procedure_mismatch was retired
+    on 2026-07-26. The cache now backs only the advisory /providers/{npi}/diagnoses
+    lookup (Medicare chronic-condition mix, for analyst context). Optional.
     Re-running this fetches the latest annual MUP release.
     """
     import asyncio

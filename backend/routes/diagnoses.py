@@ -16,11 +16,14 @@ router = APIRouter(prefix="/api/providers", tags=["diagnoses"], dependencies=[De
 
 @router.get("/{npi}/diagnoses")
 async def provider_diagnoses(npi: str):
-    """Per-provider diagnosis mix + diagnosis-procedure mismatch signal.
+    """Per-provider Medicare diagnosis mix — an ADVISORY lookup, not a scored signal.
 
     - Returns 25 chronic-condition prevalence percentages from CMS MUP-by-Provider.
-    - Computes the `diagnosis_procedure_mismatch` fraud signal by joining the
-      provider's top HCPCS codes against Medicare chronic-condition prevalence.
+    - Still computes `diagnosis_procedure_mismatch` for the analyst to eyeball, but
+      that signal was RETIRED on 2026-07-26 and no longer contributes to any risk
+      score (it fired on 2 of 106,660 providers and read Medicare data to judge
+      Medicaid claims). The response marks it `scored: false` so nothing downstream
+      — or any reader — mistakes it for a live finding.
 
     Returns has_data=False for providers not present in Medicare data
     (most Medicaid-only providers won't appear in MUP).
@@ -57,4 +60,11 @@ async def provider_diagnoses(npi: str):
         "has_data": True,
         **summarize_provider(row),
         "mismatch_signal": mismatch,
+        "mismatch_scored": False,
+        "mismatch_note": (
+            "Advisory only — the diagnosis_procedure_mismatch signal was retired on "
+            "2026-07-26 and contributes nothing to this provider's risk score. These "
+            "are MEDICARE beneficiaries; do not cite them as evidence about Medicaid "
+            "claims in a referral."
+        ),
     }
