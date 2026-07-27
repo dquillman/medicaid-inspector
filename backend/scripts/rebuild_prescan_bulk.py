@@ -83,6 +83,27 @@ async def main():
     npis = [p["npi"] for p in slim_provs if p.get("npi")]
     scan_progress = slim.get("scan_progress", {})
     print(f"  {len(npis):,} NPIs")
+
+    # Fold in the missing-provider top-up (missing_npis.json — the dollar-rank
+    # gap plus per-se leads below the old cutoff). The in-app button cannot do
+    # this reliably: it runs as a background task on Cloud Run, a background
+    # task is not traffic, so the instance gets reclaimed on a long idle scan
+    # and the whole run is lost (observed twice, 2026-07-26 and overnight
+    # 2026-07-27). Locally it is one extra INNER JOIN on an already-running
+    # scan, and it persists because the workstation is not going anywhere.
+    _missing_path = _BACKEND / "missing_npis.json"
+    if _missing_path.exists():
+        try:
+            _m = json.loads(_missing_path.read_text(encoding="utf-8"))
+            _have = set(npis)
+            _add = [n for n in _m.get("npis", []) if n not in _have]
+            if _add:
+                npis.extend(_add)
+                print(f"  + {len(_add):,} missing providers "
+                      f"({len(_m.get('rank_gap', [])):,} rank-gap, "
+                      f"{len(_m.get('perse', [])):,} per-se) -> {len(npis):,} total")
+        except (OSError, ValueError) as e:
+            print(f"  WARN: missing_npis.json unreadable ({e}) — scanning the cache list only")
     print()
 
     # One DuckDB connection used for all three big queries — keeping the
