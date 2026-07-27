@@ -145,6 +145,46 @@ def test_remote_deployment_without_artifact_says_so_instead_of_querying():
     assert "artifact" in (r.get("note") or "").lower()
 
 
+def test_scan_results_survive_a_restart(tmp_path):
+    """The bug that ate a whole scan (2026-07-27).
+
+    On Cloud Run nothing wrote prescan_slim.json — the file prod reloads on
+    every start. append_prescanned keeps providers in MEMORY, save_to_disk
+    writes prescan_cache.json (1.5GB, deliberately not GCS-synced), and
+    sync_after_scan uploaded a slim file nobody had touched. 11,296 scored
+    providers vanished at the next container recycle with no error anywhere.
+    """
+    import json
+    import core.store as st
+
+    scanned = {
+        "npi": "1234567890", "total_paid": 900_000.0, "risk_score": 12.3,
+        "specialty": "Home Health Agency", "top_hcpcs": "T1019",
+        "nppes": {"address": {"line1": "1 MAIN ST", "zip": "75001"}},
+        "flags": [{"signal": "billing_concentration", "flagged": True},
+                  {"signal": "ghost_billing", "flagged": False}],
+        # Bulk arrays a scan produces — must NOT reach the slim file.
+        "hcpcs": [{"c": i} for i in range(500)],
+        "timeline": [{"m": i} for i in range(84)],
+        "signal_results": [{"s": i} for i in range(15)],
+    }
+    slim = tmp_path / "prescan_slim.json"
+    with patch.object(st, "_SLIM_FILE", slim), \
+         patch.object(st, "prescanned_providers", [scanned]):
+        assert st.save_slim_to_disk() is True
+
+    rec = json.loads(slim.read_text(encoding="utf-8"))["providers"][0]
+    assert rec["npi"] == "1234567890"
+    assert rec["risk_score"] == 12.3
+    # NPPES enrichment must survive — three signals depend on it.
+    assert rec["nppes"]["address"]["line1"] == "1 MAIN ST"
+    # Only FLAGGED signals; flag_count agrees with the list.
+    assert rec["flag_count"] == 1 and len(rec["flags"]) == 1
+    # The 1.4GB-vs-80MB difference.
+    for bulk in ("hcpcs", "timeline", "signal_results"):
+        assert bulk not in rec, f"{bulk} leaked into the slim cache"
+
+
 def test_preview_endpoint_requires_auth(client):
     assert client.get("/api/prescan/missing").status_code in (401, 403)
     assert client.post("/api/prescan/scan-missing").status_code in (401, 403)

@@ -70,6 +70,55 @@ def save_to_disk() -> None:
         print(f"[store] Could not save cache: {e}")
 
 
+_SLIM_FILE = pathlib.Path(__file__).parent.parent / "prescan_slim.json"
+
+# The slim projection. Everything a scan produces beyond this — `hcpcs`,
+# `timeline`, the full `signal_results` — is deliberately dropped: those are
+# per-provider arrays that turn an 80MB file into a 1.4GB one.
+_SLIM_FIELDS = (
+    "npi", "total_paid", "total_claims", "total_beneficiaries", "distinct_hcpcs",
+    "active_months", "first_month", "last_month", "risk_score",
+    "claims_per_beneficiary", "revenue_per_beneficiary", "top_hcpcs",
+    "provider_name", "specialty", "state", "city", "zip", "nppes",
+)
+
+
+def save_slim_to_disk() -> bool:
+    """Write the in-memory cache back to prescan_slim.json.
+
+    THE FILE PROD ACTUALLY SERVES. Before this existed there was no durable
+    write path for scan results on Cloud Run at all: append_prescanned() keeps
+    providers in memory, save_to_disk() writes prescan_cache.json (1.5GB,
+    deliberately excluded from GCS sync because it OOMs the container), and
+    sync_after_scan() uploaded a prescan_slim.json that nothing had modified.
+    Measured 2026-07-27 on prod: the missing-provider top-up scored 11,296
+    providers, the container recycled, and the reload came back with the
+    original 106,660 — every one of them gone, with no error anywhere.
+
+    Returns True on success. Callers sync to GCS separately.
+    """
+    try:
+        with _store_lock:
+            rows = []
+            for p in prescanned_providers:
+                if not p.get("npi"):
+                    continue
+                rec = {k: p[k] for k in _SLIM_FIELDS if p.get(k) is not None}
+                flags = [f for f in (p.get("flags") or []) if f.get("flagged")]
+                rec["flags"] = flags
+                rec["flag_count"] = len(flags)
+                rows.append(rec)
+            payload = {"providers": rows, "scan_progress": scan_progress}
+            if prescan_status:
+                payload["prescan_status"] = prescan_status
+        atomic_write_json(_SLIM_FILE, payload)
+        print(f"[store] Saved slim cache: {len(rows):,} providers")
+        return True
+    except Exception as e:
+        print(f"[store] Could not save slim cache: {e}")
+        return False
+
+
 def load_from_disk(filename: str = "prescan_cache.json") -> bool:
     from core.config import settings
     global prescanned_providers, scan_progress, _npi_index, _last_loaded_at, _last_loaded_filename

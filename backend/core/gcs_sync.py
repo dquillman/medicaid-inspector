@@ -345,7 +345,12 @@ async def sync_after_scan():
     import os as _os
     _is_cloud_run = _os.environ.get("K_SERVICE") is not None
     if _is_cloud_run:
-        # Cloud Run uses the slim index — upload both slim and full if they exist
+        # Cloud Run serves the slim index. WRITE it before uploading: nothing
+        # else does, so this used to upload the same file the container started
+        # with and every scan result died at the next recycle (measured
+        # 2026-07-27 — 11,296 scored providers lost silently).
+        from core.store import save_slim_to_disk
+        await asyncio.to_thread(save_slim_to_disk)
         await asyncio.to_thread(upload_file, "prescan_slim.json")
     else:
         await asyncio.to_thread(upload_file, "prescan_cache.json")
