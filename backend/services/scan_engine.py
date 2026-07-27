@@ -828,27 +828,57 @@ def start_smart_scan(state_filter: Optional[str]) -> str:
 # signals alone, and the tail cannot fire bene_concentration at all (its maximum
 # claims/bene is 10.4 against a threshold of 15).
 
+# Precomputed by scripts/build_missing_npis.py, GCS-synced. Prod MUST read
+# this file: computing the rank gap live means a GROUP-BY over all 227M rows,
+# which the workstation does in ~60s and prod's remote parquet cannot do at
+# all — the preview endpoint 503'd after 38s (measured 2026-07-26) and the
+# button silently hid itself because its data never arrived.
+_MISSING_ARTIFACT = __import__("pathlib").Path(__file__).resolve().parent.parent / "missing_npis.json"
+
+
 async def compute_missing_npis() -> dict:
-    """Which providers belong in the cache but are not in it. Read-only."""
+    """Which providers belong in the cache but are not in it. Read-only.
+
+    Artifact-first: the heavy diff was computed offline against the local
+    parquet. Every NPI is re-checked against the LIVE cache here, so a stale
+    artifact over-lists but never double-scans — already-cached NPIs drop out.
+    Falls back to the live query only when the dataset is local (workstation).
+    """
     cached = {p.get("npi") for p in get_prescanned() if p.get("npi")}
     if not cached:
         return {"rank_gap": [], "perse": [], "npis": [], "cached": 0,
                 "note": "Scan cache is empty - run a normal scan first."}
 
-    # Top-N by spend, N = current cache size. Anything in there we have not
-    # scanned is the rank gap.
-    rows = await query_async(provider_aggregate_sql(limit=len(cached), offset=0), ())
-    rank_gap = [r["npi"] for r in rows if r.get("npi") and r["npi"] not in cached]
-
+    rank_gap: list[str] = []
     perse: list[str] = []
-    try:
-        from core import perse_store
-        perse = [
-            r["npi"] for r in perse_store.list_leads(limit=100_000)["leads"]
-            if r.get("in_scan_cache") is False and r.get("npi")
-        ]
-    except Exception as e:  # noqa: BLE001 - a missing sweep must not block the top-up
-        log.warning("[missing] per-se sweep unavailable: %s", e)
+    if _MISSING_ARTIFACT.exists():
+        try:
+            import json as _json
+            art = _json.loads(_MISSING_ARTIFACT.read_text(encoding="utf-8"))
+            rank_gap = [n for n in art.get("rank_gap", []) if n not in cached]
+            perse = [n for n in art.get("perse", []) if n not in cached]
+        except (OSError, ValueError) as e:
+            log.warning("[missing] artifact unreadable (%s) — falling back", e)
+            rank_gap = []
+    if not rank_gap and not perse:
+        if not is_local():
+            # No artifact and no local parquet: the live diff would 503 on the
+            # remote dataset. Say so instead of hanging the request.
+            return {"rank_gap": [], "perse": [], "npis": [], "cached": len(cached),
+                    "note": ("No missing-provider artifact on this deployment. Run "
+                             "scripts/build_missing_npis.py and upload missing_npis.json.")}
+        # Local fallback: top-N by spend, N = current cache size. Anything in
+        # there we have not scanned is the rank gap.
+        rows = await query_async(provider_aggregate_sql(limit=len(cached), offset=0), ())
+        rank_gap = [r["npi"] for r in rows if r.get("npi") and r["npi"] not in cached]
+        try:
+            from core import perse_store
+            perse = [
+                r["npi"] for r in perse_store.list_leads(limit=100_000)["leads"]
+                if r.get("in_scan_cache") is False and r.get("npi")
+            ]
+        except Exception as e:  # noqa: BLE001 - a missing sweep must not block the top-up
+            log.warning("[missing] per-se sweep unavailable: %s", e)
 
     npis = list(dict.fromkeys([*rank_gap, *perse]))  # dedupe, keep rank-gap order
     npis = [n for n in npis if n not in cached]

@@ -35,14 +35,24 @@ class _FakePerse:
         return {"leads": cls.leads}
 
 
-def _run(cache, top_n, perse_leads, perse=None):
+import pathlib
+
+
+def _run(cache, top_n, perse_leads, perse=None, artifact: pathlib.Path | None = None):
     """`from core import perse_store` resolves the ATTRIBUTE on the core package,
-    so patching sys.modules does not intercept it — patch the attribute."""
+    so patching sys.modules does not intercept it — patch the attribute.
+
+    The artifact path is redirected away from the developer's real
+    missing_npis.json; pass `artifact` to point at a synthetic one. is_local is
+    forced True so the live-query fallback stays reachable in tests."""
     import core
     _FakePerse.leads = perse_leads
     with patch.object(se, "get_prescanned", lambda: cache), \
          patch.object(se, "query_async",
                       lambda *a, **k: asyncio.sleep(0, result=top_n)), \
+         patch.object(se, "_MISSING_ARTIFACT",
+                      artifact or pathlib.Path("does-not-exist-missing.json")), \
+         patch.object(se, "is_local", lambda: True), \
          patch.object(core, "perse_store", perse if perse is not None else _FakePerse):
         return asyncio.run(se.compute_missing_npis())
 
@@ -98,6 +108,41 @@ def test_empty_cache_is_reported_not_crashed():
     r = _run([], [], [])
     assert r["npis"] == []
     assert "empty" in (r.get("note") or "").lower()
+
+
+def test_artifact_is_preferred_and_rechecked_against_the_live_cache(tmp_path):
+    """Prod cannot run the live diff (the remote-parquet query 503'd — that is
+    why the artifact exists). The artifact must be used when present, and every
+    NPI re-checked against the CURRENT cache so a stale artifact over-lists but
+    never double-scans."""
+    import json
+    art = tmp_path / "missing_npis.json"
+    art.write_text(json.dumps({
+        "rank_gap": ["2222222222", "1000000000"],   # second one is now cached
+        "perse": ["2444444444"],
+    }), encoding="utf-8")
+    r = _run(_cache(3), [], [], artifact=art)   # top_n empty: query must NOT be needed
+    assert r["rank_gap"] == ["2222222222"]
+    assert r["perse"] == ["2444444444"]
+    assert r["npis"] == ["2222222222", "2444444444"]
+
+
+def test_remote_deployment_without_artifact_says_so_instead_of_querying():
+    """On the remote dataset the live diff is the thing that 503'd. With no
+    artifact it must return an explanation, not attempt the query."""
+    import core
+
+    async def _boom(*a, **k):
+        raise AssertionError("live diff must not run on a remote deployment")
+
+    with patch.object(se, "get_prescanned", lambda: _cache(2)), \
+         patch.object(se, "query_async", _boom), \
+         patch.object(se, "_MISSING_ARTIFACT", pathlib.Path("absent-missing.json")), \
+         patch.object(se, "is_local", lambda: False), \
+         patch.object(core, "perse_store", _FakePerse):
+        r = asyncio.run(se.compute_missing_npis())
+    assert r["npis"] == []
+    assert "artifact" in (r.get("note") or "").lower()
 
 
 def test_preview_endpoint_requires_auth(client):

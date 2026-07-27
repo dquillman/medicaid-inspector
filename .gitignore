@@ -95,6 +95,7 @@ backend/npi_deactivations.json
 # full of real NPIs, GCS is the source of truth (same as npi_deactivations.json)
 backend/npi_deactivation_windows.json
 backend/perse_leads.json
+backend/missing_npis.json
 backend/oig_tips.json
 backend/hal_bugs.json
 backend/prescan_slim.json

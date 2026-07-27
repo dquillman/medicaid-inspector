@@ -41,6 +41,7 @@ _SYNC_FILES = [
     "npi_deactivations.json", # deactivated-NPI lookup (dead_npi_billing signal)
     "npi_deactivation_windows.json",  # deactivated-then-reactivated NPIs {npi: [deact, react]}
     "perse_leads.json",       # per-se sweep over ALL 617k billing NPIs, not just the scanned 106k
+    "missing_npis.json",      # rank-gap + per-se NPIs the "Add missing" button scans (built offline)
     "notifications.json",
     "saved_searches.json",
     "referrals.json",
