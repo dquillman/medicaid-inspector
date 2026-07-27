@@ -72,11 +72,40 @@ def reload() -> None:
     _load()
 
 
+def _scanned_npis() -> set[str]:
+    """NPIs in the scan cache RIGHT NOW.
+
+    `in_scan_cache` inside perse_leads.json is a BUILD-TIME snapshot, and it
+    goes stale the moment those providers are scanned. It did: after the
+    2026-07-27 top-up the board still announced "379 leads the risk model
+    can't see" and the Excluded table still badged them UNSCANNED, while all
+    379 were sitting in the cache with risk scores. Overlaying the live set
+    means the file can age without the UI ever lying about it.
+    """
+    try:
+        from core.store import get_prescanned
+        return {p.get("npi") for p in get_prescanned() if p.get("npi")}
+    except Exception:  # noqa: BLE001 — never let this break a lead listing
+        return set()
+
+
+def _with_live_scan_state(rows: list[dict], scanned: set[str]) -> list[dict]:
+    """Copy each row with in_scan_cache resolved against the live cache.
+    Falls back to the stored value when the cache is unavailable (empty set)."""
+    if not scanned:
+        return rows
+    return [{**r, "in_scan_cache": r.get("npi") in scanned} for r in rows]
+
+
 def get_lead(npi: str) -> dict | None:
     """The per-se lead for this NPI, or None. Used to badge a provider page."""
     if not _loaded:
         _load()
-    return _by_npi.get(npi)
+    row = _by_npi.get(npi)
+    if row is None:
+        return None
+    scanned = _scanned_npis()
+    return {**row, "in_scan_cache": npi in scanned} if scanned else row
 
 
 def list_leads(kind: str | None = None, outside_scan_cache: bool | None = None,
@@ -84,7 +113,7 @@ def list_leads(kind: str | None = None, outside_scan_cache: bool | None = None,
     """Filtered slice of the sweep, already ranked worst-first by the builder."""
     if not _loaded:
         _load()
-    rows = _payload.get("leads", [])
+    rows = _with_live_scan_state(_payload.get("leads", []), _scanned_npis())
     if kind:
         rows = [r for r in rows if r.get("kind") == kind]
     if outside_scan_cache is not None:
@@ -99,14 +128,34 @@ def list_leads(kind: str | None = None, outside_scan_cache: bool | None = None,
 
 
 def get_summary() -> dict:
-    """Counts + dollars by kind, and how stale the sweep is."""
+    """Counts + dollars by kind, and how stale the sweep is.
+
+    by_kind is RECOMPUTED from the live scan state rather than read from the
+    file's stored summary block — that block carries the same build-time
+    in_scan_cache the rows do, so it drifts the same way.
+    """
     if not _loaded:
         _load()
+    scanned = _scanned_npis()
+    by_kind: dict[str, dict] = {}
+    for r in _with_live_scan_state(_payload.get("leads", []), scanned):
+        k = by_kind.setdefault(r.get("kind", "unknown"), {
+            "count": 0, "total_paid": 0.0,
+            "outside_scan_cache": 0, "outside_scan_cache_paid": 0.0})
+        paid = float(r.get("total_paid") or 0)
+        k["count"] += 1
+        k["total_paid"] += paid
+        if r.get("in_scan_cache") is False:
+            k["outside_scan_cache"] += 1
+            k["outside_scan_cache_paid"] += paid
+    for k in by_kind.values():
+        k["total_paid"] = round(k["total_paid"], 2)
+        k["outside_scan_cache_paid"] = round(k["outside_scan_cache_paid"], 2)
     return {
         "generated_at": _payload.get("generated_at"),
-        "scanned_npis": _payload.get("scanned_npis"),
+        "scanned_npis": len(scanned) or _payload.get("scanned_npis"),
         "total_leads": len(_by_npi),
-        "by_kind": _payload.get("summary", {}),
+        "by_kind": by_kind or _payload.get("summary", {}),
         "available": bool(_by_npi),
     }
 

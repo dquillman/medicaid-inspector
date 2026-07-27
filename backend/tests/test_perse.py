@@ -19,7 +19,13 @@ def sweep(tmp_path, monkeypatch):
 
     Deliberately mixes a lead INSIDE the scan cache with two OUTSIDE it — the
     outside ones are the whole reason this feature exists.
+
+    Also sets the LIVE scan cache to match, because in_scan_cache is resolved
+    against core.store rather than read from the file (the stored value is a
+    build-time snapshot that goes stale as soon as a top-up runs).
     """
+    import core.store as _store
+    monkeypatch.setattr(_store, "prescanned_providers", [{"npi": "1111111111"}])
     payload = {
         "generated_at": "2026-07-26T00:00:00Z",
         "scanned_npis": 106660,
@@ -66,6 +72,33 @@ def test_recovery_lead_is_not_reported_as_active_fraud(client, auth_headers, swe
     kinds = {x["kind"] for x in r.json()["leads"]}
     assert kinds == {"active_exclusion"}
     assert all(x["paid_after_exclusion"] > 0 for x in r.json()["leads"])
+
+
+def test_in_scan_cache_is_resolved_live_not_read_from_the_file(sweep, monkeypatch):
+    """The stored in_scan_cache is a BUILD-TIME snapshot. After the 2026-07-27
+    top-up scanned those providers, the board still announced "379 leads the
+    risk model can't see" and the table still badged them UNSCANNED — while all
+    379 were in the cache with risk scores. Resolve it against the live cache."""
+    import core.store as store
+
+    # The sweep fixture marks 2222222222 and 3333333333 as NOT cached.
+    # Put one of them in the live cache and it must flip.
+    monkeypatch.setattr(store, "prescanned_providers",
+                        [{"npi": "1111111111"}, {"npi": "2222222222"}])
+
+    rows = {r["npi"]: r for r in perse_store.list_leads(limit=100)["leads"]}
+    assert rows["2222222222"]["in_scan_cache"] is True, "stale flag served"
+    assert rows["3333333333"]["in_scan_cache"] is False, "genuinely unscanned lead lost"
+
+    # The filter must agree with the live state, not the file.
+    only_unseen = perse_store.list_leads(outside_scan_cache=True, limit=100)
+    assert [r["npi"] for r in only_unseen["leads"]] == ["3333333333"]
+
+    # And the per-kind summary must be recomputed, not read from the file block.
+    assert perse_store.get_summary()["by_kind"]["active_exclusion"]["outside_scan_cache"] == 0
+
+    # Single-lead lookup (provider-page badge) too.
+    assert perse_store.get_lead("2222222222")["in_scan_cache"] is True
 
 
 def test_summary_reports_how_many_leads_the_model_cannot_see(client, auth_headers, sweep):
