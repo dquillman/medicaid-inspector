@@ -122,6 +122,10 @@ class HalChatRequest(BaseModel):
     # token and share one tool-loop; only the voice differs. (House rule:
     # every HAL surface must offer the face switcher.)
     face: Literal["assistant", "hal", "jarvis"] = "hal"
+    # Which model answers (HAL_SPEC §3c). Validated server-side by
+    # core.hal_models.resolve_model, so an unknown id falls back to the default
+    # and the HAL_MODEL env pin always outranks whatever the browser sends.
+    model: Optional[str] = None
 
 
 # qcode endpoint per face, derived from HAL_URL (which points at .../api/hal).
@@ -171,16 +175,24 @@ _SLOW_MSG = (
 )
 
 
-async def _post_to_hal(url: str, messages: List[dict]) -> httpx.Response:
+async def _post_to_hal(url: str, messages: List[dict],
+                       model: Optional[str] = None) -> httpx.Response:
     """POST one turn to a qcode persona endpoint. Generous read timeout: a
     multi-tool answer is 2-8 Anthropic rounds plus MCP lookups and can exceed
-    60s when cold."""
+    60s when cold.
+
+    The model id is forwarded so Dave's pick survives the relay — qcode's routes
+    run it through the same resolveModel() contract (HAL_SPEC §3c), and qcode's
+    own HAL_MODEL pin still wins there."""
+    payload: dict = {"messages": messages}
+    if model:
+        payload["model"] = model
     async with httpx.AsyncClient(
         timeout=httpx.Timeout(connect=5.0, read=170.0, write=30.0, pool=30.0)
     ) as client:
         return await client.post(
             url,
-            json={"messages": messages},
+            json=payload,
             headers={"Authorization": f"Bearer {settings.HAL_TOKEN}"},
         )
 
@@ -217,7 +229,7 @@ async def hal_chat(req: HalChatRequest, user: dict = Depends(require_user)):
     if hal_expert.available():
         try:
             out = await hal_expert.run(
-                [m.model_dump() for m in req.messages][-20:], req.face, req.npi)
+                [m.model_dump() for m in req.messages][-20:], req.face, req.npi, req.model)
             return {"reply": out.get("reply", ""),
                     "actions": [{"name": n} for n in out.get("actions", [])],
                     "providers": out.get("providers", [])}
@@ -258,13 +270,13 @@ async def hal_chat(req: HalChatRequest, user: dict = Depends(require_user)):
 
     face_url = _face_url(req.face)
     try:
-        resp = await _post_to_hal(face_url, messages)
+        resp = await _post_to_hal(face_url, messages, req.model)
     except httpx.ConnectError:
         # HAL's brain (qcode) is down — try to bring it back, then retry once.
         state = await _ensure_qcode_running()
         if state == "up":
             try:
-                resp = await _post_to_hal(face_url, messages)
+                resp = await _post_to_hal(face_url, messages, req.model)
             except httpx.ConnectError:
                 raise HTTPException(
                     503, "HAL just started but isn't answering yet — try again in a moment."

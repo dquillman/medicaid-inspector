@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, type Dispatch, type SetStateA
 import { useLocation, useNavigate, Link } from 'react-router-dom'
 import { motion, AnimatePresence } from 'framer-motion'
 import { api, type HalAction, type HalProvider } from '../lib/api'
+import { HAL_MODELS, MODEL_STORAGE_KEY, getSelectedModel, type HalModelId } from '../lib/hal-models'
 import { buildReportSlideshow } from './halReport'
 
 // HAL slide-out — a global "Ask HAL" panel. HAL itself lives in the qcode ops
@@ -298,6 +299,19 @@ export default function HalPanel({
   })
   const faceRef = useRef<Face>(face)
   faceRef.current = face
+  // MODEL picker (HAL_SPEC §3c). Same ref trick as faceRef: `send` is memoised,
+  // so read the model at send time rather than closing over a stale value.
+  const [model, setModel] = useState<HalModelId>(getSelectedModel)
+  const modelRef = useRef<HalModelId>(model)
+  modelRef.current = model
+  const pickModel = (m: HalModelId) => {
+    setModel(m)
+    try {
+      localStorage.setItem(MODEL_STORAGE_KEY, m)
+    } catch {
+      /* storage blocked — the choice still applies for this session */
+    }
+  }
   const pickFace = (f: Face) => {
     window.speechSynthesis?.cancel()
     setFace(f)
@@ -475,6 +489,7 @@ export default function HalPanel({
           next.map((m) => ({ role: m.role, content: m.content })),
           npi ?? undefined,
           faceRef.current,
+          modelRef.current,
         )
         const reply = res.reply || '(no reply)'
         setMessages((m) => [...m, { role: 'assistant', content: reply, actions: res.actions, providers: res.providers }])
@@ -1020,6 +1035,25 @@ export default function HalPanel({
                 >
                   {voiceOn ? '🔊 Mute' : '🔇 Muted'}
                 </button>
+              </div>
+              {/* MODEL picker (HAL_SPEC §3c) — after the canonical PAUSE/MUTE set. */}
+              <div className="mt-2 flex items-center gap-2">
+                <span className="text-[10px] uppercase tracking-[0.14em] text-ink-ghost">Model:</span>
+                {HAL_MODELS.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => pickModel(m.id)}
+                    className={`rounded-lg border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider transition-colors ${
+                      m.id === model
+                        ? 'border-threat-critical/70 text-ink-primary'
+                        : 'border-hairline text-ink-ghost hover:border-threat-critical/40 hover:text-ink-secondary'
+                    }`}
+                    title={`${m.label} — ${m.note}`}
+                    aria-pressed={m.id === model}
+                  >
+                    {m.label}
+                  </button>
+                ))}
               </div>
               <p className="mt-1.5 px-1 text-[10px] text-ink-ghost">
                 HAL can make mistakes — verify figures before acting.

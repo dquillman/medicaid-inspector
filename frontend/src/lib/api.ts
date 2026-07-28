@@ -1302,13 +1302,20 @@ export const api = {
   // backend. `npi` is the provider the user is currently viewing, if any.
   halStatus: () => get<{ configured: boolean }>('/hal/status'),
 
-  halChat: (messages: HalChatMessage[], npi?: string, face?: HalFace) =>
+  // `model` is the id Dave picked in the panel (HAL_SPEC §3c). The backend
+  // validates it and lets its HAL_MODEL pin outrank it, so sending a bad value
+  // can only fall back to the default — never select an arbitrary model.
+  halChat: (messages: HalChatMessage[], npi?: string, face?: HalFace, model?: HalModelId) =>
     mutate<HalChatResponse>('POST', '/hal/chat', {
       messages,
       npi: npi ?? null,
       face: face ?? 'hal',
+      model: model ?? null,
     }),
 }
+
+export type { HalModelId } from './hal-models'
+import type { HalModelId } from './hal-models'
 
 export type HalFace = 'assistant' | 'hal' | 'jarvis'
 export type HalChatMessage = { role: 'user' | 'assistant'; content: string }

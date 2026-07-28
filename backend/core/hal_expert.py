@@ -32,7 +32,6 @@ from typing import List, Optional
 
 logger = logging.getLogger(__name__)
 
-MODEL = os.environ.get("HAL_MODEL", "claude-sonnet-5")
 MAX_TOOL_ROUNDS = 6
 
 # The Second Brain engine (deterministic retrieval). brain_ask shells out to it
@@ -278,9 +277,18 @@ def _collect_providers(result_str: str, into: dict) -> None:
     walk(data)
 
 
-async def run(messages: List[dict], face: str = "hal", npi: Optional[str] = None) -> dict:
-    """Run the local expert loop. Returns {reply, actions, providers}."""
+async def run(messages: List[dict], face: str = "hal", npi: Optional[str] = None,
+              model: Optional[str] = None) -> dict:
+    """Run the local expert loop. Returns {reply, actions, providers}.
+
+    `model` is the id the panel picked (HAL_SPEC §3c); resolve_model validates it
+    and lets the HAL_MODEL env pin outrank it.
+    """
     from anthropic import AsyncAnthropic
+
+    from core.hal_models import resolve_model
+
+    resolved = resolve_model(model)
 
     client = AsyncAnthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
     tools = _anthropic_tools()
@@ -291,7 +299,7 @@ async def run(messages: List[dict], face: str = "hal", npi: Optional[str] = None
 
     for _ in range(MAX_TOOL_ROUNDS):
         resp = await client.messages.create(
-            model=MODEL, max_tokens=1024, system=_system(face, npi),
+            model=resolved, max_tokens=1024, system=_system(face, npi),
             tools=tools, messages=convo,
         )
         tool_uses = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
