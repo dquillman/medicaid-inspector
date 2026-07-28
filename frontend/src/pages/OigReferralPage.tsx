@@ -48,7 +48,8 @@ export default function OigReferralPage() {
     staleTime: 5 * 60_000,
   })
   const autoNarrative = tip?.text ?? ''
-  const shortNarrative = tip?.short_narrative ?? ''
+  // The short narrative is only rendered inside formFields' "Describe the
+  // suspected fraud" row now — no standalone copy of it here.
   const guide = tip?.filing_guide
   const formFields = tip?.form_fields ?? []
 
@@ -193,16 +194,9 @@ export default function OigReferralPage() {
                 />
               )}
 
-              {shortNarrative && (
-                <CopyBlock
-                  text={shortNarrative}
-                  tone="secondary"
-                  rows={7}
-                  buttonLabel="Copy short version"
-                  title={<>Short version &mdash; for a small description field</>}
-                  subtitle={<>Same facts, condensed. Use this if space is tight.</>}
-                />
-              )}
+              {/* No standalone "short version" box: it held the exact same text
+                  as the "Describe the suspected fraud" row below, in the field
+                  answer sheet, which is already individually copyable there. */}
 
               {formFields.length > 0 && (
                 <div className="mt-1">

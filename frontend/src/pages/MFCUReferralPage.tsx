@@ -83,7 +83,8 @@ export default function MFCUReferralPage() {
     staleTime: 5 * 60_000,
   })
   const autoNarrative = referralNarrative?.text ?? ''
-  const shortNarrative = referralNarrative?.short_narrative ?? ''
+  // The short narrative is only rendered inside formFields' "Describe the
+  // suspected fraud" row now — no standalone copy of it here.
   const formFields = referralNarrative?.form_fields ?? []
 
   // Prefill jurisdiction + narrative once the provider/MFCU data lands, unless
@@ -401,18 +402,9 @@ export default function MFCUReferralPage() {
                 />
               )}
 
-              {/* Many state intake forms give ONE small textarea, not OIG's
-                  single big free-text box. Same data, condensed. */}
-              {shortNarrative && (
-                <CopyBlock
-                  text={shortNarrative}
-                  tone="secondary"
-                  rows={7}
-                  buttonLabel="Copy short version"
-                  title={<>Short version &mdash; for a small &ldquo;describe the fraud&rdquo; field</>}
-                  subtitle={<>Same facts, condensed. Use this if the state form has no room for the full narrative.</>}
-                />
-              )}
+              {/* No standalone "short version" box: it held the exact same text
+                  as the "Describe the suspected fraud" row below, in the field
+                  answer sheet, which is already individually copyable there. */}
 
               {/* Dave: don't make me mine the narrative for field values. */}
               {formFields.length > 0 && (
