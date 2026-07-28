@@ -101,6 +101,46 @@ def test_in_scan_cache_is_resolved_live_not_read_from_the_file(sweep, monkeypatc
     assert perse_store.get_lead("2222222222")["in_scan_cache"] is True
 
 
+def test_excluded_page_and_worklist_are_disjoint(sweep, monkeypatch):
+    """ONE rule decides which surface a provider belongs to.
+
+    Before this, the Providers list filtered OIG exclusions but not the
+    deactivated-NPI findings, so 343 providers sat in the worklist AND on the
+    Excluded page carrying a per-se finding. A provider must be in exactly one.
+    """
+    import core.oig_store as oig
+
+    # 1111111111 is an active_exclusion in the fixture; treat it as OIG-listed.
+    monkeypatch.setattr(oig, "is_excluded",
+                        lambda npi: (npi == "1111111111", {"name": "X"}))
+
+    # OIG-excluded -> Excluded page.
+    assert perse_store.is_on_excluded_page("1111111111") is True
+    # Deactivated-NPI finding -> also the Excluded page, which is the fix.
+    monkeypatch.setattr(perse_store, "_by_npi", {
+        **perse_store._by_npi,
+        "5555555555": {"npi": "5555555555", "kind": "deactivated_billing"},
+        "6666666666": {"npi": "6666666666", "kind": "deactivated_window"},
+    })
+    assert perse_store.is_on_excluded_page("5555555555") is True
+    assert perse_store.is_on_excluded_page("6666666666") is True
+    # A recovery lead is NOT a deactivation; it stays out unless OIG says so.
+    assert perse_store.is_on_excluded_page("3333333333") is False
+    # An ordinary provider stays in the worklist.
+    assert perse_store.is_on_excluded_page("9999999999") is False
+
+
+def test_worklist_filter_degrades_to_oig_only_without_a_sweep(tmp_path, monkeypatch):
+    """No perse_leads.json must not empty the worklist — fall back to the OIG
+    check, which is what the list did before the sweep existed."""
+    import core.oig_store as oig
+    monkeypatch.setattr(oig, "is_excluded", lambda npi: (npi == "1111111111", None))
+    monkeypatch.setattr(perse_store, "_PATH", tmp_path / "absent.json")
+    perse_store.reload()
+    assert perse_store.is_on_excluded_page("1111111111") is True
+    assert perse_store.is_on_excluded_page("5555555555") is False
+
+
 def test_summary_reports_how_many_leads_the_model_cannot_see(client, auth_headers, sweep):
     r = client.get("/api/perse/summary", headers=auth_headers)
     assert r.status_code == 200

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback, useMemo, memo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useNavigate, useSearchParams } from 'react-router-dom'
+import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { api, mutate, get } from '../lib/api'
 import { fmt } from '../lib/format'
 import { STATUS_LABELS, STATUS_COLORS } from '../lib/reviewStatus'
@@ -937,7 +937,19 @@ export default function ProviderExplorer() {
       {/* Summary row */}
       <div className="flex items-center justify-between px-1">
         <span className="text-xs text-gray-500">
-          {!isLoading && total > 0 && `Showing ${Math.min(providers.length, LIMIT)} of ${total.toLocaleString()} providers`}
+          {!isLoading && total > 0 && (
+            <>
+              {`Showing ${Math.min(providers.length, LIMIT)} of ${total.toLocaleString()} providers`}
+              {/* The count is lower than the scanned total on purpose. Say so —
+                  an unexplained gap reads as missing data. */}
+              <span className="text-gray-600">
+                {' · '}providers with a per-se finding are on the{' '}
+                <Link to="/excluded" className="text-gray-500 hover:text-blue-400 underline decoration-dotted">
+                  Excluded page
+                </Link>
+              </span>
+            </>
+          )}
         </span>
         {lastUpdated && (
           <span className="text-xs text-gray-600">

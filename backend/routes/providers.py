@@ -755,9 +755,14 @@ async def get_provider_facets():
 
 @router.get("/export/csv")
 async def export_providers_csv():
-    """Export all scanned providers as a CSV download (OIG-excluded omitted)."""
-    from core.oig_store import is_excluded as _excl
-    prescanned = [p for p in get_prescanned() if not _excl(p.get("npi", ""))[0]]
+    """Export all scanned providers as a CSV download.
+
+    Omits everything on the Excluded page (OIG exclusions AND deactivated-NPI
+    findings) so the export matches what the Providers list shows — an export
+    that disagrees with the screen it came from is worse than no export.
+    """
+    from core.perse_store import is_on_excluded_page as _barred
+    prescanned = [p for p in get_prescanned() if not _barred(p.get("npi", ""))]
     if not prescanned:
         raise HTTPException(404, "No scanned providers available")
 
@@ -828,12 +833,13 @@ async def list_providers(
 
     # Serve from prescan cache when available — avoids remote Parquet queries
     if prescanned:
-        # OIG-excluded providers live on the dedicated Excluded page — they're
-        # already barred from the program, so they don't belong in worklists.
-        # (Direct import: _oig_check is bound by a LATER local import in this
-        # function, so referencing it here would be an unbound-local error.)
-        from core.oig_store import is_excluded as _excl
-        pool = [p for p in prescanned if not _excl(p.get("npi", ""))[0]]
+        # Per-se findings live on the dedicated Excluded page, not in a worklist:
+        # a barred party, or an NPI CMS deactivated, is already established — the
+        # remaining work is filing it, not investigating it. This used to filter
+        # OIG exclusions only, which left 343 deactivated-NPI providers sitting in
+        # BOTH places. is_on_excluded_page is the single rule both surfaces use.
+        from core.perse_store import is_on_excluded_page as _barred
+        pool = [p for p in prescanned if not _barred(p.get("npi", ""))]
 
         if search:
             q = search.lower()

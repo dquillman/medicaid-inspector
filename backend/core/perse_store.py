@@ -164,3 +164,34 @@ def count() -> int:
     if not _loaded:
         _load()
     return len(_by_npi)
+
+
+# Kinds that are NOT an OIG exclusion — the deactivated-NPI findings. The OIG
+# ones are caught by oig_store, which is authoritative and always loaded.
+_DEACTIVATED_KINDS = ("deactivated_billing", "deactivated_window")
+
+
+def is_on_excluded_page(npi: str) -> bool:
+    """True when this provider belongs to the Excluded page and NOT the worklist.
+
+    ONE rule, so the two surfaces cannot disagree. A provider used to appear in
+    both: OIG exclusions were filtered out of the Providers list, but the
+    deactivated-NPI findings were not, so 343 providers sat in the worklist AND
+    on the Excluded page with a per-se finding against them.
+
+    The distinction the split encodes: the Providers list is for leads that
+    still need investigating. A per-se finding — barred party, or billing under
+    an NPI CMS deactivated — is already established; the work left is filing it,
+    which happens on the Excluded page.
+
+    Falls back to the OIG check alone when no sweep is loaded, so a deployment
+    without perse_leads.json keeps its old behaviour instead of emptying the
+    worklist or crashing.
+    """
+    from core.oig_store import is_excluded
+    if is_excluded(npi)[0]:
+        return True
+    if not _loaded:
+        _load()
+    lead = _by_npi.get(npi)
+    return bool(lead) and lead.get("kind") in _DEACTIVATED_KINDS
