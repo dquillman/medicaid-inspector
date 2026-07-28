@@ -40,9 +40,17 @@ gcloud run deploy "$SERVICE_NAME" \
   --source . \
   --project "$PROJECT_ID" \
   --region "$REGION" \
-  --memory 2Gi \
+  `# 4Gi, not 2Gi: the slim prescan cache is loaded whole into memory and grew` \
+  `# to 117,956 providers / 108MB on 2026-07-27. At 2Gi the container started` \
+  `# fine, served ~50s, then OOMed the moment a page load fired ~12 concurrent` \
+  `# endpoints that each walk the full cache — every request 500'd with "no` \
+  `# available instance". Raise this if the cache grows again.` \
+  --memory 4Gi \
   --cpu 1 \
-  --max-instances 3 \
+  `# ONE instance. Sessions live in per-instance memory, so >1 means a login on` \
+  `# instance A is unknown to instance B — "log in, immediately logged out".` \
+  `# backend/cli/mfi.py pins this too; they must not disagree.` \
+  --max-instances 1 \
   --concurrency 80 \
   --timeout 300 \
   --allow-unauthenticated \

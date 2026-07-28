@@ -262,6 +262,14 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
         # durability across restarts is handled separately by GCS-syncing
         # sessions.json on save.)
         "--max-instances", "1",
+        # Declared, not inherited. The slim prescan cache is loaded whole into
+        # memory and grew to 117,956 providers / 108MB on 2026-07-27; at the old
+        # 2Gi the container started fine, served ~50 seconds, then OOMed as soon
+        # as a page load fired ~12 concurrent endpoints that each walk the full
+        # cache — every request 500'd with "no available instance". Leaving this
+        # unset made the limit whatever the service happened to carry, so a
+        # fresh service would have silently come up on the 512Mi default.
+        "--memory", "4Gi",
         "--quiet",
     ]
     if not getattr(args, "skip_tests", False):
