@@ -10,7 +10,7 @@
   },
   "overrides": {
     "d3-color": "^3.1.0",
-    "undici": "^7.28.0"
+    "undici": "^7.29.0"
   },
   "dependencies": {
     "@gsap/react": "^2.1.2",
