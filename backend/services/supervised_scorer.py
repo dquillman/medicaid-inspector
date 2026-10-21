@@ -231,13 +231,13 @@ def train_model() -> dict:
 
     # Gather labeled data from the review queue. Labels come from the
     # case-ledger (queue_status) — the pipeline's source of truth:
-    #   positive: confirmed / referred (Reported; incl. legacy tip_filed)
+    #   positive: confirmed / Reported (referred=MFCU, tip_filed=OIG, doj_filed=DOJ)
     #   negative: dismissed (a human ruled it not-fraud)
     # The retired workflow `status` field is still read as a FALLBACK so labels
     # recorded before the pipeline migration keep teaching the model; when both
     # fields are set, queue_status wins.
     all_review = get_review_queue()
-    ledger_positive = {"confirmed", "referred", "tip_filed"}
+    ledger_positive = {"confirmed", "referred", "tip_filed", "doj_filed"}
     ledger_negative = {"dismissed"}
     legacy_positive = {"confirmed_fraud", "referred"}
     legacy_negative = {"dismissed"}

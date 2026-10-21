@@ -465,9 +465,11 @@ TOOLS: list[Tool] = [
     Tool(
         name="draft_oig_tip",
         description=(
-            "Generate the referral narrative for a provider — the text that IS the submission, "
-            "since the HHS-OIG Hotline and state MFCU intakes are text-only forms with no file "
-            "attachment. Pass destination='oig' (federal hotline, default) or 'mfcu' (state unit); "
+            "Generate the referral narrative for a provider — the text that IS the submission. "
+            "Pass destination='oig' (federal HHS-OIG hotline, default), 'mfcu' (state unit) or "
+            "'doj' (DOJ Criminal Tip Rewards portal at america.gov/fraud — the reward program: "
+            "$10k-$30k per distinct tip if it leads to charges; result includes a <=2,000-char "
+            "short_narrative for the portal's first box and a per-provider filing guide); "
             "the evidence body is identical, only the routing header/footer differs. "
             "The generated narrative is AUTOMATICALLY SAVED to the provider's case as an "
             "append-only case note (deduplicated), so it is on the permanent record and can be "
@@ -475,14 +477,15 @@ TOOLS: list[Tool] = [
             "was saved. Check 'saved_to_case' in the result: if false, 'save_skipped' says why "
             "(usually the NPI is not in the review queue yet). "
             "Drafting only — it does NOT submit anything to HHS/MFCU and does NOT change the "
-            "case status; filing and marking tip_filed/referred are human-only actions."
+            "case status; filing and marking tip_filed/referred/doj_filed are human-only actions."
         ),
         inputSchema={
             "type": "object",
             "properties": {
                 "npi": _NPI_SCHEMA,
-                "destination": {"type": "string", "enum": ["oig", "mfcu"],
-                                "description": "oig = federal HHS-OIG Hotline (default); mfcu = state Medicaid Fraud Control Unit"},
+                "destination": {"type": "string", "enum": ["oig", "mfcu", "doj"],
+                                "description": "oig = federal HHS-OIG Hotline (default); mfcu = state Medicaid "
+                                               "Fraud Control Unit; doj = DOJ Criminal Tip Rewards portal (america.gov/fraud)"},
             },
             "required": ["npi"],
         },
@@ -534,9 +537,10 @@ TOOLS: list[Tool] = [
         description=(
             "Record a case-pipeline status change for an NPI ALREADY in the review queue. The "
             "pipeline is: open (New) -> under_review (Investigating) -> confirmed (Confirmed "
-            "fraud) -> tip_filed (Reported: OIG hotline tip) -> referred (Reported: MFCU state "
-            "referral) — two DISTINCT reporting settings; dismissed is the not-fraud off-ramp. "
-            "IMPORTANT: the weighty transitions 'confirmed', 'tip_filed', and 'referred' "
+            "fraud) -> tip_filed (Reported: OIG hotline tip) / referred (Reported: MFCU state "
+            "referral) / doj_filed (Reported: DOJ tip-rewards portal) — three DISTINCT reporting "
+            "settings; dismissed is the not-fraud off-ramp. "
+            "IMPORTANT: the weighty transitions 'confirmed', 'tip_filed', 'referred' and 'doj_filed' "
             "require a HUMAN and are REFUSED here — an AI must not mark a case confirmed or "
             "reported as a side effect; a person does those in the review UI. An "
             "AI may set 'open', 'under_review', 'dismissed', or 'archived'. 'archived' closes "
@@ -549,7 +553,8 @@ TOOLS: list[Tool] = [
             "properties": {
                 "npi": _NPI_SCHEMA,
                 "new_status": {"type": "string", "enum": sorted(
-                    ["open", "under_review", "confirmed", "referred", "tip_filed", "dismissed", "archived"])},
+                    ["open", "under_review", "confirmed", "referred", "tip_filed", "doj_filed",
+                     "dismissed", "archived"])},
                 "note": {"type": "string", "description": "Optional reason/context recorded in the audit trail"},
             },
             "required": ["npi", "new_status"],
@@ -562,7 +567,8 @@ TOOLS: list[Tool] = [
             "activity first — for triage, dedupe, and cross-checking against the "
             "live Brain ranking. Returns each case's NPI, provider name, state, "
             "case-ledger status (open=New, under_review=Investigating, confirmed, "
-            "tip_filed=Reported: OIG, referred=Reported: MFCU, dismissed, archived), "
+            "tip_filed=Reported: OIG, referred=Reported: MFCU, doj_filed=Reported: DOJ, "
+            "dismissed, archived), "
             "risk score, and added/updated timestamps, plus overall counts by "
             "status. Optionally filter by a single status. This is the read "
             "counterpart to update_queue_status; it does NOT change anything."
@@ -572,7 +578,7 @@ TOOLS: list[Tool] = [
             "properties": {
                 "status": {"type": "string", "description": "Optional filter",
                            "enum": sorted(["open", "under_review", "confirmed",
-                                           "referred", "tip_filed", "dismissed", "archived"])},
+                                           "referred", "tip_filed", "doj_filed", "dismissed", "archived"])},
                 "limit": {"type": "integer", "description": "Max rows (default 100, max 500)"},
             },
         },
@@ -797,7 +803,7 @@ async def _tool_update_queue_status(args: dict) -> dict:
 
 _QUEUE_STATUS_LABELS = {
     "open": "New", "under_review": "Investigating", "confirmed": "Confirmed",
-    "tip_filed": "Reported: OIG", "referred": "Reported: MFCU",
+    "tip_filed": "Reported: OIG", "referred": "Reported: MFCU", "doj_filed": "Reported: DOJ",
     "dismissed": "Dismissed", "archived": "Archived",
 }
 

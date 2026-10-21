@@ -23,6 +23,13 @@ _loaded = False
 
 # lifecycle for an OIG Hotline tip
 VALID_STATUS = ["filed", "acknowledged", "under_review", "action_taken", "no_action", "closed"]
+# Federal tip channels logged here. 'doj' = DOJ Criminal Tip Rewards portal
+# (america.gov/fraud). Tips saved before this field existed are OIG tips.
+VALID_DESTINATIONS = ("oig", "doj")
+
+
+def _dest_of(tip: dict) -> str:
+    return tip.get("destination") or "oig"
 
 
 def _load() -> None:
@@ -54,60 +61,70 @@ def list_tips() -> list[dict]:
         return sorted(_tips, key=lambda t: t.get("filed_at", 0), reverse=True)
 
 
-def filed_npis() -> set[str]:
-    """NPIs that have an open (not closed/no_action) tip — drives the badge."""
+def filed_npis(destination: str = "oig") -> set[str]:
+    """NPIs with a logged tip for `destination` — drives the badges."""
     _load()
     with _lock:
-        return {t["npi"] for t in _tips if t.get("npi")}
+        return {t["npi"] for t in _tips if t.get("npi") and _dest_of(t) == destination}
 
 
-def get_tip_by_npi(npi: str) -> dict | None:
+def get_tip_by_npi(npi: str, destination: str = "oig") -> dict | None:
     _load()
     with _lock:
         for t in _tips:
-            if t.get("npi") == npi:
+            if t.get("npi") == npi and _dest_of(t) == destination:
                 return dict(t)
     return None
 
 
-def _make_ref(npi: str, when: float) -> str:
-    """MFI-assigned reference for an OIG tip (see referral_workflow.make_case_number)."""
+def _make_ref(npi: str, when: float, channel: str = "OIG") -> str:
+    """MFI-assigned reference for a tip (see referral_workflow.make_case_number)."""
     try:
         from core.referral_workflow import make_case_number
-        return make_case_number(npi, when, "OIG")
+        return make_case_number(npi, when, channel)
     except Exception:
         import datetime
-        return f"MFI-OIG-{npi}-{datetime.datetime.fromtimestamp(when).strftime('%Y%m%d')}"
+        return f"MFI-{channel}-{npi}-{datetime.datetime.fromtimestamp(when).strftime('%Y%m%d')}"
 
 
 def add_tip(npi: str, provider_name: str = "", state: str = "",
-            risk_score: float = 0.0, notes: str = "") -> dict:
-    """Idempotent per NPI — returns the existing tip if one is already logged."""
+            risk_score: float = 0.0, notes: str = "", destination: str = "oig",
+            reference_number: str = "") -> dict:
+    """Idempotent per (NPI, destination) — returns the existing tip if one is
+    already logged for that channel."""
+    if destination not in VALID_DESTINATIONS:
+        raise ValueError(f"Invalid destination {destination!r}; must be one of {VALID_DESTINATIONS}")
     _load()
     with _lock:
         for t in _tips:
-            if t.get("npi") == npi:
+            if t.get("npi") == npi and _dest_of(t) == destination:
                 return dict(t)
         now = time.time()
         tip = {
             "id": uuid.uuid4().hex[:12],
             "npi": npi,
+            "destination": destination,
             "provider_name": provider_name,
             "state": state,
             "risk_score": round(float(risk_score or 0), 1),
             "status": "filed",
             # OIG never issues a receipt, so MFI assigns its own reference —
-            # same format as MFCU referrals. Overwritten if OIG ever supplies one.
-            "reference_number": _make_ref(npi, now),
+            # same format as MFCU referrals. The DOJ portal DOES show a reference
+            # number on submit; when the filer enters it, it wins.
+            "reference_number": (reference_number or "").strip()
+                                or _make_ref(npi, now, destination.upper()),
             "notes": notes,
             "outcome_notes": "",
             "filed_at": now,
             "updated_at": now,
+            "history": [{"at": now, "status": "filed", "note": (
+                "Tip logged as filed with HHS-OIG Hotline" if destination == "oig" else
+                "Tip logged as filed with the DOJ Criminal Tip Rewards portal (america.gov/fraud)")}],
+        }
+        if destination == "oig":
             # OIG never confirms receipt/status; a FOIA "records pertinent to my
             # complaint" request is only appropriate >=6 months after filing.
-            "foia_eligible_at": now + 183 * 86400,
-            "history": [{"at": now, "status": "filed", "note": "Tip logged as filed with HHS-OIG Hotline"}],
-        }
+            tip["foia_eligible_at"] = now + 183 * 86400
         _tips.append(tip)
     _save()
     return dict(tip)
@@ -143,6 +160,8 @@ def counts() -> dict:
     _load()
     with _lock:
         by_status = {s: 0 for s in VALID_STATUS}
+        by_destination = {d: 0 for d in VALID_DESTINATIONS}
         for t in _tips:
             by_status[t.get("status", "filed")] = by_status.get(t.get("status", "filed"), 0) + 1
-        return {"total": len(_tips), "by_status": by_status}
+            by_destination[_dest_of(t)] = by_destination.get(_dest_of(t), 0) + 1
+        return {"total": len(_tips), "by_status": by_status, "by_destination": by_destination}

@@ -33,9 +33,23 @@ export default function OigTips() {
     <div className="space-y-5">
       <Breadcrumbs />
       <div>
-        <h1 className="text-xl font-display font-bold text-ink-primary tracking-tight">OIG Hotline Tips</h1>
+        <h1 className="text-xl font-display font-bold text-ink-primary tracking-tight">Federal Tips &mdash; OIG &amp; DOJ</h1>
         <p className="text-sm text-ink-tertiary mt-1 max-w-3xl leading-relaxed">
-          Every tip you've filed with the HHS-OIG Hotline, its lifecycle, and outcome.
+          Every tip you've filed with the HHS-OIG Hotline or the DOJ Criminal Tip Rewards portal
+          (america.gov/fraud), its lifecycle, and outcome.
+          {data?.counts.by_destination && (
+            <span className="font-mono tabular-nums">
+              {' '}OIG {data.counts.by_destination.oig ?? 0} &middot; DOJ {data.counts.by_destination.doj ?? 0}
+            </span>
+          )}
+        </p>
+      </div>
+
+      <div className="card border-amber-400/30 bg-amber-400/5">
+        <p className="text-xs text-ink-secondary leading-relaxed">
+          <span className="text-amber-300 font-semibold">DOJ tips:</span> the portal shows a reference number
+          when you submit &mdash; record it in Ref #. DOJ contacts eligible tipsters after charges are unsealed;
+          a reward ($10,000&ndash;$30,000 per distinct tip) is discretionary and not guaranteed.
         </p>
       </div>
 
@@ -66,8 +80,8 @@ export default function OigTips() {
       {data && data.tips.length === 0 && (
         <div className="card">
           <p className="text-sm text-ink-tertiary">
-            No tips logged yet. Open a provider, generate an <span className="text-filament-core">OIG Hotline Tip</span>, and click
-            “Log as filed” after you submit it at oig.hhs.gov.
+            No tips logged yet. Open a provider, generate an <span className="text-filament-core">OIG Hotline Tip</span> or
+            a <span className="text-amber-300">DOJ Tip</span>, and click “Log as filed” after you submit it.
           </p>
         </div>
       )}
@@ -78,10 +92,11 @@ export default function OigTips() {
             <thead>
               <tr className="text-left text-[10px] text-ink-tertiary uppercase tracking-[0.14em] border-b border-hairline">
                 <th className="py-2 pr-4">Provider</th>
+                <th className="py-2 pr-4">Channel</th>
                 <th className="py-2 pr-4">Risk</th>
                 <th className="py-2 pr-4">Filed</th>
                 <th className="py-2 pr-4">Status</th>
-                <th className="py-2 pr-4">OIG Ref #</th>
+                <th className="py-2 pr-4">Ref #</th>
                 <th className="py-2">Outcome notes</th>
               </tr>
             </thead>
@@ -91,6 +106,13 @@ export default function OigTips() {
                   <td className="py-2 pr-4">
                     <Link to={`/providers/${t.npi}`} className="text-filament-core hover:underline">{t.provider_name || t.npi}</Link>
                     <span className="block font-mono text-[11px] text-ink-tertiary">{t.npi}{t.state ? ` · ${t.state}` : ''}</span>
+                  </td>
+                  <td className="py-2 pr-4">
+                    {(t.destination ?? 'oig') === 'doj' ? (
+                      <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-400/50 bg-amber-400/10 text-amber-300">DOJ</span>
+                    ) : (
+                      <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-teal-400/50 bg-teal-400/10 text-teal-300">OIG</span>
+                    )}
                   </td>
                   <td className="py-2 pr-4"><Magnitude score={t.risk_score} size="sm" /></td>
                   <td className="py-2 pr-4 font-mono text-xs text-ink-tertiary">

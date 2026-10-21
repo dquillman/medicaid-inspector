@@ -174,7 +174,7 @@ export interface ReviewItem {
   total_claims: number
   status: 'pending' | 'assigned' | 'investigating' | 'confirmed_fraud' | 'referred' | 'dismissed'
   // Case-ledger status — human-gated, decoupled from the computed risk score.
-  queue_status?: 'open' | 'under_review' | 'tip_filed' | 'confirmed' | 'referred' | 'dismissed' | 'archived'
+  queue_status?: 'open' | 'under_review' | 'tip_filed' | 'confirmed' | 'referred' | 'doj_filed' | 'dismissed' | 'archived'
   notes: string
   assigned_to?: string | null
   added_at: number
@@ -1750,6 +1750,9 @@ export interface FraudBrainProvider {
   queue_status?: string | null
   deactivated_npi?: boolean
   size_dampened?: boolean
+  // DOJ Criminal Tip Rewards priority area (Hospice / Home health care / Day
+  // care / Special services), null when not a priority area. Annotation only.
+  doj_priority_area?: string | null
   corroborating_sources: number
   components: Record<string, number>
   evidence: FraudBrainEvidence[]
@@ -1798,6 +1801,7 @@ export interface FraudBrainResponse {
 // served from the per-se sweep across the full 617k billing universe.
 export type PerSeKind =
   | 'active_exclusion'      // billed DURING an exclusion — per-se fraud
+  | 'medicare_revoked_billing' // billed Medicaid after Medicare revoked the provider
   | 'deactivated_billing'   // billed under an NPI CMS killed
   | 'deactivated_window'    // billed while deactivated; NPI later reactivated
   | 'recovery_lead'         // billing predates the exclusion — a clawback, not active fraud
@@ -1823,8 +1827,14 @@ export interface ExcludedProvider {
   exclusion_type?: string
   deactivation_date?: string
   reactivation_date?: string
+  revocation_date?: string
+  revocation_reason?: string
+  reenrollment_bar_until?: string | null
   /** Dollars paid while the provider was barred — the figure a referral needs. */
   paid_after_exclusion?: number
+  paid_after_revocation?: number
+  /** Non-empty when the finding needs a check before filing. */
+  caveat?: string
   paid_after_deactivation?: number
   paid_during_deactivation?: number
   citation?: string
@@ -1899,8 +1909,22 @@ export interface OigFilingGuide {
   url: string
   steps: [string, string][]
   notes: string[]
-  subject_fields: Record<string, string>
+  // OIG guide only
+  subject_fields?: Record<string, string>
+  // DOJ guide only
+  priority?: DojPriority
+  prior_filings?: { agency: string; date: string }[]
 }
+
+// DOJ names hospice / home health / day care / special services as the
+// priority fraud areas of its Criminal Tip Rewards program.
+export interface DojPriority {
+  priority: boolean
+  area: string
+  taxonomy: string
+}
+
+export type ReferralDestination = 'oig' | 'mfcu' | 'doj'
 
 export interface FormAnswerField {
   label: string
@@ -1920,8 +1944,13 @@ export interface OigTipResponse {
   // Field-by-field answers for the destination's intake form, so values never
   // have to be dug out of the narrative prose.
   form_fields?: FormAnswerField[]
-  // Per-provider answer sheet for the OIG wizard (destination='oig' only).
+  // Per-provider answer sheet (OIG wizard, or the DOJ portal for destination='doj').
   filing_guide?: OigFilingGuide | null
+  text_with_guide?: string
+  destination?: ReferralDestination
+  saved_to_case?: boolean
+  save_skipped?: string
+  doj_priority?: DojPriority
   fields: Record<string, unknown>
   signal_count: number
 }
@@ -1937,6 +1966,9 @@ export interface FraudBrainMembership {
 export interface OigTip {
   id: string
   npi: string
+  // 'oig' = HHS-OIG Hotline; 'doj' = DOJ Criminal Tip Rewards portal. Absent on
+  // tips logged before the DOJ channel existed (those are OIG).
+  destination?: 'oig' | 'doj'
   provider_name: string
   state: string
   risk_score: number
@@ -1952,11 +1984,12 @@ export interface OigTip {
 
 export interface OigTipsResponse {
   tips: OigTip[]
-  counts: { total: number; by_status: Record<string, number> }
+  counts: { total: number; by_status: Record<string, number>; by_destination?: Record<string, number> }
 }
 
 export interface OigTipsFiledResponse {
-  npis: string[]
+  npis: string[]       // OIG tips
+  doj_npis?: string[]  // DOJ tips
 }
 
 // Scan & Data freshness strip

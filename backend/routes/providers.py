@@ -2797,8 +2797,8 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     """
     npi = _validate_npi(npi)
     dest = (destination or "oig").strip().lower()
-    if dest not in ("oig", "mfcu"):
-        raise HTTPException(400, "destination must be 'oig' or 'mfcu'")
+    if dest not in ("oig", "mfcu", "doj"):
+        raise HTTPException(400, "destination must be 'oig', 'mfcu' or 'doj'")
     cached = get_provider_by_npi(npi)
     if not cached:
         raise HTTPException(404, f"Provider {npi} not in scan cache")
@@ -2935,14 +2935,32 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         txt = txt.replace("≥", "at least ").replace("≤", "at most ")
         return to_ascii(txt).rstrip(".")
 
-    _findings = [_ascii_finding(i["finding"]) for i in _ranked]
-    while True:
-        body = " ".join(f"{f}." for f in _findings)
-        candidate = " ".join(x for x in [to_ascii(_lead), body, to_ascii(_close)] if x)
-        if len(candidate) <= _DESC_FIELD_CAP or not _findings:
-            short_narrative = candidate
-            break
-        _findings.pop()          # drop the least-weighted finding and retry
+    def _fit(lead: str, close: str, cap: int) -> str:
+        findings = [_ascii_finding(i["finding"]) for i in _ranked]
+        while True:
+            body = " ".join(f"{f}." for f in findings)
+            candidate = " ".join(x for x in [to_ascii(lead), body, to_ascii(close)] if x)
+            if len(candidate) <= cap or not findings:
+                return candidate
+            findings.pop()       # drop the least-weighted finding and retry
+
+    short_narrative = _fit(_lead, _close, _DESC_FIELD_CAP)
+    if dest == "doj":
+        # The DOJ portal's first box is the ONLY free text the AI intake reads
+        # before it asks follow-ups, so it must name the subject (state forms
+        # carry name/NPI in their own fields; this one does not), and it must
+        # disclose any earlier OIG/MFCU filing — DOJ treats a tipster as an
+        # original source only if they were the source of the earlier report.
+        from services.doj_filing_guide import (
+            DOJ_DESC_CAP, prior_filings as _doj_prior, prior_filing_sentence as _doj_prior_s)
+        _doj_filings = _doj_prior(npi)
+        _doj_lead = f"Suspected Medicaid fraud by {name} (NPI {npi}), {address_str}. " + _lead
+        _doj_close = " ".join(x for x in [
+            _close,
+            "Source: my own independent analysis of public data (no insider information).",
+            _doj_prior_s(_doj_filings),
+        ] if x)
+        short_narrative = _fit(_doj_lead, _doj_close, DOJ_DESC_CAP)
 
     # Single "date of service": most recent billed month, day 01 (the dataset is
     # monthly, so a specific day is not knowable). Shared by the answer sheet
@@ -3047,6 +3065,32 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     # Length is not cosmetic here: an over-long paste is either truncated
     # mid-word or rejected outright, which is exactly how Dave lost the full
     # narrative on PA's form. Ship the count so the UI can warn BEFORE filing.
+    if dest == "doj":
+        # The DOJ portal is an AI chat, not a fixed form: one 2,000-char box,
+        # attachments, then follow-up questions. These are the answers to keep
+        # at hand for those follow-ups — the state-form fields (victim name,
+        # recipient ID, license) don't apply.
+        form_fields = [
+            {"label": "What raised your concern? (first box)", "value": short_narrative,
+             "note": "Paste this first. The portal box takes 2,000 characters."},
+            {"label": "Provider / business name", "value": name},
+            {"label": "NPI", "value": npi},
+            {"label": "Address (NPPES)", "value": address_str},
+            {"label": "Provider telephone", "value": npp_phone,
+             "note": "" if npp_phone else "Not on file in NPPES."},
+            {"label": "Business or individual", "value": "Individual" if _ent.lower() == "npi-1" else "Business"},
+            {"label": "Program", "value": "Medicaid"},
+            {"label": "When (period in the public data)",
+             "value": f"{first_m} to {last_m}" if first_m != "?" else ""},
+            {"label": "Amount (Medicaid paid, total exposure)", "value": f"${total_paid:,.0f}",
+             "note": "Exposure, not a proven loss. Say so if the portal asks."},
+            {"label": "How do you know?",
+             "value": "My own independent analysis of public HHS T-MSIS Medicaid spending data, "
+                      "NPPES, the OIG LEIE and SAM.gov. No insider information; no other witness."},
+            {"label": "Previously reported", "value": _doj_prior_s(_doj_filings) or "No",
+             "note": "Keep this in the report: DOJ counts you as an original source only if you were "
+                     "the source of the earlier report."},
+        ]
     for _f in form_fields:
         _f["chars"] = len(_f["value"])
     for _f in form_fields:
@@ -3097,6 +3141,12 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
                "Leave blank what we don't hold: state provider/Medicaid ID, license "
                "number, provider phone. Never guess on a government form.\n")
         )
+    elif dest == "doj":
+        _header = (
+            "DOJ CRIMINAL TIP REWARDS PILOT PROGRAM — Suspected Medicaid Provider Fraud\n"
+            "Submitted via the federal fraud portal: https://america.gov/fraud\n"
+            + (f"Previously reported: {_doj_prior_s(_doj_filings)}\n" if _doj_filings else "")
+        )
     else:
         _header = (
             "HHS-OIG HOTLINE COMPLAINT — Suspected Medicaid Provider Fraud\n"
@@ -3137,14 +3187,22 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         "  third-party informant).\n"
         "\n"
         "  No protected health information (PHI) is included; all figures derive from public\n"
-        "  aggregate provider-level data. (HIPAA/privacy concerns are out of OIG Hotline scope\n"
-        "  and would route to HHS OCR — not applicable here.)\n"
+        "  aggregate provider-level data. (HIPAA/privacy concerns are out of scope for this\n"
+        "  fraud report and would route to HHS OCR — not applicable here.)\n"
         "\n"
         + (
             "  Note: state MFCUs may contact the referrer for clarification. Detailed per-signal\n"
             "  evidence (peer means, z-scores, procedure codes) and a full referral packet are\n"
             "  available on request.\n"
             if dest == "mfcu" else
+            "  This tip is submitted under the DOJ Criminal Tip Rewards Pilot Program. The\n"
+            "  findings are leads from public data, not proof of fraud. I understand a reward\n"
+            "  ($10,000-$30,000 per distinct tip, at DOJ's discretion) is possible only if this\n"
+            "  information leads to unsealed criminal charges. My contact information is in the\n"
+            "  portal submission so the Department can reach me; detailed per-signal evidence\n"
+            "  (peer means, z-scores, procedure codes) and a full referral packet are available\n"
+            "  on request.\n"
+            if dest == "doj" else
             "  Note: This complaint, once submitted, is a Privacy-Act record. OIG does not confirm\n"
             "  receipt or report status; outcome may be sought only via a FOIA records request to\n"
             "  the OIG FOIA officer no sooner than 6 months after submission.\n"
@@ -3160,13 +3218,31 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     # complaint. OIG only: state MFCU intake forms differ by state.
     filing_guide = None
     guide_block = ""
-    if dest != "mfcu":
+    from services.doj_filing_guide import doj_priority as _doj_pri
+    doj_priority_info = _doj_pri([specialty] + _other_tax)
+    if dest == "doj":
+        try:
+            from services.doj_filing_guide import build_doj_filing_guide, render_doj_filing_guide
+            filing_guide = build_doj_filing_guide(
+                npi=npi, name=name, taxonomies=[specialty] + _other_tax,
+                state=(addr.get("state") or cached.get("state") or ""),
+                first_month=cached.get("first_month"), last_month=cached.get("last_month"),
+                total_paid=total_paid, address=address_str, phone=npp_phone,
+                entity_type=nppes.get("entity_type"),
+                flagged_signals=[f.get("signal", "") for f in flags],
+                filings=_doj_filings, oig_excluded=oig_excluded,
+            )
+            guide_block = render_doj_filing_guide(filing_guide)
+        except Exception:
+            import logging as _logging
+            _logging.getLogger(__name__).warning("oig-tip: DOJ filing guide failed for %s", npi, exc_info=True)
+    elif dest == "oig":
         try:
             from services.oig_filing_guide import build_filing_guide, render_filing_guide
             _prev = False
             try:
                 from core.review_store import get_queue_status
-                _prev = get_queue_status(npi) in ("tip_filed", "referred")
+                _prev = get_queue_status(npi) in ("tip_filed", "referred", "doj_filed")
             except Exception:
                 pass
             filing_guide = build_filing_guide(
@@ -3248,6 +3324,10 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         # never have to be dug out of the narrative prose.
         "form_fields": form_fields,
         "filing_guide": filing_guide,
+        # DOJ names hospice / home health / day care / special services as its
+        # priority fraud areas — returned for every destination so any referral
+        # page can show the badge.
+        "doj_priority": doj_priority_info,
         "fields": {
             "subject_name": to_ascii(name),
             "npi": npi,

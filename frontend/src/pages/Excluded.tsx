@@ -7,11 +7,12 @@ import { threatColor } from '../lib/threat'
 import Breadcrumbs from '../components/Breadcrumbs'
 import ProviderFlags from '../components/ProviderFlags'
 
-const KIND_ORDER = ['active_exclusion', 'deactivated_billing', 'deactivated_window', 'recovery_lead'] as const
+const KIND_ORDER = ['active_exclusion', 'medicare_revoked_billing', 'deactivated_billing', 'deactivated_window', 'recovery_lead'] as const
 
 /** Per-se kinds are not equally damning — colour them by how provable they are. */
 const KIND_STYLE: Record<string, string> = {
   active_exclusion:    'bg-red-950/60 border-red-800 text-red-300',
+  medicare_revoked_billing: 'bg-rose-950/60 border-rose-800 text-rose-300',
   deactivated_billing: 'bg-orange-950/60 border-orange-800 text-orange-300',
   deactivated_window:  'bg-amber-950/60 border-amber-800 text-amber-300',
   recovery_lead:       'bg-slate-800/60 border-slate-700 text-slate-300',
@@ -52,8 +53,8 @@ export default function Excluded() {
       <div>
         <h1 className="text-xl font-bold text-gray-200">Barred From Billing — And Billed Anyway</h1>
         <p className="text-sm text-gray-500 mt-1 max-w-3xl">
-          Providers on the federal OIG LEIE exclusion list, and NPIs CMS deactivated, that
-          still drew Medicaid payments. These are per-se findings: no statistical inference,
+          Providers on the federal OIG LEIE exclusion list, providers Medicare revoked, and
+          NPIs CMS deactivated, that still drew Medicaid payments. These are per-se findings: no statistical inference,
           no peer comparison — a barred party was paid. They are removed from the Providers
           list, Anomalies, Review Queue, and Fraud Brain, so this page is their single home.
         </p>
@@ -159,8 +160,8 @@ export default function Excluded() {
             </thead>
             <tbody>
               {rows.map(p => {
-                const barred = p.paid_after_exclusion ?? p.paid_after_deactivation ?? p.paid_during_deactivation
-                const since = p.exclusion_date || p.deactivation_date || p.excl_date
+                const barred = p.paid_after_exclusion ?? p.paid_after_revocation ?? p.paid_after_deactivation ?? p.paid_during_deactivation
+                const since = p.exclusion_date || p.revocation_date || p.deactivation_date || p.excl_date
                 return (
                   <tr
                     key={p.npi}
@@ -187,6 +188,11 @@ export default function Excluded() {
                       <span className={`text-[10px] px-2 py-0.5 border rounded ${KIND_STYLE[p.kind ?? ''] ?? 'border-gray-800 text-gray-500'}`}>
                         {labels[p.kind ?? ''] ?? p.excl_type ?? '—'}
                       </span>
+                      {p.caveat && (
+                        <span className="ml-1.5 text-[9px] text-amber-400 cursor-help" title={p.caveat}>
+                          CHECK FIRST
+                        </span>
+                      )}
                     </td>
                     <td className="py-2 pr-4 text-gray-400 font-mono text-xs">{since || '—'}</td>
                     <td className="py-2 pr-4 text-right font-mono text-red-400">

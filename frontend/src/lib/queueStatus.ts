@@ -13,6 +13,8 @@
  *   Confirmed      you've verified it IS fraud
  *   Reported: OIG  tip filed with the federal HHS-OIG hotline (tip_filed)
  *   Reported: MFCU referred to the state Medicaid Fraud Control Unit (referred)
+ *   Reported: DOJ  tip filed on the DOJ Criminal Tip Rewards portal,
+ *                  america.gov/fraud (doj_filed) — the reward program
  *   Dismissed      NOT fraud — closed (negative training label)
  *   Archived       closed without judgment — never a training label
  *
@@ -31,13 +33,17 @@ export const CASE_STAGES = [
   { value: 'confirmed',    label: 'Confirmed',      blurb: 'Verified as fraud' },
   { value: 'tip_filed',    label: 'Reported: OIG',  blurb: 'Tip filed with the HHS-OIG hotline' },
   { value: 'referred',     label: 'Reported: MFCU', blurb: 'Referred to the state Medicaid Fraud Control Unit. If you file both, set OIG first, then MFCU — the History keeps each step' },
+  { value: 'doj_filed',    label: 'Reported: DOJ',  blurb: 'Tip filed on the DOJ Criminal Tip Rewards portal (america.gov/fraud) — the reward program' },
   { value: 'dismissed',    label: 'Dismissed',      blurb: 'Not fraud — closed (trains the model)' },
   { value: 'archived',     label: 'Archived',       blurb: 'Closed without judgment — never trains the model' },
 ] as const
 
 export const QUEUE_STATUS_ORDER = CASE_STAGES.map(s => s.value)
 
-export type QueueStatus = 'open' | 'under_review' | 'confirmed' | 'referred' | 'tip_filed' | 'dismissed' | 'archived'
+export type QueueStatus = 'open' | 'under_review' | 'confirmed' | 'referred' | 'tip_filed' | 'doj_filed' | 'dismissed' | 'archived'
+
+// The reporting settings — terminal, human-set, brain-excluded.
+export const REPORTED_STATUSES: readonly string[] = ['tip_filed', 'referred', 'doj_filed']
 
 // Display label for any backend value. Reporting is TWO distinct settings:
 // tip_filed = the federal OIG hotline tip; referred = the state MFCU referral.
@@ -49,6 +55,7 @@ export const QUEUE_STATUS_LABELS: Record<string, string> = {
   confirmed:    'Confirmed',
   tip_filed:    'Reported: OIG',
   referred:     'Reported: MFCU',
+  doj_filed:    'Reported: DOJ',
   dismissed:    'Dismissed',
   archived:     'Archived',
 }
@@ -61,6 +68,7 @@ export const QUEUE_STATUS_COLORS: Record<string, string> = {
   confirmed:    'text-red-400 border-red-400/60 bg-red-400/10',
   tip_filed:    'text-teal-300 border-teal-400/50 bg-teal-400/10',
   referred:     'text-emerald-400 border-emerald-400/50 bg-emerald-400/10',
+  doj_filed:    'text-amber-300 border-amber-400/50 bg-amber-400/10',
   dismissed:    'text-gray-500 border-gray-500/40 bg-gray-500/10',
   archived:     'text-gray-600 border-gray-600/40 bg-gray-600/10',
 }

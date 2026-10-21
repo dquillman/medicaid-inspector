@@ -66,6 +66,7 @@ import type {
   OigTip,
   OigTipsResponse,
   OigTipsFiledResponse,
+  ReferralDestination,
   DataFreshness,
   FraudBrainMembership,
   PharmacyHighRiskResponse,
@@ -996,9 +997,9 @@ export const api = {
   methods: () => get<MethodsResponse>('/methods'),
   // ONE referral-narrative generator, two destinations (Dave's rule: the
   // reports are ALWAYS a referral narrative — it IS the submission, since both
-  // OIG and MFCU intakes are text-only forms). 'mfcu' swaps only the routing
-  // header/footer; the evidence body is identical.
-  oigTip: (npi: string, destination: 'oig' | 'mfcu' = 'oig') =>
+  // OIG and MFCU intakes are text-only forms). 'mfcu' / 'doj' swap only the
+  // routing header/footer; the evidence body is identical.
+  oigTip: (npi: string, destination: ReferralDestination = 'oig') =>
     get<OigTipResponse>(`/providers/${npi}/oig-tip`, { destination }),
 
   // Scan & Data freshness strip
@@ -1007,7 +1008,12 @@ export const api = {
   // OIG Hotline tip log (filed-tip tracking + outcomes)
   oigTipsList: () => get<OigTipsResponse>('/oig-tips'),
   oigTipsFiled: () => get<OigTipsFiledResponse>('/oig-tips/filed'),
-  logOigTip: (body: { npi: string; provider_name?: string; state?: string; risk_score?: number; notes?: string }) =>
+  // destination 'doj' logs a DOJ Criminal Tip Rewards filing and sets the case
+  // to Reported: DOJ; `reference_number` = the portal's own reference number.
+  logOigTip: (body: {
+    npi: string; provider_name?: string; state?: string; risk_score?: number; notes?: string
+    destination?: 'oig' | 'doj'; reference_number?: string
+  }) =>
     mutate<OigTip>('POST', '/oig-tips', body),
   updateOigTip: (id: string, body: Partial<Pick<OigTip, 'status' | 'reference_number' | 'notes' | 'outcome_notes'>>) =>
     mutate<OigTip>('PATCH', `/oig-tips/${id}`, body),

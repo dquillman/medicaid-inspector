@@ -248,9 +248,25 @@ function RankCard({ rank, p }: { rank: number; p: FraudBrainProvider }) {
             {/* Data-recency badge — annotation only, never a scoring input.
                 Stale = recovery lead (FCA reaches back 6 years), not innocent. */}
             <RecencyBadge recency={p.recency} lastActiveMonth={p.last_active_month} dataAgeMonths={p.data_age_months} />
+            {p.doj_priority_area && (
+              <span
+                className="text-[10px] px-2 py-0.5 rounded-full font-bold uppercase tracking-[0.14em] text-amber-300 border border-amber-400/60 bg-amber-400/10"
+                title={`DOJ names ${p.doj_priority_area.toLowerCase()} as a priority fraud area for its Criminal Tip Rewards program`}
+              >
+                DOJ priority
+              </span>
+            )}
             <div className="ml-auto flex items-center gap-1.5">
               <PrepareCaseButton npi={p.npi} queueStatus={p.queue_status} />
               <OigTipButton npi={p.npi} providerName={p.provider_name} state={p.state} riskScore={p.brain_score} />
+              <Link
+                to={`/providers/${p.npi}/doj-referral`}
+                onClick={(e) => e.stopPropagation()}
+                title="Draft a DOJ Criminal Tip Rewards tip (america.gov/fraud) for this provider"
+                className="shrink-0 px-2 py-1 text-[10px] font-mono uppercase tracking-wider bg-surface-2 hover:bg-hairline border border-hairline hover:border-filament-dim rounded text-ink-secondary hover:text-filament-core transition-colors"
+              >
+                DOJ Tip
+              </Link>
             </div>
           </div>
           <p className="text-xs text-ink-tertiary mt-0.5 truncate">{p.specialty || '—'}</p>
@@ -427,7 +443,7 @@ export default function FraudBrain() {
   }
   const ranked = (data?.top ?? []).map((p, i) => ({ p, rank: i + 1 }))
   const isResolved = (p: FraudBrainProvider) =>
-    p.queue_status === 'referred' || p.queue_status === 'tip_filed' ||
+    p.queue_status === 'referred' || p.queue_status === 'tip_filed' || p.queue_status === 'doj_filed' ||
     p.queue_status === 'dismissed' || p.queue_status === 'archived'
   const isExcluded = ({ p }: { p: FraudBrainProvider }) => p.recency === 'expired' || isResolved(p)
   const BOARD_SIZE = 10

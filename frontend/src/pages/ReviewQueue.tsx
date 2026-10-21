@@ -16,8 +16,8 @@ import { useProviderFlags } from '../hooks/useProviderFlags'
 
 // The queue speaks ONE status model: the case-ledger pipeline (see queueStatus).
 // Filter keys are the stage values plus 'all'. tip_filed = Reported: OIG;
-// referred = Reported: MFCU — two distinct reporting settings.
-type StatusFilter = 'all' | 'open' | 'under_review' | 'confirmed' | 'tip_filed' | 'referred' | 'dismissed' | 'archived'
+// referred = Reported: MFCU; doj_filed = Reported: DOJ — distinct reporting settings.
+type StatusFilter = 'all' | 'open' | 'under_review' | 'confirmed' | 'tip_filed' | 'referred' | 'doj_filed' | 'dismissed' | 'archived'
 
 // The Fraud Brain is the queue's authority, so its fused meta-score is the
 // primary number. The raw 18-signal risk (one of the Brain's five inputs) is
@@ -780,6 +780,7 @@ export default function ReviewQueue() {
     confirmed:    rawItems.filter(i => qs(i) === 'confirmed').length,
     tip_filed:    rawItems.filter(i => qs(i) === 'tip_filed').length,
     referred:     rawItems.filter(i => qs(i) === 'referred').length,
+    doj_filed:    rawItems.filter(i => qs(i) === 'doj_filed').length,
     dismissed:    rawItems.filter(i => qs(i) === 'dismissed').length,
     // Archived lives outside the working-queue payload — count from its own
     // endpoint (full-store total, not just the visible page).
@@ -833,6 +834,7 @@ export default function ReviewQueue() {
     { key: 'confirmed',    label: 'Confirmed',      count: queueCounts.confirmed },
     { key: 'tip_filed',    label: 'Reported: OIG',  count: queueCounts.tip_filed },
     { key: 'referred',     label: 'Reported: MFCU', count: queueCounts.referred },
+    { key: 'doj_filed',    label: 'Reported: DOJ',  count: queueCounts.doj_filed },
     { key: 'dismissed',    label: 'Dismissed',      count: queueCounts.dismissed },
     { key: 'archived',     label: 'Archived',       count: queueCounts.archived },
   ]
@@ -850,7 +852,7 @@ export default function ReviewQueue() {
             <span className="text-gray-600 mx-2">&middot;</span>
             <span className="text-red-400 font-semibold">{queueCounts.confirmed}</span> confirmed fraud
             <span className="text-gray-600 mx-2">&middot;</span>
-            <span className="text-emerald-400 font-semibold">{queueCounts.tip_filed + queueCounts.referred}</span> reported to authorities
+            <span className="text-emerald-400 font-semibold">{queueCounts.tip_filed + queueCounts.referred + queueCounts.doj_filed}</span> reported to authorities
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -950,6 +952,14 @@ export default function ReviewQueue() {
               className="px-4 py-1.5 text-xs rounded bg-emerald-700 hover:bg-emerald-600 text-white font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
             >
               Reported: MFCU
+            </button>
+            <button
+              onClick={() => handleBulkAction('doj_filed')}
+              disabled={bulkMutation.isPending}
+              title="Tip filed on the DOJ Criminal Tip Rewards portal (america.gov/fraud)"
+              className="px-4 py-1.5 text-xs rounded bg-amber-600 hover:bg-amber-500 text-black font-bold uppercase tracking-wider transition-colors disabled:opacity-50"
+            >
+              Reported: DOJ
             </button>
             <button
               onClick={() => handleBulkAction('dismissed')}

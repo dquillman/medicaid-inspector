@@ -295,7 +295,8 @@ async def auto_prep_loop() -> None:
 # case — auto-prepare must not touch these. "open" is deliberately NOT here:
 # it's the default the instant a provider is merely added to the queue, before
 # any investigation happens, so it stays eligible for auto-preparation.
-_ALREADY_WORKED_STATUSES = {"under_review", "tip_filed", "confirmed", "referred", "dismissed", "archived"}
+_ALREADY_WORKED_STATUSES = {"under_review", "tip_filed", "confirmed", "referred", "doj_filed",
+                            "dismissed", "archived"}
 
 
 def pick_nightly_leads(count: int = AUTO_PREP_LEADS_PER_NIGHT) -> list[str]:

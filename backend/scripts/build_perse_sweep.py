@@ -98,6 +98,44 @@ def _ym(s) -> int | None:
     return None
 
 
+def _add_months(m: int, n: int) -> int:
+    y, mo = divmod(m, 100)
+    idx = y * 12 + (mo - 1) + n
+    return (idx // 12) * 100 + idx % 12 + 1
+
+
+# A state needs time to act on a Medicare revocation, so only billing from the
+# second month after the effective date counts.
+_REVOCATION_GRACE_MONTHS = 2
+# Measured 2026-10-20: 21 of 182 revocation leads were under $1,000 after the
+# revocation (one was $3) — rounding noise, not a referral.
+_REVOCATION_MIN_PAID = 1_000.0
+
+
+def _revocation_caveat(recs: list[dict]) -> str:
+    """A revocation that rests ONLY on DME supplier standards (424.535(a)(1)) can
+    cover just the supply enrollment of a practice that also bills lawfully."""
+    reasons = [(r.get("reason") or "").lower() for r in recs]
+    if reasons and all("dme standards" in x and "felon" not in x for x in reasons):
+        return ("Medicare revoked this provider's DME supplier enrollment for failing "
+                "supplier standards. Confirm the state terminated the same enrollment "
+                "before filing; other services the practice bills may still be lawful.")
+    return ""
+
+
+def _revocation_windows(recs: list[dict]) -> list[tuple[int, int | None]]:
+    """[start, end) YYYYMM windows in which Medicaid billing is barred by a
+    Medicare revocation. Billing after the re-enrollment bar expires is not
+    counted — the provider may have lawfully re-enrolled."""
+    out = []
+    for r in recs:
+        rd = _ym(r.get("revocation_date"))
+        if rd is None:
+            continue
+        out.append((_add_months(rd, _REVOCATION_GRACE_MONTHS), _ym(r.get("reenrollment_bar_until"))))
+    return out
+
+
 def main() -> int:
     import duckdb
     from data.duckdb_client import get_parquet_path
@@ -120,6 +158,9 @@ def main() -> int:
         windows = json.loads((_BACKEND / "npi_deactivation_windows.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         windows = {}
+    import core.revocation_store as rev_store
+    revocations = dict(rev_store.all_revocations())
+    print(f"Medicare revocations: {len(revocations):,}  (built {rev_store.generated_at()})")
     print(f"OIG LEIE records: {len(exclusions):,}  (store reports "
           f"{(get_oig_stats() or {}).get('record_count')})")
     print(f"NPPES deactivations (currently dead): {len(deacts):,}")
@@ -132,7 +173,7 @@ def main() -> int:
         print("WARN: deactivation store is empty — the deactivated_billing "
               "portion of this sweep will be blank.")
 
-    raw_targets = set(exclusions) | set(deacts) | set(windows)
+    raw_targets = set(exclusions) | set(deacts) | set(windows) | set(revocations)
     targets = {n for n in raw_targets if _NPI_RE.match(str(n))}
     dropped = len(raw_targets) - len(targets)
     print(f"target NPIs to check against billing: {len(targets):,}"
@@ -241,6 +282,31 @@ def main() -> int:
             })
             continue
 
+        revs = revocations.get(npi)
+        if revs:
+            wins = _revocation_windows(revs)
+            after = sum(p for m, p in a["months"]
+                        if any(s <= m and (e is None or m < e) for s, e in wins))
+            if after >= _REVOCATION_MIN_PAID:
+                first = revs[0]
+                leads.append({
+                    **base,
+                    "kind": "medicare_revoked_billing",
+                    "provider_name": first.get("name") or "",
+                    "state": first.get("state") or "",
+                    "specialty": first.get("provider_type") or "",
+                    "revocation_date": first.get("revocation_date"),
+                    "revocation_reason": first.get("reason") or "",
+                    "reenrollment_bar_until": first.get("reenrollment_bar_until"),
+                    "paid_after_revocation": round(after, 2),
+                    "caveat": _revocation_caveat(revs),
+                    "citation": (
+                        "42 CFR § 455.416(c) (state Medicaid must terminate a provider "
+                        "Medicare has revoked); 42 CFR § 455.436"
+                    ),
+                })
+                continue
+
         dt = deacts.get(npi)
         if dt:
             dd = _ym(dt)
@@ -282,12 +348,12 @@ def main() -> int:
             })
 
     # Rank: active per-se fraud first, then by the dollars billed while barred.
-    _ORDER = {"active_exclusion": 0, "deactivated_billing": 1,
-              "deactivated_window": 2, "recovery_lead": 3}
+    _ORDER = {"active_exclusion": 0, "medicare_revoked_billing": 1, "deactivated_billing": 2,
+              "deactivated_window": 3, "recovery_lead": 4}
     leads.sort(key=lambda r: (
         _ORDER.get(r["kind"], 9),
-        -(r.get("paid_after_exclusion") or r.get("paid_after_deactivation")
-          or r.get("paid_during_deactivation") or 0),
+        -(r.get("paid_after_exclusion") or r.get("paid_after_revocation")
+          or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0),
         -r["total_paid"],
     ))
 

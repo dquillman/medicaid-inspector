@@ -29,14 +29,18 @@ VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 # 'archived' = closed WITHOUT judgment ("too old / not pursuing") — unlike
 # 'dismissed' ("a human judged this NOT fraud") it is NEVER a training label,
 # so bulk-archiving stale cases can't poison the supervised model.
-VALID_QUEUE_STATUSES = {"open", "under_review", "tip_filed", "dismissed", "confirmed", "referred", "archived"}
+VALID_QUEUE_STATUSES = {"open", "under_review", "tip_filed", "dismissed", "confirmed", "referred",
+                        "doj_filed", "archived"}
 DEFAULT_QUEUE_STATUS = "open"
-# Transitions that carry real-world weight — confirming fraud, and the two
-# reporting settings ('tip_filed' = Reported: OIG hotline tip; 'referred' =
-# Reported: MFCU state referral) — must be a deliberate HUMAN action, never an
-# automatic side effect of an AI drafting a document. Enforced in
-# set_queue_status by requiring actor_type == "user".
-HUMAN_GATED_QUEUE_STATUSES = {"confirmed", "referred", "tip_filed"}
+# The three reporting settings: 'tip_filed' = Reported: OIG hotline tip;
+# 'referred' = Reported: MFCU state referral; 'doj_filed' = Reported: DOJ
+# (Criminal Tip Rewards portal, america.gov/fraud).
+REPORTED_QUEUE_STATUSES = {"tip_filed", "referred", "doj_filed"}
+# Transitions that carry real-world weight — confirming fraud and the reporting
+# settings — must be a deliberate HUMAN action, never an automatic side effect
+# of an AI drafting a document. Enforced in set_queue_status by requiring
+# actor_type == "user".
+HUMAN_GATED_QUEUE_STATUSES = {"confirmed"} | REPORTED_QUEUE_STATUSES
 VALID_ACTOR_TYPES = {"user", "system", "ai"}
 
 
@@ -228,7 +232,7 @@ def bulk_archive(npis_with_meta: list[dict], *, actor: str) -> dict:
     bulk archive is one lock + one save."""
     now = time.time()
     archived = created = protected = already = 0
-    protected_states = {"confirmed", "referred", "tip_filed", "dismissed"}
+    protected_states = {"confirmed", "dismissed"} | REPORTED_QUEUE_STATUSES
     with _review_lock:
         for meta in npis_with_meta:
             npi = meta.get("npi")
@@ -368,7 +372,7 @@ def set_queue_status(
         if new_status == "dismissed":
             from services.feedback_tracker import record_dismissal
             record_dismissal(npi)
-        elif new_status in ("confirmed", "tip_filed", "referred"):
+        elif new_status == "confirmed" or new_status in REPORTED_QUEUE_STATUSES:
             from services.feedback_tracker import record_confirmation
             record_confirmation(npi)
         # NOTE: "archived" deliberately records nothing — archiving closes a case

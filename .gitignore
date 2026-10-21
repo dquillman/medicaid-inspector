@@ -114,3 +114,7 @@ backend/referrals.json
 backend/auto_prep_state.json
 # signal FP/TP counts + learned weight multipliers
 backend/feedback_data.json
+# built by scripts/build_revocations.py (CMS quarterly extract)
+backend/medicare_revocations.json
+# TypeScript incremental build byproduct
+*.tsbuildinfo

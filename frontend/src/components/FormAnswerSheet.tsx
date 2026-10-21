@@ -25,7 +25,13 @@ export interface FormField {
  * Empty value = we do not hold it. Rendered as "leave blank" rather than an
  * empty box, because guessing on a government form is worse than a gap.
  */
-export default function FormAnswerSheet({ fields }: { fields: FormField[] }) {
+export default function FormAnswerSheet({
+  fields,
+  formName = 'the state’s intake form',
+}: {
+  fields: FormField[]
+  formName?: string
+}) {
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null)
   const [failedIdx, setFailedIdx] = useState<number | null>(null)
   const scratch = useRef<HTMLTextAreaElement>(null)
@@ -69,7 +75,7 @@ export default function FormAnswerSheet({ fields }: { fields: FormField[] }) {
           Form answers &mdash; copy each field straight across
         </h3>
         <p className="text-[11px] text-gray-500 mt-0.5">
-          Everything the state&rsquo;s intake form asks for, derived for this provider.
+          Everything {formName} asks for, derived for this provider.
           Blank means we don&rsquo;t hold it &mdash; leave it blank rather than guess.
         </p>
       </div>

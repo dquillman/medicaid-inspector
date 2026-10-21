@@ -47,6 +47,7 @@ const InvestigatePage = lazy(() => import('./pages/InvestigatePage'))
 const OwnershipTracePage = lazy(() => import('./pages/OwnershipTracePage'))
 const MFCUReferralPage = lazy(() => import('./pages/MFCUReferralPage'))
 const OigReferralPage = lazy(() => import('./pages/OigReferralPage'))
+const DojReferralPage = lazy(() => import('./pages/DojReferralPage'))
 import NotificationBell from './components/NotificationBell'
 import CommandPalette from './components/CommandPalette'
 import KeyboardShortcuts from './components/KeyboardShortcuts'
@@ -195,6 +196,7 @@ function AnimatedRoutes() {
           <Route path="/providers/:npi/ownership" element={<OwnershipTracePage />} />
           <Route path="/providers/:npi/referral" element={<MFCUReferralPage />} />
           <Route path="/providers/:npi/oig-referral" element={<OigReferralPage />} />
+          <Route path="/providers/:npi/doj-referral" element={<DojReferralPage />} />
           <Route path="/anomalies"         element={<AnomalyDashboard />} />
           <Route path="/network"           element={<NetworkGraph />} />
           <Route path="/review"            element={<ReviewQueue />} />

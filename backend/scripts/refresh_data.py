@@ -59,6 +59,7 @@ ARTIFACTS = [
     {"key": "network_index","path": "network_index.parquet",     "blob": "network_index.parquet",     "kind": "derived",  "syncable": True,  "desc": "Ego-network index (fast /api/network)"},
     {"key": "ml_scores",    "path": "ml_scores.json",            "blob": "ml_scores.json",            "kind": "derived",  "syncable": True,  "desc": "ML anomaly scores (Isolation Forest)"},
     {"key": "deactivations","path": "npi_deactivations.json",    "blob": "npi_deactivations.json",    "kind": "external", "syncable": True,  "desc": "Deactivated-NPI lookup (NPPES)"},
+    {"key": "perse_leads",  "path": "perse_leads.json",          "blob": "perse_leads.json",          "kind": "external", "syncable": True,  "desc": "Per-se leads (LEIE, Medicare revocation, dead NPI)"},
 ]
 
 _TOLERANCE_SEC = 120  # ignore sub-2-minute clock skew between local mtime and GCS
@@ -260,6 +261,13 @@ def _upload(keys: list[str]) -> None:
         print(f"    done in {time.time() - t:.0f}s")
 
 
+def _run_perse_steps() -> None:
+    """The Medicare revocation list is refreshed quarterly by CMS and the
+    per-se sweep depends on it, so both rebuild on every update."""
+    _run_step("Medicare revocation list (CMS)", [str(_SCRIPTS / "build_revocations.py")])
+    _run_step("Per-se sweep (LEIE / revocation / dead NPI)", [str(_SCRIPTS / "build_perse_sweep.py")])
+
+
 def cmd_update(args) -> int:
     parquet = _BACKEND / "data" / "medicaid-provider-spending.parquet"
 
@@ -289,6 +297,8 @@ def cmd_update(args) -> int:
             upload_keys = [k for k in upload_keys if k != "deactivations"]
     else:
         upload_keys = [k for k in upload_keys if k != "deactivations"]
+
+    _run_perse_steps()
 
     if args.upload_parquet:
         upload_keys = ["parquet", *upload_keys]
@@ -358,6 +368,7 @@ def cmd_smart() -> int:
         _run_step("Download the new government data", [str(_SCRIPTS / "ingest_source_parquet.py"), "ingest"])
     _run_step("Rebuild scan cache", [str(_SCRIPTS / "rebuild_prescan_bulk.py")])
     _run_step("Rebuild analyses + indexes + scores", [str(_SCRIPTS / "precompute_analyses.py")])
+    _run_perse_steps()
 
     upload_keys = [a["key"] for a in ARTIFACTS if a["syncable"] and a["key"] != "deactivations"]
     if source_new:

@@ -203,7 +203,7 @@ export default function OigReferralPage() {
                   <h3 className="text-sm font-semibold text-gray-200 mb-2">
                     Subject fields &mdash; copy each straight into the wizard
                   </h3>
-                  <FormAnswerSheet fields={formFields} />
+                  <FormAnswerSheet fields={formFields} formName="the OIG Hotline form" />
                 </div>
               )}
 

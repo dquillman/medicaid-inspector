@@ -14,6 +14,17 @@ class AddTipBody(BaseModel):
     state: str = ""
     risk_score: float = 0.0
     notes: str = ""
+    # 'oig' = HHS-OIG Hotline; 'doj' = DOJ Criminal Tip Rewards portal.
+    destination: str = "oig"
+    # The DOJ portal shows a reference number on submit — record it here.
+    reference_number: str = ""
+
+
+# Ledger status a logged tip moves the case to, per channel.
+_STATUS_FOR_DEST = {
+    "oig": ("tip_filed", "HHS-OIG Hotline tip logged as filed"),
+    "doj": ("doj_filed", "DOJ Criminal Tip Rewards tip (america.gov/fraud) logged as filed"),
+}
 
 
 class UpdateTipBody(BaseModel):
@@ -30,28 +41,35 @@ async def list_tips():
 
 @router.get("/filed")
 async def filed():
-    """Lightweight NPI set for cross-page 'tip filed' badges."""
-    return {"npis": sorted(oig_tips_store.filed_npis())}
+    """Lightweight NPI sets for cross-page 'tip filed' badges. `npis` stays the
+    OIG set (the original TIP FILED badge); `doj_npis` is the DOJ set."""
+    return {"npis": sorted(oig_tips_store.filed_npis("oig")),
+            "doj_npis": sorted(oig_tips_store.filed_npis("doj"))}
 
 
 @router.post("")
 async def add_tip(body: AddTipBody, user: dict = Depends(require_user)):
     if not (body.npi or "").strip():
         raise HTTPException(400, "npi is required")
+    dest = (body.destination or "oig").strip().lower()
+    if dest not in _STATUS_FOR_DEST:
+        raise HTTPException(400, "destination must be 'oig' or 'doj'")
     npi = body.npi.strip()
     tip = oig_tips_store.add_tip(
         npi=npi, provider_name=body.provider_name,
         state=body.state, risk_score=body.risk_score, notes=body.notes,
+        destination=dest, reference_number=body.reference_number,
     )
-    # Single source of truth, mirroring mfcu_referral.py's /submit: logging an
-    # OIG tip IS the case reaching "Reported: OIG". Before this, nothing in the
-    # codebase ever set queue_status to tip_filed — a human had to separately
-    # remember to flip it from the Review Queue, and the two could drift.
+    # Single source of truth, mirroring mfcu_referral.py's /submit: logging a
+    # tip IS the case reaching "Reported: OIG" / "Reported: DOJ". Before this,
+    # nothing ever set the ledger status — a human had to separately remember
+    # to flip it from the Review Queue, and the two could drift.
     # Best-effort — the provider may not be in the review queue.
+    status, note = _STATUS_FOR_DEST[dest]
     try:
         from core.review_store import set_queue_status
-        set_queue_status(npi, "tip_filed", actor=user.get("username", "unknown"),
-                          actor_type="user", note="HHS-OIG Hotline tip logged as filed")
+        set_queue_status(npi, status, actor=user.get("username", "unknown"),
+                         actor_type="user", note=note)
     except Exception:
         pass
     return tip

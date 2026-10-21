@@ -124,10 +124,53 @@ def test_excluded_page_and_worklist_are_disjoint(sweep, monkeypatch):
     })
     assert perse_store.is_on_excluded_page("5555555555") is True
     assert perse_store.is_on_excluded_page("6666666666") is True
+    # Medicare-revoked and still billing Medicaid -> Excluded page too.
+    monkeypatch.setattr(perse_store, "_by_npi", {
+        **perse_store._by_npi,
+        "7777777777": {"npi": "7777777777", "kind": "medicare_revoked_billing"},
+    })
+    assert perse_store.is_on_excluded_page("7777777777") is True
     # A recovery lead is NOT a deactivation; it stays out unless OIG says so.
     assert perse_store.is_on_excluded_page("3333333333") is False
     # An ordinary provider stays in the worklist.
     assert perse_store.is_on_excluded_page("9999999999") is False
+
+
+def _sweep_module():
+    import importlib.util
+    import pathlib
+    path = pathlib.Path(__file__).parent.parent / "scripts" / "build_perse_sweep.py"
+    spec = importlib.util.spec_from_file_location("build_perse_sweep", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_revocation_window_skips_grace_month_and_ends_at_reenrollment_bar():
+    """Billing in the month right after a revocation is not a lead (the state
+    needs time to act), and billing after the re-enrollment bar expires may be
+    a lawful re-enrollment."""
+    m = _sweep_module()
+    wins = m._revocation_windows([{"revocation_date": "2021-04-15",
+                                   "reenrollment_bar_until": "2023-04-15"}])
+    assert wins == [(202106, 202304)]
+    inside = lambda month: any(s <= month and (e is None or month < e) for s, e in wins)
+    assert not inside(202105)
+    assert inside(202106)
+    assert inside(202303)
+    assert not inside(202304)
+    assert m._add_months(202111, 2) == 202201
+
+
+def test_dme_only_revocation_carries_a_check_first_caveat():
+    """A revocation resting only on DME supplier standards can cover just the
+    supply enrollment of a practice — the lead must say so before anyone files."""
+    m = _sweep_module()
+    dme = [{"reason": "424.535(A)(1) Noncompliance (Dme Standards Not Met)"}]
+    felony = [{"reason": "424.535(A)(9) Failure To Report;424.535(A)(3) Felonies"}]
+    assert "DME supplier enrollment" in m._revocation_caveat(dme)
+    assert m._revocation_caveat(felony) == ""
+    assert m._revocation_caveat(dme + felony) == ""
 
 
 def test_worklist_filter_degrades_to_oig_only_without_a_sweep(tmp_path, monkeypatch):

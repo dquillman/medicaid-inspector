@@ -31,10 +31,12 @@ _loaded = False
 # Ranked worst-first. active_exclusion is billing DURING an exclusion (per-se
 # fraud); recovery_lead is billing that predates it (a clawback, not active
 # fraud) and must never be presented as the former.
-KINDS = ("active_exclusion", "deactivated_billing", "deactivated_window", "recovery_lead")
+KINDS = ("active_exclusion", "medicare_revoked_billing", "deactivated_billing",
+         "deactivated_window", "recovery_lead")
 
 KIND_LABELS = {
     "active_exclusion": "Billing while excluded",
+    "medicare_revoked_billing": "Billing after Medicare revocation",
     "deactivated_billing": "Billing under a dead NPI",
     "deactivated_window": "Billed while NPI was deactivated",
     "recovery_lead": "Recovery lead (excluded later)",
@@ -166,9 +168,10 @@ def count() -> int:
     return len(_by_npi)
 
 
-# Kinds that are NOT an OIG exclusion — the deactivated-NPI findings. The OIG
-# ones are caught by oig_store, which is authoritative and always loaded.
-_DEACTIVATED_KINDS = ("deactivated_billing", "deactivated_window")
+# Per-se kinds that are NOT an OIG exclusion — Medicare revocation and the
+# deactivated-NPI findings. The OIG ones are caught by oig_store, which is
+# authoritative and always loaded.
+_NON_OIG_PERSE_KINDS = ("medicare_revoked_billing", "deactivated_billing", "deactivated_window")
 
 
 def is_on_excluded_page(npi: str) -> bool:
@@ -194,4 +197,4 @@ def is_on_excluded_page(npi: str) -> bool:
     if not _loaded:
         _load()
     lead = _by_npi.get(npi)
-    return bool(lead) and lead.get("kind") in _DEACTIVATED_KINDS
+    return bool(lead) and lead.get("kind") in _NON_OIG_PERSE_KINDS

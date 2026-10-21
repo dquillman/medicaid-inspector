@@ -91,10 +91,10 @@ def get_roi_summary() -> dict:
 
     # Review queue stats — read the case-ledger status (queue_status), the one
     # status model. The legacy workflow `status` field was retired from the UI,
-    # so it no longer advances. 'referred'/'tip_filed' both mean Reported.
+    # so it no longer advances. 'referred'/'tip_filed'/'doj_filed' all mean Reported.
     all_reviews = get_review_queue()
     confirmed = [r for r in all_reviews if r.get("queue_status") == "confirmed"]
-    referred = [r for r in all_reviews if r.get("queue_status") in ("referred", "tip_filed")]
+    referred = [r for r in all_reviews if r.get("queue_status") in ("referred", "tip_filed", "doj_filed")]
     dismissed = [r for r in all_reviews if r.get("queue_status") == "dismissed"]
 
     cases_confirmed = len(confirmed)

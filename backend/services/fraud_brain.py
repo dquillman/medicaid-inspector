@@ -357,11 +357,12 @@ def _perse_waiting_summary() -> dict:
 
     rows = perse_store.list_leads(limit=100_000)["leads"]
     statuses = get_queue_statuses([r["npi"] for r in rows])
-    _worked = {"confirmed", "referred", "tip_filed", "archived", "dismissed"}
+    _worked = {"confirmed", "referred", "tip_filed", "doj_filed", "archived", "dismissed"}
     open_rows = [r for r in rows if statuses.get(r["npi"]) not in _worked]
 
     provable = [r for r in open_rows
-                if r.get("kind") in ("active_exclusion", "deactivated_billing", "deactivated_window")]
+                if r.get("kind") in ("active_exclusion", "medicare_revoked_billing",
+                                     "deactivated_billing", "deactivated_window")]
     return {
         "available": True,
         "provable": len(provable),
@@ -369,8 +370,9 @@ def _perse_waiting_summary() -> dict:
         # The reason the sweep exists: these are invisible to the risk model.
         "below_cutoff": len([r for r in provable if r.get("in_scan_cache") is False]),
         "paid_while_barred": round(sum(
-            (r.get("paid_after_exclusion") or r.get("paid_after_deactivation")
-             or r.get("paid_during_deactivation") or 0) for r in provable), 2),
+            (r.get("paid_after_exclusion") or r.get("paid_after_revocation")
+             or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0)
+            for r in provable), 2),
         "generated_at": summary.get("generated_at"),
     }
 
@@ -411,8 +413,8 @@ def compute_top_frauds(limit: int = 10) -> dict:
     #     fraud — investigation is over. The board is for leads still needing
     #     investigation, so a confirmed case drops off and is worked (reported)
     #     from the Review Queue, not the board. (Dave's call 2026-07-24.)
-    #   - REPORTED cases (queue_status referred / legacy tip_filed): the work is
-    #     done — filed with OIG + referred to MFCU. A membership gate, not a
+    #   - REPORTED cases (queue_status referred / tip_filed / doj_filed): the work
+    #     is done — filed with OIG, MFCU or DOJ. A membership gate, not a
     #     score input: nothing here changes any remaining provider's score.
     #   - STALE providers (last claim >24mo behind the newest data): not an
     #     active scheme.
@@ -424,7 +426,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
     # and the board's Actionable view, and their labels train the model).
     from core.review_store import get_queue_statuses
     _statuses = get_queue_statuses([p.get("npi") for p in providers if p.get("npi")])
-    _reported = {n for n, s in _statuses.items() if s in ("referred", "tip_filed")}
+    _reported = {n for n, s in _statuses.items() if s in ("referred", "tip_filed", "doj_filed")}
     _confirmed = {n for n, s in _statuses.items() if s == "confirmed"}
     newest_idx = dataset_newest_month_index()
     excluded_counts = {"reported": 0, "confirmed": 0, "stale": 0, "expired": 0}
@@ -733,6 +735,12 @@ def compute_top_frauds(limit: int = 10) -> dict:
     for e in scored:
         e["queue_status"] = _ledger.get(e["npi"])  # None => not in the review queue
 
+    # DOJ priority area (hospice / home health / day care / special services) —
+    # annotation only, never a score input. Only the served slice is tagged.
+    from services.doj_filing_guide import doj_priority
+    for e in scored[:limit]:
+        e["doj_priority_area"] = doj_priority(e.get("specialty") or "")["area"] or None
+
     return {
         "top": scored[:limit],
         "providers_evaluated": len(scored),
@@ -776,7 +784,7 @@ def _apply_live_ledger(entries: list[dict]) -> list[dict]:
     out = []
     for e in entries:
         qs = statuses.get(e["npi"])
-        if qs in ("confirmed", "referred", "tip_filed", "archived"):
+        if qs in ("confirmed", "referred", "tip_filed", "doj_filed", "archived"):
             continue
         out.append({**e, "queue_status": qs})
     return out

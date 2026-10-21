@@ -620,6 +620,13 @@ export default function ProviderDetail() {
           >
             <DocumentTextIcon /> OIG Hotline Tip
           </Link>
+          <Link
+            to={`/providers/${npi}/doj-referral`}
+            className="px-4 py-2 bg-amber-500/15 hover:bg-amber-500/25 border border-amber-400 hover:border-amber-300 text-amber-200 text-sm font-semibold rounded transition-colors flex items-center gap-2"
+            title="DOJ CRIMINAL TIP REWARDS — file this lead at america.gov/fraud. Reward $10k-$30k per distinct tip if it leads to criminal charges. Short version for the 2,000-char box, the full narrative as a .txt to attach, and a per-provider guide."
+          >
+            <DocumentTextIcon /> DOJ Tip (Rewards)
+          </Link>
           {exportError && <p className="text-xs text-red-400">{exportError}</p>}
           {watchlistStatus?.watched ? (
             <button
