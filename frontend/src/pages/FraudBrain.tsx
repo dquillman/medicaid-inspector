@@ -416,18 +416,21 @@ export default function FraudBrain() {
   // are still live work. "All" is one click away and shows everything ranked;
   // nothing is ever removed from the ranking and ranks never renumber.
   const [actionableOnly, setActionableOnly] = useState(true)
+  // DOJ view: the same ranking, filtered to DOJ's Criminal Tip Rewards priority
+  // areas. Scores and ranks are the main board's — it never re-scores.
+  const [dojOnly, setDojOnly] = useState(false)
   // The Recompute button must genuinely bypass the backend's 15-min cache —
   // previously it refetched the CACHED board, which made it a no-op. The ref
   // flips to true for exactly one fetch when the button is clicked.
   const forceRef = useRef(false)
   const { data, isLoading, error, refetch, isFetching } = useQuery({
-    queryKey: ['fraud-brain'],
+    queryKey: ['fraud-brain', dojOnly],
     // Fetch 25 deep so the Actionable view still fills 10 slots after
     // resolved/expired rows are filtered out.
     queryFn: () => {
       const force = forceRef.current
       forceRef.current = false
-      return api.fraudBrainTop(25, force)
+      return api.fraudBrainTop(25, force, dojOnly)
     },
     // Kept short + refetch-on-focus so this board and the Review Queue's Brain
     // scores (via useProviderFlags) converge on the same snapshot.
@@ -441,7 +444,7 @@ export default function FraudBrain() {
     // membership map too so the Review Queue's Brain scores don't lag behind.
     void qc.invalidateQueries({ queryKey: ['brain-membership'] })
   }
-  const ranked = (data?.top ?? []).map((p, i) => ({ p, rank: i + 1 }))
+  const ranked = (data?.top ?? []).map((p, i) => ({ p, rank: dojOnly ? (p.brain_rank ?? i + 1) : i + 1 }))
   const isResolved = (p: FraudBrainProvider) =>
     p.queue_status === 'referred' || p.queue_status === 'tip_filed' || p.queue_status === 'doj_filed' ||
     p.queue_status === 'dismissed' || p.queue_status === 'archived'
@@ -485,7 +488,7 @@ export default function FraudBrain() {
         }
       })
     },
-    { dependencies: [data?.top, actionableOnly], scope: boardRef },
+    { dependencies: [data?.top, actionableOnly, dojOnly], scope: boardRef },
   )
 
   return (
@@ -551,7 +554,7 @@ export default function FraudBrain() {
                 {data.perse_waiting.provable.toLocaleString()} provable leads are waiting, and none of them can rank here
               </p>
               <p className="text-xs text-ink-tertiary mt-1 leading-relaxed">
-                Providers billing while OIG-excluded or under a deactivated NPI
+                Providers billing while OIG-excluded, after a Medicare revocation, or under a deactivated NPI
                 {data.perse_waiting.paid_while_barred
                   ? <> — <span className="text-threat-high font-mono">{fmt(data.perse_waiting.paid_while_barred)}</span> paid while barred</>
                   : null}
@@ -581,6 +584,42 @@ export default function FraudBrain() {
         </div>
       )}
       {data?.note && <div className="card"><p className="text-sm text-ink-tertiary">{data.note}</p></div>}
+
+      {data && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="inline-flex rounded border border-hairline overflow-hidden">
+            <button
+              onClick={() => setDojOnly(false)}
+              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider transition-colors ${
+                !dojOnly ? 'bg-surface-2 text-filament-core' : 'text-ink-tertiary hover:text-ink-secondary'
+              }`}
+            >
+              All leads
+            </button>
+            <button
+              onClick={() => setDojOnly(true)}
+              title="Hospice, home health, day care and special services: the areas DOJ names as priorities for its Criminal Tip Rewards program"
+              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider transition-colors border-l border-hairline ${
+                dojOnly ? 'bg-amber-400/10 text-amber-300' : 'text-ink-tertiary hover:text-ink-secondary'
+              }`}
+            >
+              DOJ priority
+            </button>
+          </div>
+          {dojOnly && (
+            <span className="text-[11px] text-ink-tertiary font-mono">
+              {(data.doj_priority_total ?? 0).toLocaleString()} ranked providers in DOJ priority areas
+              (hospice, home health, day care, special services). Same scores; # is the main-board rank.{' '}
+              <Link to="/doj-shortlist" className="text-amber-300 hover:text-amber-200 underline">
+                The DOJ Shortlist puts provable leads first →
+              </Link>
+            </span>
+          )}
+        </div>
+      )}
+      {dojOnly && data && data.top.length === 0 && (
+        <div className="card"><p className="text-sm text-ink-tertiary">No ranked leads in DOJ priority areas right now.</p></div>
+      )}
 
       {/* Actionable/All view toggle — Actionable (default) hides resolved
           (Reported/Dismissed) and expired rows, backfilling with the next

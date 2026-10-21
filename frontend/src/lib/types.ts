@@ -1753,6 +1753,8 @@ export interface FraudBrainProvider {
   // DOJ Criminal Tip Rewards priority area (Hospice / Home health care / Day
   // care / Special services), null when not a priority area. Annotation only.
   doj_priority_area?: string | null
+  /** 1-based position on the full ranking (the DOJ view keeps the main-board rank). */
+  brain_rank?: number
   corroborating_sources: number
   components: Record<string, number>
   evidence: FraudBrainEvidence[]
@@ -1770,9 +1772,40 @@ export interface MissingProvidersPreview {
   note?: string | null
 }
 
+export interface DojShortlistLead {
+  npi: string
+  rank: number
+  /** 1 = worked case not yet sent to DOJ, 2 = per-se finding, 3 = statistical Brain lead */
+  tier: 1 | 2 | 3
+  provider_name: string
+  state: string
+  specialty: string
+  reason: string
+  amount: number
+  amount_label: string
+  last_month: string | null
+  doj_priority_area: string | null
+  queue_status: string | null
+  caveat: string
+  kind?: string
+  brain_rank?: number
+}
+
+export interface DojShortlistResponse {
+  leads: DojShortlistLead[]
+  total: number
+  by_tier: Record<'1' | '2' | '3', number>
+  dropped: { too_old: number; already_doj: number; closed: number }
+  cutoff_month: string
+  limitation_years: number
+}
+
 export interface FraudBrainResponse {
   top: FraudBrainProvider[]
   providers_evaluated: number
+  /** Ranked providers in a DOJ Criminal Tip Rewards priority area. */
+  doj_priority_total?: number
+  doj_only?: boolean
   // Membership gates: providers excluded from the ranking entirely (no brain
   // rank) — reported (work done), stale (not active), expired (past recovery).
   excluded?: { confirmed: number; reported: number; stale: number; expired: number }

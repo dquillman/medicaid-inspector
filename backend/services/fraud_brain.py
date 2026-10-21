@@ -736,13 +736,25 @@ def compute_top_frauds(limit: int = 10) -> dict:
         e["queue_status"] = _ledger.get(e["npi"])  # None => not in the review queue
 
     # DOJ priority area (hospice / home health / day care / special services) —
-    # annotation only, never a score input. Only the served slice is tagged.
+    # annotation only, never a score input. Every ranked row is tagged so the
+    # DOJ view can reach past the top N; memoised because ~117k rows share a
+    # few hundred specialty strings.
     from services.doj_filing_guide import doj_priority
-    for e in scored[:limit]:
-        e["doj_priority_area"] = doj_priority(e.get("specialty") or "")["area"] or None
+    _area: dict[str, str | None] = {}
+    for i, e in enumerate(scored):
+        spec = e.get("specialty") or ""
+        if spec not in _area:
+            _area[spec] = doj_priority(spec)["area"] or None
+        e["doj_priority_area"] = _area[spec]
+        e["brain_rank"] = i + 1
+    doj_rows = [e for e in scored if e["doj_priority_area"]]
 
     return {
         "top": scored[:limit],
+        # The DOJ view: the best-ranked leads in DOJ's priority areas, in the
+        # SAME order and with the SAME scores as the main board.
+        "doj_top": doj_rows[:limit],
+        "doj_priority_total": len(doj_rows),
         "providers_evaluated": len(scored),
         # Per-se leads are NOT ranked here (they need filing, not investigating)
         # and most sit below the $1M scan cutoff, so they can never reach this
@@ -790,8 +802,16 @@ def _apply_live_ledger(entries: list[dict]) -> list[dict]:
     return out
 
 
-def get_top_frauds(limit: int = 10, force_refresh: bool = False) -> dict:
-    """TTL-cached wrapper around compute_top_frauds."""
+def get_top_frauds(limit: int = 10, force_refresh: bool = False, doj_only: bool = False) -> dict:
+    """TTL-cached wrapper around compute_top_frauds. doj_only serves the
+    DOJ-priority view (same scores, same order, filtered by provider type)."""
+    res = _get_top_frauds(limit, force_refresh)
+    if not doj_only:
+        return res
+    return {**res, "top": _apply_live_ledger(res.get("doj_top") or [])[:limit], "doj_only": True}
+
+
+def _get_top_frauds(limit: int, force_refresh: bool) -> dict:
     with _lock:
         cached = _cache["result"]
         fresh = (time.time() - _cache["computed_at"]) < CACHE_TTL_SEC

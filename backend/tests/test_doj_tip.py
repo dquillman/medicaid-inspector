@@ -125,6 +125,7 @@ def test_log_tip_rejects_unknown_destination(client, auth_headers):
     (["Child Day Care"], "Day care"),
     (["Adult Day Care"], "Day care"),
     (["Behavior Analyst"], "Special services"),
+    (["Behavior Technician"], "Special services"),
     (["Psychiatry Physician", "Early Intervention Provider Agency"], "Special services"),
 ])
 def test_doj_priority_areas(taxonomies, area):
@@ -138,3 +139,26 @@ def test_doj_priority_areas(taxonomies, area):
 ])
 def test_doj_priority_negative(taxonomies):
     assert doj_priority(taxonomies)["priority"] is False
+
+
+def test_brain_doj_view_serves_priority_rows_with_main_board_rank(monkeypatch):
+    """The DOJ view filters the SAME ranking; it never re-scores or re-ranks,
+    and a lead already reported to DOJ drops off it like any reported case."""
+    import services.fraud_brain as fb
+    import core.review_store as rs
+    doj_rows = [
+        {"npi": "1000000001", "brain_rank": 4, "doj_priority_area": "Hospice"},
+        {"npi": "1000000002", "brain_rank": 37, "doj_priority_area": "Home health care"},
+    ]
+    fake = {"top": [{"npi": "1000000009", "brain_rank": 1}], "doj_top": doj_rows,
+            "doj_priority_total": 2}
+    monkeypatch.setattr(fb, "_get_top_frauds", lambda limit, force: fake)
+    monkeypatch.setattr(rs, "get_queue_statuses",
+                        lambda npis: {"1000000001": "doj_filed"})
+
+    main = fb.get_top_frauds(10)
+    assert [e["npi"] for e in main["top"]] == ["1000000009"]
+
+    doj = fb.get_top_frauds(10, doj_only=True)
+    assert doj["doj_only"] is True
+    assert [(e["npi"], e["brain_rank"]) for e in doj["top"]] == [("1000000002", 37)]

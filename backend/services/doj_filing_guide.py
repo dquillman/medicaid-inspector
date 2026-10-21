@@ -44,7 +44,7 @@ _PRIORITY_MAP: list[tuple[tuple[str, ...], str]] = [
       "homemaker", "in home supportive", "attendant care"), "Home health care"),
     (("child care", "day care", "daycare", "adult day", "day training",
       "day habilitation"), "Day care"),
-    (("behavior analyst", "applied behavior", "autism", "developmental disab",
+    (("behavior analyst", "behavior technician", "applied behavior", "autism", "developmental disab",
       "intellectual disab", "early intervention", "respite", "supported living",
       "supports brokerage", "housing", "waiver"), "Special services"),
 ]

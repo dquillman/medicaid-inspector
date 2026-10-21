@@ -1,0 +1,68 @@
+"""DOJ shortlist: most provable first, nothing stale, nothing already sent to DOJ."""
+import datetime as dt
+
+import pytest
+
+from services import doj_shortlist as ds
+
+TODAY = dt.date(2026, 10, 21)
+
+
+@pytest.fixture
+def sources(monkeypatch):
+    import core.perse_store as perse
+    import core.oig_tips_store as tips
+    import core.review_store as rs
+    import core.store as store
+    import services.fraud_brain as fb
+
+    leads = [
+        {"npi": "1000000001", "kind": "medicare_revoked_billing", "provider_name": "OLD REVOKED",
+         "specialty": "Hospice", "last_month": "2020-06", "paid_after_revocation": 900_000},
+        {"npi": "1000000002", "kind": "deactivated_billing", "provider_name": "DEAD NPI",
+         "specialty": "Internal Medicine", "last_month": "2024-12", "paid_after_deactivation": 50_000},
+        {"npi": "1000000003", "kind": "medicare_revoked_billing", "provider_name": "HOSPICE REVOKED",
+         "specialty": "Hospice", "last_month": "2024-11", "paid_after_revocation": 10_000},
+        {"npi": "1000000004", "kind": "recovery_lead", "provider_name": "EXCLUDED LATER",
+         "specialty": "Hospice", "last_month": "2024-12", "paid_after_exclusion": 0},
+        {"npi": "1000000005", "kind": "active_exclusion", "provider_name": "SENT TO DOJ",
+         "specialty": "Hospice", "last_month": "2024-12", "paid_after_exclusion": 5_000_000},
+        {"npi": "1000000006", "kind": "deactivated_billing", "provider_name": "JUDGED NOT FRAUD",
+         "specialty": "Hospice", "last_month": "2024-12", "paid_after_deactivation": 70_000},
+    ]
+    review = [
+        {"npi": "1000000010", "queue_status": "tip_filed", "total_paid": 2_000_000},
+        {"npi": "1000000011", "queue_status": "dismissed", "total_paid": 9_000_000},
+    ]
+    statuses = {"1000000010": "tip_filed", "1000000011": "dismissed", "1000000006": "dismissed"}
+    brain = [{"npi": "1000000020", "brain_rank": 7, "brain_score": 61.0, "specialty": "Home Health",
+              "total_paid": 3_000_000, "last_active_month": "2024-10"}]
+    providers = {"1000000010": {"provider_name": "OIG CASE", "specialty": "Home Health",
+                                "last_month": "2024-09"}}
+
+    monkeypatch.setattr(perse, "list_leads", lambda limit=0, **k: {"leads": leads})
+    monkeypatch.setattr(tips, "filed_npis", lambda dest="oig": {"1000000005"} if dest == "doj" else set())
+    monkeypatch.setattr(rs, "get_review_queue", lambda *a, **k: review)
+    monkeypatch.setattr(rs, "get_queue_statuses", lambda npis: {n: statuses[n] for n in npis if n in statuses})
+    monkeypatch.setattr(store, "get_provider_by_npi", lambda npi: providers.get(npi))
+    monkeypatch.setattr(fb, "get_top_frauds", lambda *a, **k: {"top": brain})
+
+
+def test_shortlist_order_and_filters(sources):
+    out = ds.build_shortlist(TODAY)
+    order = [(r["npi"], r["tier"]) for r in out["leads"]]
+    assert order == [
+        ("1000000010", 1),   # worked case (OIG tip) not yet sent to DOJ
+        ("1000000003", 2),   # per-se, DOJ priority area (hospice) beats a bigger non-priority lead
+        ("1000000002", 2),
+        ("1000000020", 3),   # statistical Brain lead in a priority area
+    ]
+    assert out["dropped"] == {"too_old": 1, "already_doj": 1, "closed": 1}
+    assert out["cutoff_month"] == "2021-10"
+    assert all(r["npi"] != "1000000004" for r in out["leads"]), "recovery lead is not billing while barred"
+    assert out["leads"][1]["doj_priority_area"] == "Hospice"
+    assert out["leads"][1]["amount_label"] == "Paid while barred"
+
+
+def test_shortlist_endpoint_requires_auth(client):
+    assert client.get("/api/doj/shortlist").status_code in (401, 403)

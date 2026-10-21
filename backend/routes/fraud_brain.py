@@ -9,11 +9,13 @@ router = APIRouter(prefix="/api/fraud-brain", tags=["fraud-brain"], dependencies
 
 
 @router.get("/top")
-async def top_frauds(limit: int = Query(10, ge=1, le=50), refresh: bool = Query(False)):
-    """Top N most probable frauds across every data source, with evidence."""
+async def top_frauds(limit: int = Query(10, ge=1, le=50), refresh: bool = Query(False),
+                     doj_only: bool = Query(False)):
+    """Top N most probable frauds across every data source, with evidence.
+    doj_only=true limits the board to DOJ Criminal Tip Rewards priority areas."""
     from services.fraud_brain import get_top_frauds
     # Scores 106k providers in a worker thread (~1-3s cold, instant cached)
-    return await asyncio.to_thread(get_top_frauds, limit, refresh)
+    return await asyncio.to_thread(get_top_frauds, limit, refresh, doj_only)
 
 
 @router.get("/membership")

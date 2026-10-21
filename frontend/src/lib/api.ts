@@ -59,6 +59,7 @@ import type {
   LicenseVerification,
   LicenseFlagsResponse,
   FraudBrainResponse,
+  DojShortlistResponse,
   MissingProvidersPreview,
   ExcludedProvidersResponse,
   MethodsResponse,
@@ -987,8 +988,10 @@ export const api = {
   excludedProviders: () => get<ExcludedProvidersResponse>('/exclusions/excluded'),
 
   // Fraud Brain — cross-source meta-analysis
-  fraudBrainTop: (limit = 10, refresh = false) =>
-    get<FraudBrainResponse>('/fraud-brain/top', { limit, refresh }),
+  dojShortlist: () => get<DojShortlistResponse>('/doj/shortlist'),
+
+  fraudBrainTop: (limit = 10, refresh = false, dojOnly = false) =>
+    get<FraudBrainResponse>('/fraud-brain/top', { limit, refresh, doj_only: dojOnly }),
 
   fraudBrainMembership: (limit = 100) =>
     get<FraudBrainMembership>('/fraud-brain/membership', { limit }),
