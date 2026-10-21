@@ -68,7 +68,8 @@ function Invoke-Deploy {
   # resolution / WinError 2), silently leaving prod on the OLD revision after a
   # successful data upload. gcloud already works here (it fetched ADMIN_PASSWORD
   # above), so this just inlines what deploy-backend.sh does. Keep flags in sync
-  # with deploy-backend.sh.
+  # with backend/cli/mfi.py cmd_deploy_backend (4Gi, ONE instance, update - not
+  # set - env vars so HAL_URL survives, ADMIN_PASSWORD from Secret Manager).
   $pkgPath = Join-Path $root 'frontend\package.json'
   $appVersion = 'dev'
   if (Test-Path $pkgPath) {
@@ -80,9 +81,11 @@ function Invoke-Deploy {
     '--source','.',
     '--project','medicaid-inspector',
     '--region','us-central1',
-    '--memory','2Gi','--cpu','1','--max-instances','3','--concurrency','80','--timeout','300',
+    '--memory','4Gi','--cpu','1','--max-instances','1','--concurrency','80','--timeout','300',
     '--allow-unauthenticated','--port','8080',
-    '--set-env-vars',"PYTHONUNBUFFERED=1,ADMIN_PASSWORD=$($env:ADMIN_PASSWORD),APP_VERSION=$appVersion"
+    '--update-env-vars',"PYTHONUNBUFFERED=1,APP_VERSION=$appVersion",
+    '--update-secrets','ADMIN_PASSWORD=admin-password:latest',
+    '--quiet'
   )
   Push-Location $root
   try {

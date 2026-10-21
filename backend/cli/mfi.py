@@ -225,8 +225,8 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
 
     # Single source of truth for the app version is frontend/package.json. Inject
     # it so /health and the FastAPI docs report the same version as the UI.
-    # NOTE: gcloud's --set-env-vars REPLACES the whole env set, so APP_VERSION
-    # must be listed here explicitly or the deployed revision reverts to "dev".
+    # --update-env-vars, NOT --set-env-vars: "set" replaces the whole env set and
+    # would silently wipe plain vars configured on the service (HAL_URL).
     app_version = "dev"
     try:
         _pkg = json.loads((repo_root / "frontend" / "package.json").read_text(encoding="utf-8"))
@@ -252,7 +252,7 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
         "--project", _DEFAULT_GCLOUD_PROJECT,
         "--region", _DEFAULT_GCLOUD_REGION,
         "--allow-unauthenticated",
-        "--set-env-vars", f"PYTHONUNBUFFERED=1,APP_VERSION={app_version}",
+        "--update-env-vars", f"PYTHONUNBUFFERED=1,APP_VERSION={app_version}",
         "--update-secrets", f"ADMIN_PASSWORD={secret_name}:latest",
         # Pin to a SINGLE instance. Sessions live in per-instance memory (see
         # auth_store), so >1 instance means a login on instance A is unknown to
