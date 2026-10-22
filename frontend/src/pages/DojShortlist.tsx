@@ -6,21 +6,17 @@ import { fmt } from '../lib/format'
 import Breadcrumbs from '../components/Breadcrumbs'
 import ProviderFlags from '../components/ProviderFlags'
 import type { DojShortlistLead } from '../lib/types'
-
-const TIERS: { tier: 1 | 2 | 3; label: string; blurb: string; style: string }[] = [
-  { tier: 1, label: 'Your worked cases', blurb: 'Confirmed by you, or already reported to OIG / an MFCU, and not yet sent to DOJ.',
-    style: 'bg-emerald-950/60 border-emerald-800 text-emerald-300' },
-  { tier: 2, label: 'Provable findings', blurb: 'Billed while excluded, after a Medicare revocation, or under a dead NPI. Facts a prosecutor can check fast.',
-    style: 'bg-red-950/60 border-red-800 text-red-300' },
-  { tier: 3, label: 'Brain leads (DOJ areas)', blurb: 'Statistical suspicion in a DOJ priority area. Needs more checking before you file.',
-    style: 'bg-slate-800/60 border-slate-700 text-slate-300' },
-]
+import { DOJ_TIERS as TIERS } from '../lib/dojTiers'
 
 export default function DojShortlist() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['doj-shortlist'],
     queryFn: () => api.dojShortlist(),
-    staleTime: 5 * 60_000,
+    // Coming back from filing must show the list at once (kept 30 min) and
+    // refresh quietly behind it, so the lead just filed drops off.
+    staleTime: 30_000,
+    gcTime: 30 * 60_000,
+    refetchOnWindowFocus: true,
   })
   const [tier, setTier] = useState<1 | 2 | 3 | null>(null)
   const [priorityOnly, setPriorityOnly] = useState(false)
@@ -48,8 +44,10 @@ export default function DojShortlist() {
           <p className="text-xs text-gray-500 mt-2 max-w-3xl">
             Left off: {data.dropped.too_old.toLocaleString()} last billed before {data.cutoff_month}{' '}
             (federal charges usually must be filed within {data.limitation_years} years) &middot;{' '}
-            {data.dropped.already_doj.toLocaleString()} already filed with DOJ &middot;{' '}
-            {data.dropped.closed.toLocaleString()} dismissed or archived.
+            {data.dropped.already_doj.toLocaleString()} already filed with DOJ (any NPI of the company) &middot;{' '}
+            {data.dropped.closed.toLocaleString()} dismissed or archived
+            {data.dropped.same_company ? <> &middot; {data.dropped.same_company.toLocaleString()} extra NPIs merged into their company&rsquo;s row</> : null}
+            {data.dropped.short_lapse ? <> &middot; {data.dropped.short_lapse.toLocaleString()} short NPI lapses (deactivated under 6 months, then reactivated: usually paperwork)</> : null}.
           </p>
         )}
       </div>
@@ -71,10 +69,19 @@ export default function DojShortlist() {
       )}
 
       {data && (
-        <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none">
-          <input type="checkbox" checked={priorityOnly} onChange={e => setPriorityOnly(e.target.checked)} className="accent-amber-500" />
-          Only DOJ priority areas (hospice, home health, day care, special services)
-        </label>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <label className="flex items-center gap-1.5 text-xs text-gray-400 cursor-pointer select-none">
+            <input type="checkbox" checked={priorityOnly} onChange={e => setPriorityOnly(e.target.checked)} className="accent-amber-500" />
+            Only DOJ priority areas (hospice, home health, day care, special services)
+          </label>
+          <Link
+            to={`/doj-filing?${new URLSearchParams({ ...(tier ? { tier: String(tier) } : {}), ...(priorityOnly ? { priority: '1' } : {}) })}`}
+            className="px-4 py-2 text-sm font-semibold rounded bg-amber-600 hover:bg-amber-500 text-black"
+            title="Walk these leads one at a time, with each report ready"
+          >
+            Start filing ({rows.length.toLocaleString()}) &rarr;
+          </Link>
+        </div>
       )}
 
       {isLoading && (
@@ -111,6 +118,11 @@ export default function DojShortlist() {
                       <Link to={`/providers/${l.npi}`} className="text-blue-400 hover:underline">{l.provider_name || l.npi}</Link>
                       <ProviderFlags npi={l.npi} className="ml-1.5" />
                       <p className="text-[10px] text-gray-600 font-mono">{l.npi} &middot; {l.specialty || 'specialty unknown'}</p>
+                      {l.related_npis && l.related_npis.length > 0 && (
+                        <p className="text-[10px] text-amber-400/80 font-mono" title="Same company. File it as ONE tip and list all of these NPIs in it.">
+                          +{l.related_npis.length} more NPI{l.related_npis.length === 1 ? '' : 's'}: {l.related_npis.join(', ')}
+                        </p>
+                      )}
                     </td>
                     <td className="py-2 pr-3 text-gray-400">{l.state || '—'}</td>
                     <td className="py-2 pr-3">

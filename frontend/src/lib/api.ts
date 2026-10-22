@@ -1015,7 +1015,7 @@ export const api = {
   // to Reported: DOJ; `reference_number` = the portal's own reference number.
   logOigTip: (body: {
     npi: string; provider_name?: string; state?: string; risk_score?: number; notes?: string
-    destination?: 'oig' | 'doj'; reference_number?: string
+    destination?: 'oig' | 'doj'; reference_number?: string; filed_text?: string
   }) =>
     mutate<OigTip>('POST', '/oig-tips', body),
   updateOigTip: (id: string, body: Partial<Pick<OigTip, 'status' | 'reference_number' | 'notes' | 'outcome_notes'>>) =>

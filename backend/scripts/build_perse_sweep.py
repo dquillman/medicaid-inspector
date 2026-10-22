@@ -120,6 +120,12 @@ def _revocation_caveat(recs: list[dict]) -> str:
         return ("Medicare revoked this provider's DME supplier enrollment for failing "
                 "supplier standards. Confirm the state terminated the same enrollment "
                 "before filing; other services the practice bills may still be lawful.")
+    if any("felon" in x for x in reasons):
+        # 424.535(a)(3) revocations follow a conviction, so prosecutors already
+        # know the provider. Only the billing AFTER the revocation is new.
+        return ("Revoked after a felony conviction, so prosecutors already know this "
+                "provider. Your tip's new fact is the Medicaid billing after the "
+                "revocation; lead with that.")
     return ""
 
 
@@ -259,10 +265,14 @@ def main() -> int:
             "in_scan_cache": (npi in scanned) if scanned is not None else None,
         }
 
+        # Billing is monthly, so only months wholly AFTER a bar date count. A
+        # bar that starts on the 31st must not turn that whole month's billing
+        # into "paid while barred" (measured 2026-10-21: 66 of 338 dead-NPI
+        # leads billed only in the deactivation month itself).
         rec = exclusions.get(npi)
         if rec:
             ed = _ym(rec.get("excl_date"))
-            after = sum(p for m, p in a["months"] if ed is not None and m >= ed)
+            after = sum(p for m, p in a["months"] if ed is not None and m > ed)
             active = ed is not None and after > 0
             leads.append({
                 **base,
@@ -310,7 +320,7 @@ def main() -> int:
         dt = deacts.get(npi)
         if dt:
             dd = _ym(dt)
-            after = sum(p for m, p in a["months"] if dd is not None and m >= dd)
+            after = sum(p for m, p in a["months"] if dd is not None and m > dd)
             if after <= 0:
                 # Deactivated AFTER all its billing. The NPI is dead now, but
                 # nothing was billed while it was dead — no per-se claim.
@@ -332,7 +342,10 @@ def main() -> int:
             dd, rd = _ym(win[0]), _ym(win[1])
             if dd is None or rd is None or rd <= dd:
                 continue
-            inside = sum(p for m, p in a["months"] if dd <= m < rd)
+            # Whole months strictly inside the gap only. Most gaps are
+            # paperwork lapses (median 40 days), and a 20-day gap spanning a
+            # month boundary contains no whole month at all.
+            inside = sum(p for m, p in a["months"] if dd < m < rd)
             if inside <= 0:
                 continue  # billed only outside the window — the NPI was valid then
             leads.append({

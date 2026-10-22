@@ -26,6 +26,7 @@ VALID_STATUS = ["filed", "acknowledged", "under_review", "action_taken", "no_act
 # Federal tip channels logged here. 'doj' = DOJ Criminal Tip Rewards portal
 # (america.gov/fraud). Tips saved before this field existed are OIG tips.
 VALID_DESTINATIONS = ("oig", "doj")
+MAX_FILED_TEXT = 30_000
 
 
 def _dest_of(tip: dict) -> str:
@@ -89,9 +90,13 @@ def _make_ref(npi: str, when: float, channel: str = "OIG") -> str:
 
 def add_tip(npi: str, provider_name: str = "", state: str = "",
             risk_score: float = 0.0, notes: str = "", destination: str = "oig",
-            reference_number: str = "") -> dict:
+            reference_number: str = "", filed_text: str = "") -> dict:
     """Idempotent per (NPI, destination) — returns the existing tip if one is
-    already logged for that channel."""
+    already logged for that channel.
+
+    filed_text is the narrative as filed. Most DOJ-shortlist leads are per-se
+    findings that never enter the Review Queue, so they have no case to hold a
+    case note — the filing record is where the submitted text is kept."""
     if destination not in VALID_DESTINATIONS:
         raise ValueError(f"Invalid destination {destination!r}; must be one of {VALID_DESTINATIONS}")
     _load()
@@ -121,6 +126,8 @@ def add_tip(npi: str, provider_name: str = "", state: str = "",
                 "Tip logged as filed with HHS-OIG Hotline" if destination == "oig" else
                 "Tip logged as filed with the DOJ Criminal Tip Rewards portal (america.gov/fraud)")}],
         }
+        if filed_text:
+            tip["filed_text"] = filed_text[:MAX_FILED_TEXT]
         if destination == "oig":
             # OIG never confirms receipt/status; a FOIA "records pertinent to my
             # complaint" request is only appropriate >=6 months after filing.

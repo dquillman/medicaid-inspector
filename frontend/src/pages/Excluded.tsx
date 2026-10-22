@@ -18,6 +18,17 @@ const KIND_STYLE: Record<string, string> = {
   recovery_lead:       'bg-slate-800/60 border-slate-700 text-slate-300',
 }
 
+/** Days between deactivation and reactivation (NPPES MM/DD/YYYY dates). */
+function gapDays(p: { deactivation_date?: string; reactivation_date?: string }): number | null {
+  const parse = (s?: string) => {
+    const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s ?? '')
+    return m ? Date.UTC(+m[3], +m[1] - 1, +m[2]) : null
+  }
+  const a = parse(p.deactivation_date)
+  const b = parse(p.reactivation_date)
+  return a !== null && b !== null ? Math.round((b - a) / 86_400_000) : null
+}
+
 export default function Excluded() {
   const { data, isLoading, error } = useQuery({
     queryKey: ['excluded-providers'],
@@ -188,6 +199,12 @@ export default function Excluded() {
                       <span className={`text-[10px] px-2 py-0.5 border rounded ${KIND_STYLE[p.kind ?? ''] ?? 'border-gray-800 text-gray-500'}`}>
                         {labels[p.kind ?? ''] ?? p.excl_type ?? '—'}
                       </span>
+                      {p.kind === 'deactivated_window' && gapDays(p) !== null && gapDays(p)! < 180 && (
+                        <span className="ml-1.5 text-[9px] text-gray-500 cursor-help"
+                              title={`The NPI was off for ${gapDays(p)} days, then reactivated. A short gap is usually a paperwork lapse, so this lead is weak and is not on the DOJ shortlist.`}>
+                          WEAK
+                        </span>
+                      )}
                       {p.caveat && (
                         <span className="ml-1.5 text-[9px] text-amber-400 cursor-help" title={p.caveat}>
                           CHECK FIRST

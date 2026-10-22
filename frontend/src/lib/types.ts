@@ -1786,16 +1786,19 @@ export interface DojShortlistLead {
   last_month: string | null
   doj_priority_area: string | null
   queue_status: string | null
+  risk_score: number
   caveat: string
   kind?: string
   brain_rank?: number
+  /** Other NPIs of the same company, merged into this row (file one tip). */
+  related_npis?: string[]
 }
 
 export interface DojShortlistResponse {
   leads: DojShortlistLead[]
   total: number
   by_tier: Record<'1' | '2' | '3', number>
-  dropped: { too_old: number; already_doj: number; closed: number }
+  dropped: { too_old: number; already_doj: number; closed: number; same_company?: number; short_lapse?: number }
   cutoff_month: string
   limitation_years: number
 }
@@ -2009,6 +2012,8 @@ export interface OigTip {
   reference_number: string
   notes: string
   outcome_notes: string
+  /** The narrative as filed (kept on the record; most DOJ leads have no case). */
+  filed_text?: string
   filed_at: number
   updated_at: number
   foia_eligible_at?: number

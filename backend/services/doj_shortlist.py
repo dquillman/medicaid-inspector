@@ -15,9 +15,11 @@ DOJ pays only when a tip leads to unsealed criminal charges, so the order is:
 
 Inside a tier, DOJ priority areas come first, then the dollar figure.
 
-Two filters apply to every tier:
-  * Leads already logged with DOJ, dismissed (judged not fraud) or archived
-    are dropped.
+Filters that apply to every tier:
+  * Leads already logged with DOJ (any NPI of the same company), dismissed
+    (judged not fraud) or archived are dropped.
+  * One company billing under several NPIs is one row (DOJ pays per distinct
+    tip); the other NPIs are listed on it.
   * The general federal limitation period is 5 years (18 U.S.C. 3282), so a
     lead whose most recent billing is older than that is dropped. DOJ decides
     timeliness; this keeps clearly stale leads off the list.
@@ -25,9 +27,17 @@ Two filters apply to every tier:
 from __future__ import annotations
 
 import datetime as _dt
+import re
 
 LIMITATION_YEARS = 5
 
+# deactivated_window (NPI deactivated, then reactivated) needs a long gap.
+# Most gaps are paperwork lapses (median 40 days, measured 2026-10-21; Seven
+# Hills RI alone had six NPIs on the list), and a lapse the provider fixed
+# within weeks will not support criminal charges. A gap of six months or more
+# is not a lapse (Great Bay Services: ~3 years), so those stay. Short-gap
+# leads remain on the Excluded page.
+MIN_WINDOW_GAP_DAYS = 180
 _PERSE_KIND_ORDER = {
     "active_exclusion": 0,
     "medicare_revoked_billing": 1,
@@ -40,6 +50,23 @@ _PERSE_REASON = {
     "deactivated_billing": "Billed Medicaid under a deactivated NPI",
     "deactivated_window": "Billed Medicaid while the NPI was deactivated",
 }
+
+
+def _gap_days(lead: dict) -> int | None:
+    try:
+        a = _dt.datetime.strptime(lead["deactivation_date"], "%m/%d/%Y")
+        b = _dt.datetime.strptime(lead["reactivation_date"], "%m/%d/%Y")
+        return (b - a).days
+    except (KeyError, TypeError, ValueError):
+        return None
+_NAME_NOISE = re.compile(r"\b(INC|INCORPORATED|LLC|L\s?L\s?C|LC|PC|P\s?C|PA|PLLC|CORP|CORPORATION|"
+                         r"CO|COMPANY|LTD|THE)\b")
+
+
+def company_key(name: str | None) -> str:
+    """One key per company, so a provider billing under several NPIs is one tip."""
+    n = re.sub(r"[^A-Z0-9 ]", " ", (name or "").upper())
+    return " ".join(_NAME_NOISE.sub(" ", n).split())
 _WORKED_REASON = {
     "confirmed": "You confirmed this as fraud",
     "tip_filed": "You reported this to HHS-OIG",
@@ -61,7 +88,7 @@ def cutoff_month(today: _dt.date | None = None) -> int:
 
 def build_shortlist(today: _dt.date | None = None) -> dict:
     from core import perse_store
-    from core.oig_tips_store import filed_npis
+    from core.oig_tips_store import filed_npis, list_tips
     from core.review_store import get_queue_statuses, get_review_queue
     from core.store import get_provider_by_npi
     from services.doj_filing_guide import doj_priority
@@ -71,7 +98,7 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
     doj_filed = filed_npis("doj")
     seen: set[str] = set()
     rows: list[dict] = []
-    dropped = {"too_old": 0, "already_doj": 0, "closed": 0}
+    dropped = {"too_old": 0, "already_doj": 0, "closed": 0, "same_company": 0, "short_lapse": 0}
 
     def _provider(npi: str) -> dict:
         return get_provider_by_npi(npi) or {}
@@ -108,6 +135,7 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
             "last_month": last_month,
             "doj_priority_area": doj_priority(specialty)["area"] or None,
             "queue_status": status,
+            "risk_score": round(float(base.get("risk_score") or p.get("risk_score") or 0), 1),
             "caveat": base.get("caveat") or "",
             **(extra or {}),
         })
@@ -124,8 +152,19 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
              p.get("last_month"), statuses)
 
     # Tier 2: per-se findings.
-    perse = [r for r in perse_store.list_leads(limit=100_000)["leads"]
-             if r.get("kind") in _PERSE_KIND_ORDER]
+    perse = []
+    for r in perse_store.list_leads(limit=100_000)["leads"]:
+        if r.get("kind") not in _PERSE_KIND_ORDER:
+            continue
+        if r["kind"] == "deactivated_window":
+            gap = _gap_days(r)
+            if gap is None or gap < MIN_WINDOW_GAP_DAYS:
+                dropped["short_lapse"] += 1
+                continue
+            r = {**r, "caveat": (f"The NPI was deactivated for about {gap // 30} months, then "
+                                 "reactivated. Check that the state did not keep the provider "
+                                 "enrolled under another ID before filing.")}
+        perse.append(r)
     statuses = get_queue_statuses([r["npi"] for r in perse])
     for r in perse:
         barred = (r.get("paid_after_exclusion") or r.get("paid_after_revocation")
@@ -148,6 +187,37 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
                 r.get("brain_rank") or 0, -r["amount"])
 
     rows.sort(key=_key)
+
+    # A company already filed with DOJ under one NPI is filed under all of them.
+    doj_companies = {company_key(t.get("provider_name")) for t in list_tips()
+                     if (t.get("destination") or "oig") == "doj"} - {""}
+    kept = []
+    for r in rows:
+        if company_key(r["provider_name"]) in doj_companies:
+            dropped["already_doj"] += 1
+        else:
+            kept.append(r)
+    rows = kept
+
+    # DOJ pays one award per DISTINCT tip, and filing the same company six
+    # times under six NPIs reads as spam. Keep the best-ranked row per company
+    # and list the others on it.
+    merged: list[dict] = []
+    by_company: dict[str, dict] = {}
+    for r in rows:
+        key = company_key(r["provider_name"])
+        head = by_company.get(key) if key else None
+        if head is None:
+            r["related_npis"] = []
+            merged.append(r)
+            if key:
+                by_company[key] = r
+            continue
+        head["related_npis"].append(r["npi"])
+        if r["amount_label"] == head["amount_label"]:
+            head["amount"] = round(head["amount"] + r["amount"], 2)
+        dropped["same_company"] += 1
+    rows = merged
     for i, r in enumerate(rows):
         r["rank"] = i + 1
 

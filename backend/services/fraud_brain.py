@@ -811,35 +811,78 @@ def get_top_frauds(limit: int = 10, force_refresh: bool = False, doj_only: bool 
     return {**res, "top": _apply_live_ledger(res.get("doj_top") or [])[:limit], "doj_only": True}
 
 
+# Every compute scores ALL providers (~17s on prod), whatever `limit` is, so
+# always keep the deepest slice any caller asks for (membership asks for 500).
+# Caching a shallower slice made callers with different limits evict each
+# other and pay a full recompute.
+_COMPUTE_DEPTH = 500
+_compute_lock = threading.Lock()   # one compute at a time (prod has 1 CPU)
+_bg_refreshing = threading.Event()
+
+
+def _oig_ready() -> bool:
+    from core.oig_store import get_oig_stats
+    return get_oig_stats().get("record_count", 0) > 0
+
+
+def _compute_and_store(force: bool) -> dict:
+    """Single-flight compute. A caller that waited on another thread's compute
+    gets that fresh result instead of starting its own."""
+    started = time.time()
+    with _compute_lock:
+        if not force:
+            with _lock:
+                cached, at = _cache["result"], _cache["computed_at"]
+            if cached and at >= started:
+                return cached
+        result = compute_top_frauds(limit=_COMPUTE_DEPTH)
+        # Defense-in-depth: never cache a ranking computed while the OIG
+        # exclusion store is empty — a cold-start compute buries provable fraud
+        # (excluded providers dark, no OIG boost) and must not outlive the
+        # warm-up.
+        if _oig_ready():
+            with _lock:
+                _cache["result"] = result
+                _cache["computed_at"] = time.time()
+        return result
+
+
+def _refresh_in_background() -> None:
+    if _bg_refreshing.is_set():
+        return
+    _bg_refreshing.set()
+
+    def _run() -> None:
+        try:
+            _compute_and_store(force=True)
+        except Exception:  # noqa: BLE001 — the stale board keeps serving
+            log.warning("fraud_brain: background refresh failed", exc_info=True)
+        finally:
+            _bg_refreshing.clear()
+
+    threading.Thread(target=_run, name="fraud-brain-refresh", daemon=True).start()
+
+
 def _get_top_frauds(limit: int, force_refresh: bool) -> dict:
     with _lock:
         cached = _cache["result"]
-        fresh = (time.time() - _cache["computed_at"]) < CACHE_TTL_SEC
-    if cached and fresh and not force_refresh:
-        live = _apply_live_ledger(cached["top"])
-        if len(live) >= limit:
-            return {**cached, "top": live[:limit], "cached": True}
-        # Too few rows survive the live ledger check — fall through to recompute.
+        age = time.time() - _cache["computed_at"]
 
-    # Defense-in-depth: never serve OR cache a ranking computed while the OIG
-    # exclusion store is empty. On a cold start that store loads at startup /
-    # downloads from HHS; a compute in that window buries provable fraud
-    # (excluded providers dark, no OIG boost) and produces a wildly different
-    # board — different NPIs, missing names, wrong scores. If that garbage board
-    # reaches the client it gets cached there and disagrees with the warm board
-    # the Fraud Brain page later shows. So while OIG is warming, prefer the last
-    # good cached board (stale-but-complete beats fresh-but-incomplete).
-    from core.oig_store import get_oig_stats
-    oig_ready = get_oig_stats().get("record_count", 0) > 0
-    if not oig_ready and cached and len(cached.get("top", [])) >= limit:
-        return {**cached, "top": _apply_live_ledger(cached["top"])[:limit], "cached": True, "warming": True}
+    # Stale-while-revalidate: an expired board is still served at once (with
+    # today's case-ledger statuses applied) while a fresh one computes in the
+    # background. Only a missing board, or an explicit Recompute, blocks.
+    # Before this, coming back to a page after the 15-min TTL — e.g. after
+    # filing a tip — meant a ~17s wait.
+    if cached and not force_refresh:
+        stale = age >= CACHE_TTL_SEC
+        if stale:
+            _refresh_in_background()
+        out = {**cached, "top": _apply_live_ledger(cached["top"])[:limit], "cached": True}
+        if stale:
+            out["stale"] = True
+        return out
 
-    result = compute_top_frauds(limit=max(limit, 25))  # compute a few extra for cheap re-serves
-
-    if oig_ready:
-        with _lock:
-            _cache["result"] = result
-            _cache["computed_at"] = time.time()
+    result = _compute_and_store(force=force_refresh)
     # No prior board to fall back on (truly cold first request) — serve this one
     # but flag it so callers know the reference stores are still loading.
-    return {**result, "top": result["top"][:limit], "cached": False, "warming": not oig_ready}
+    return {**result, "top": result["top"][:limit], "cached": False, "warming": not _oig_ready()}

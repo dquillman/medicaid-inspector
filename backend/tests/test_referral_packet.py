@@ -54,10 +54,20 @@ MULTI_SIGNALS = [
 ]
 
 
+async def _offline(*_a, **_k):
+    raise RuntimeError("network lookups are stubbed out in unit tests")
+
+
 def _build(npi, **kw):
-    # build_referral_packet is async but does no real I/O for synthetic inputs
-    # (exclusion/network/narrative enrichment fail-soft to None).
-    return asyncio.run(build_referral_packet(npi, provider=_provider(npi, **kw)))
+    # The builder's exclusion check and ownership lookup are LIVE network calls
+    # (SAM/OIG and a DuckDB scan of the remote parquet). Unstubbed, they made
+    # this "no network" test hang a full suite run for over an hour on a slow
+    # connection. The builder catches a failed lookup and falls back to its
+    # defaults, so stub both to fail fast.
+    from unittest import mock
+    with mock.patch("core.exclusion_aggregator.check_all_exclusions", _offline), \
+         mock.patch("routes.providers.get_ownership_chain", _offline):
+        return asyncio.run(build_referral_packet(npi, provider=_provider(npi, **kw)))
 
 
 def test_packet_multi_signal_structure():

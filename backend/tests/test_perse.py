@@ -169,8 +169,11 @@ def test_dme_only_revocation_carries_a_check_first_caveat():
     dme = [{"reason": "424.535(A)(1) Noncompliance (Dme Standards Not Met)"}]
     felony = [{"reason": "424.535(A)(9) Failure To Report;424.535(A)(3) Felonies"}]
     assert "DME supplier enrollment" in m._revocation_caveat(dme)
-    assert m._revocation_caveat(felony) == ""
-    assert m._revocation_caveat(dme + felony) == ""
+    # A felony revocation follows a conviction: prosecutors already know the
+    # provider, so the caveat points the tip at the post-revocation billing.
+    assert "felony conviction" in m._revocation_caveat(felony)
+    assert "felony conviction" in m._revocation_caveat(dme + felony)
+    assert m._revocation_caveat([{"reason": "424.535(A)(17) Debt Referred To Treasury"}]) == ""
 
 
 def test_worklist_filter_degrades_to_oig_only_without_a_sweep(tmp_path, monkeypatch):

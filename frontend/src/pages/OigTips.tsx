@@ -106,6 +106,12 @@ export default function OigTips() {
                   <td className="py-2 pr-4">
                     <Link to={`/providers/${t.npi}`} className="text-filament-core hover:underline">{t.provider_name || t.npi}</Link>
                     <span className="block font-mono text-[11px] text-ink-tertiary">{t.npi}{t.state ? ` · ${t.state}` : ''}</span>
+                    {t.filed_text && (
+                      <details className="mt-1">
+                        <summary className="text-[11px] text-ink-tertiary cursor-pointer hover:text-ink-secondary">Text as filed</summary>
+                        <pre className="mt-1 max-h-64 max-w-xl overflow-auto whitespace-pre-wrap text-[11px] text-ink-secondary bg-surface-2 border border-hairline rounded p-2">{t.filed_text}</pre>
+                      </details>
+                    )}
                   </td>
                   <td className="py-2 pr-4">
                     {(t.destination ?? 'oig') === 'doj' ? (

@@ -71,6 +71,8 @@ def test_doj_filing_guide_rendered_above_copy_line(client, auth_headers):
     g = doj["filing_guide"]
     assert g and g["url"] == "https://america.gov/fraud"
     assert any("Contact information" in s[0] for s in g["steps"])
+    # Live portal (2026-10-21): no Medicaid choice; "Healthcare Fraud" is the pick.
+    assert any("Complaint type" in s[0] and "Healthcare Fraud" in s[1] for s in g["steps"])
     guide_part, _, body = doj["text_with_guide"].partition("COPY FROM HERE")
     assert "DOJ CRIMINAL TIP REWARDS PORTAL" in guide_part
     assert body.strip().startswith("=")  # the rest of the separator line
@@ -139,6 +141,23 @@ def test_doj_priority_areas(taxonomies, area):
 ])
 def test_doj_priority_negative(taxonomies):
     assert doj_priority(taxonomies)["priority"] is False
+
+
+def test_doj_filing_keeps_the_text_as_filed(client, auth_headers, tmp_path, monkeypatch):
+    """Most DOJ-shortlist leads have no case to hold a case note, so the filing
+    record is where the submitted text lives."""
+    import core.oig_tips_store as store
+    monkeypatch.setattr(store, "_FILE", tmp_path / "oig_tips.json")
+    monkeypatch.setattr(store, "_tips", [])
+    monkeypatch.setattr(store, "_loaded", True)
+    monkeypatch.setattr(store, "_save", lambda: None)
+    r = client.post("/api/oig-tips", headers=auth_headers, json={
+        "npi": "1999999991", "destination": "doj", "reference_number": "REF-1",
+        "filed_text": "SHORT VERSION (first box):\nx\n\nFULL NARRATIVE (attached .txt):\ny",
+    })
+    assert r.status_code == 200
+    assert r.json()["filed_text"].startswith("SHORT VERSION")
+    assert r.json()["reference_number"] == "REF-1"
 
 
 def test_brain_doj_view_serves_priority_rows_with_main_board_rank(monkeypatch):

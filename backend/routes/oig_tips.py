@@ -18,6 +18,8 @@ class AddTipBody(BaseModel):
     destination: str = "oig"
     # The DOJ portal shows a reference number on submit — record it here.
     reference_number: str = ""
+    # The narrative as filed, kept on the filing record.
+    filed_text: str = ""
 
 
 # Ledger status a logged tip moves the case to, per channel.
@@ -59,6 +61,7 @@ async def add_tip(body: AddTipBody, user: dict = Depends(require_user)):
         npi=npi, provider_name=body.provider_name,
         state=body.state, risk_score=body.risk_score, notes=body.notes,
         destination=dest, reference_number=body.reference_number,
+        filed_text=body.filed_text,
     )
     # Single source of truth, mirroring mfcu_referral.py's /submit: logging a
     # tip IS the case reaching "Reported: OIG" / "Reported: DOJ". Before this,

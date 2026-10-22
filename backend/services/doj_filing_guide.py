@@ -133,6 +133,12 @@ def build_doj_filing_guide(*, npi: str, name: str, taxonomies: list[str], state:
     who = ", ".join(x for x in [name, f"NPI {npi}", address, phone] if x)
     steps = [
         ("Open the portal", f"{PORTAL_URL} -> 'Start your report' -> 'Report fraud' -> Start"),
+        # Verified on a live filing 2026-10-21. The portal's dropdown options
+        # render white-on-white, so say how to read them.
+        ("Complaint type (dropdown)",
+         "Choose 'Healthcare Fraud'. There is no separate Medicaid choice. If the list "
+         "looks blank, the options are white on white: hover over them, or type 'H' "
+         "to jump to Healthcare Fraud."),
         ("What raised your concern? (2,000-char box)",
          "Paste the SHORT version (button 'Copy short version'). It already names the "
          "provider, NPI, period, dollars and the top findings."),
@@ -140,7 +146,8 @@ def build_doj_filing_guide(*, npi: str, name: str, taxonomies: list[str], state:
          "Attach the FULL narrative as .txt ('Download full narrative'). Optional: the "
          "referral packet printed to PDF. .html is NOT accepted."),
         ("Who was involved?", f"{who} ({subject_type})"),
-        ("Which program?", "Medicaid"),
+        ("Which program?", "Medicaid. If Medicaid is not a choice, pick the health-care one "
+                           "and write 'Medicaid' in the text."),
         ("When did it happen?", f"{period} (most recent billed month in the public data: "
                                 f"{last_month or '?'}; still occurring: not sure)"),
         ("Amount", f"${total_paid:,.0f} paid by Medicaid over {period} - total exposure, "

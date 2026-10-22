@@ -40,8 +40,24 @@ def sources(monkeypatch):
     providers = {"1000000010": {"provider_name": "OIG CASE", "specialty": "Home Health",
                                 "last_month": "2024-09"}}
 
+    leads += [
+        {"npi": "1000000007", "kind": "deactivated_window", "provider_name": "PAPERWORK LAPSE",
+         "specialty": "Hospice", "last_month": "2024-12", "paid_during_deactivation": 9_000_000,
+         "deactivation_date": "03/31/2022", "reactivation_date": "05/20/2022"},
+        {"npi": "1000000012", "kind": "deactivated_window", "provider_name": "LONG GAP",
+         "specialty": "Hospice", "last_month": "2024-12", "paid_during_deactivation": 400_000,
+         "deactivation_date": "01/01/2022", "reactivation_date": "01/01/2023"},
+        {"npi": "1000000008", "kind": "deactivated_billing", "provider_name": "Dead NPI, Inc.",
+         "specialty": "Internal Medicine", "last_month": "2024-12", "paid_after_deactivation": 20_000},
+        {"npi": "1000000009", "kind": "deactivated_billing", "provider_name": "ALREADY FILED CO",
+         "specialty": "Hospice", "last_month": "2024-12", "paid_after_deactivation": 1_000},
+    ]
     monkeypatch.setattr(perse, "list_leads", lambda limit=0, **k: {"leads": leads})
     monkeypatch.setattr(tips, "filed_npis", lambda dest="oig": {"1000000005"} if dest == "doj" else set())
+    monkeypatch.setattr(tips, "list_tips", lambda: [
+        {"npi": "1000000005", "destination": "doj", "provider_name": "SENT TO DOJ"},
+        {"npi": "1999999999", "destination": "doj", "provider_name": "Already Filed Co."},
+    ])
     monkeypatch.setattr(rs, "get_review_queue", lambda *a, **k: review)
     monkeypatch.setattr(rs, "get_queue_statuses", lambda npis: {n: statuses[n] for n in npis if n in statuses})
     monkeypatch.setattr(store, "get_provider_by_npi", lambda npi: providers.get(npi))
@@ -54,10 +70,19 @@ def test_shortlist_order_and_filters(sources):
     assert order == [
         ("1000000010", 1),   # worked case (OIG tip) not yet sent to DOJ
         ("1000000003", 2),   # per-se, DOJ priority area (hospice) beats a bigger non-priority lead
+        ("1000000012", 2),   # a year-long deactivation gap is a lead, not a lapse
         ("1000000002", 2),
         ("1000000020", 3),   # statistical Brain lead in a priority area
     ]
-    assert out["dropped"] == {"too_old": 1, "already_doj": 1, "closed": 1}
+    assert "deactivated for about 12 months" in out["leads"][2]["caveat"]
+    # 1000000008 ("Dead NPI, Inc.") merges into 1000000002 ("DEAD NPI"): one company.
+    assert out["leads"][3]["related_npis"] == ["1000000008"]
+    assert out["leads"][3]["amount"] == 70_000
+    # A 50-day lapse never reaches the DOJ list; a company already filed with
+    # DOJ under another NPI drops too.
+    assert all(r["npi"] not in ("1000000007", "1000000009") for r in out["leads"])
+    assert out["dropped"] == {"too_old": 1, "already_doj": 2, "closed": 1, "same_company": 1,
+                              "short_lapse": 1}
     assert out["cutoff_month"] == "2021-10"
     assert all(r["npi"] != "1000000004" for r in out["leads"]), "recovery lead is not billing while barred"
     assert out["leads"][1]["doj_priority_area"] == "Hospice"
