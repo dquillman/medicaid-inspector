@@ -184,6 +184,54 @@ def test_doj_tip_offers_the_chat_followup_answers(client, auth_headers):
     assert any("risk to patients" in s for s in steps)
 
 
+_REVOKED_LEAD = {
+    "npi": "1669892584", "kind": "medicare_revoked_billing",
+    "provider_name": "SOFT TOUCH HOSPICE INC", "state": "CA",
+    "specialty": "PART A PROVIDER - HOSPICE", "total_paid": 1_256_153.0,
+    "total_claims": 900, "total_beneficiaries": 80,
+    "first_month": "2023-09", "last_month": "2024-10",
+    "revocation_date": "2023-07-01", "revocation_reason": "424.535(A)(9) Failure To Report",
+    "paid_after_revocation": 127_400.0,
+    "citation": "42 CFR § 455.416(c) (state Medicaid must terminate a provider Medicare has revoked)",
+    "caveat": "",
+}
+
+
+def test_describe_finding_names_the_barred_amount():
+    from core.perse_store import describe_finding
+    f = describe_finding(_REVOKED_LEAD)
+    assert f["amount"] == 127_400.0
+    assert "Medicare revoked this provider's enrollment effective 2023-07-01" in f["headline"]
+    assert "$127,400" in f["headline"]
+    assert describe_finding(None) is None
+
+
+def test_tip_for_a_per_se_lead_below_the_scan_cutoff(client, auth_headers, monkeypatch):
+    """A revoked provider under the $1M scan cutoff used to 404 ('not in scan
+    cache'), and when it did draft, the report never mentioned the revocation
+    and the DOJ chat picked up total paid ($1.26M) instead of $127K barred."""
+    import core.perse_store as perse
+    import data.nppes_client as nppes
+
+    async def _no_live(*_a, **_k):
+        return {}
+    monkeypatch.setattr(nppes, "get_provider", _no_live)
+    monkeypatch.setattr(perse, "get_lead",
+                        lambda npi: dict(_REVOKED_LEAD) if npi == _REVOKED_LEAD["npi"] else None)
+
+    r = client.get(f"/api/providers/{_REVOKED_LEAD['npi']}/oig-tip?destination=doj&save_note=false",
+                   headers=auth_headers)
+    assert r.status_code == 200
+    body = r.json()
+    assert "KEY FINDING" in body["text"]
+    assert "Medicare revoked" in body["short_narrative"]
+    # The first dollar figure the DOJ chat sees is the barred amount.
+    assert body["short_narrative"].index("$127,400") < body["short_narrative"].index("$1,256,153")
+    rows = {f["label"]: f["value"] for f in body["form_fields"]}
+    assert rows["Amount (paid while barred)"].startswith("$127,400 paid after Medicare revoked")
+    assert "composite risk score of 0/100" not in body["text"]
+
+
 def test_doj_filing_keeps_the_text_as_filed(client, auth_headers, tmp_path, monkeypatch):
     """Most DOJ-shortlist leads have no case to hold a case note, so the filing
     record is where the submitted text lives."""

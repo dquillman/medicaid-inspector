@@ -165,6 +165,75 @@ def get_summary() -> dict:
     }
 
 
+def describe_finding(lead: dict | None) -> dict | None:
+    """Plain report sentences for a per-se lead, for the OIG/MFCU/DOJ narrative.
+
+    Before this existed the referral generator never read the sweep, so a tip
+    on a Medicare-revoked provider listed only statistical signals and left out
+    the one fact that makes it provable (Soft Touch Hospice, 2026-10-22), and the
+    DOJ chat picked up total Medicaid paid instead of the amount paid while barred.
+    """
+    if not lead:
+        return None
+    kind = lead.get("kind")
+    total = float(lead.get("total_paid") or 0)
+    if kind == "active_exclusion":
+        amt = float(lead.get("paid_after_exclusion") or 0)
+        when = lead.get("exclusion_date") or "?"
+        head = (f"The provider is on the HHS-OIG exclusion list (LEIE, excluded {when}) and "
+                f"Medicaid still paid it ${amt:,.0f} for services after the exclusion.")
+        label = "paid after the OIG exclusion"
+    elif kind == "medicare_revoked_billing":
+        amt = float(lead.get("paid_after_revocation") or 0)
+        reason = (lead.get("revocation_reason") or "").strip()
+        head = (f"Medicare revoked this provider's enrollment effective "
+                f"{lead.get('revocation_date') or '?'}"
+                + (f" (reason: {reason})" if reason else "")
+                + f". Medicaid still paid it ${amt:,.0f} for services from the second month "
+                  "after the revocation onward. A state must terminate a provider Medicare has "
+                  "revoked (42 CFR 455.416(c)).")
+        label = "paid after Medicare revoked the provider"
+    elif kind == "paid_while_terminated":
+        amt = float(lead.get("paid_while_terminated") or 0)
+        status = (lead.get("enrollment_status") or "").replace("TERM - ", "").strip().lower()
+        head = (f"The state Medicaid program terminated this provider's enrollment for cause "
+                f"({status}) effective {lead.get('terminated_since') or '?'}, and Medicaid still "
+                f"paid it ${amt:,.0f} for {lead.get('months_while_terminated') or '?'} whole "
+                "months in which it had no active Medicaid enrollment in any state.")
+        label = "paid after the state terminated its enrollment"
+    elif kind == "deactivated_billing":
+        amt = float(lead.get("paid_after_deactivation") or 0)
+        head = (f"The provider's NPI was deactivated in NPPES on "
+                f"{lead.get('deactivation_date') or '?'}, and Medicaid paid ${amt:,.0f} for "
+                "services billed under that NPI in later months.")
+        label = "paid under a deactivated NPI"
+    elif kind == "deactivated_window":
+        amt = float(lead.get("paid_during_deactivation") or 0)
+        head = (f"The provider's NPI was deactivated from {lead.get('deactivation_date') or '?'} "
+                f"to {lead.get('reactivation_date') or '?'}, and Medicaid paid ${amt:,.0f} for "
+                "services in whole months inside that gap. The NPI was later reactivated.")
+        label = "paid while the NPI was deactivated"
+    elif kind == "recovery_lead":
+        when = lead.get("exclusion_date") or "?"
+        return {
+            "headline": (f"The provider was later excluded by HHS-OIG (LEIE, {when}). All Medicaid "
+                         "billing in the public data predates the exclusion, so this is a "
+                         "possible recovery matter, not billing while excluded."),
+            "amount": 0.0, "amount_label": "", "total_paid": total,
+            "citation": lead.get("citation") or "", "caveat": lead.get("caveat") or "",
+        }
+    else:
+        return None
+    return {
+        "headline": head,
+        "amount": round(amt, 2),
+        "amount_label": label,
+        "total_paid": total,
+        "citation": lead.get("citation") or "",
+        "caveat": lead.get("caveat") or "",
+    }
+
+
 def count() -> int:
     if not _loaded:
         _load()

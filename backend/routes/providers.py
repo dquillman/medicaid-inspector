@@ -2799,9 +2799,29 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     dest = (destination or "oig").strip().lower()
     if dest not in ("oig", "mfcu", "doj"):
         raise HTTPException(400, "destination must be 'oig', 'mfcu' or 'doj'")
+    from core.perse_store import get_lead as _perse_get, describe_finding as _perse_describe
+    _perse_lead = _perse_get(npi)
     cached = get_provider_by_npi(npi)
+    if not cached and _perse_lead:
+        # Per-se leads reach every NPI that bills Medicaid, most below the $1M
+        # scan cutoff, so they have no scan-cache row. The sweep row carries the
+        # billing totals; NPPES identity is filled live below.
+        cached = {
+            "npi": npi,
+            "provider_name": _perse_lead.get("provider_name") or "",
+            "state": _perse_lead.get("state") or "",
+            "specialty": _perse_lead.get("specialty") or "",
+            "total_paid": _perse_lead.get("total_paid") or 0,
+            "total_claims": _perse_lead.get("total_claims") or 0,
+            "total_beneficiaries": _perse_lead.get("total_beneficiaries") or 0,
+            "first_month": _perse_lead.get("first_month"),
+            "last_month": _perse_lead.get("last_month"),
+            "risk_score": 0,
+            "signal_results": [],
+        }
     if not cached:
         raise HTTPException(404, f"Provider {npi} not in scan cache")
+    _perse = _perse_describe(_perse_lead)
 
     from services.narrative_generator import _SIGNAL_META
 
@@ -2858,6 +2878,19 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         "  Federal exclusion check: NPI is not currently on the OIG LEIE (checked at generation).\n\n"
     )
 
+    _perse_block = ""
+    if _perse:
+        import textwrap as _tw
+        _perse_block = (
+            "  ** KEY FINDING (verifiable from public records):\n"
+            + "\n".join("     " + ln for ln in _tw.wrap(_perse["headline"], 84))
+            + ("\n     Amount " + _perse["amount_label"] + f": ${_perse['amount']:,.0f}"
+               if _perse["amount"] else "")
+            + (f"\n     Legal basis: {_perse['citation'].replace('§ ', 'Sec. ')}"
+               if _perse["citation"] else "")
+            + " **\n\n"
+        )
+
     flags = [f for f in (cached.get("signal_results") or cached.get("flags") or []) if f.get("flagged")]
     # Map fired signals to the OIG Hotline's accepted complaint categories so the
     # tip lands in the right bucket (the Hotline only handles certain categories).
@@ -2883,7 +2916,8 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         f"  - {ind['label']}: {ind['finding']}"
         + (f"\n      Regulatory basis: {'; '.join(ind['citations'])}" if ind["citations"] else "")
         for ind in indicators
-    ) or "  - (no individual signals fired; flagged on composite score)"
+    ) or ("  - (no statistical signals; this lead rests on the key finding above)" if _perse
+          else "  - (no individual signals fired; flagged on composite score)")
 
     # ── Short-form summary — for form fields too small for the full narrative ──
     # State intake forms (e.g. PA's "MA Provider Compliance Hotline") give a
@@ -2906,9 +2940,12 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         "not proof of fraud. No individual recipient is identified"
         + (f"; the pattern spans all {total_benes:,.0f} recipients." if total_benes else ".")
     )
-    if oig_excluded:
+    if oig_excluded and not (_perse and _perse_lead.get("kind") == "active_exclusion"):
         _close = ("The subject NPI also appears on the HHS-OIG LEIE exclusion list; billing "
                   "Medicaid while excluded violates 42 CFR 1001.1901. ") + _close
+    if _perse:
+        # The provable fact leads; the statistics follow it.
+        _lead = _perse["headline"] + " " + _lead
 
     # Use the space the field actually gives us. This started as top-2-signals
     # only, which spent ~530 of PA's ~2,000 characters and silently dropped
@@ -3101,8 +3138,14 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
             {"label": "Program", "value": "Medicaid"},
             {"label": "When (period in the public data)",
              "value": f"{first_m} to {last_m}" if first_m != "?" else ""},
-            {"label": "Amount (Medicaid paid, total exposure)", "value": f"${total_paid:,.0f}",
-             "note": "Exposure, not a proven loss. Say so if the portal asks."},
+            ({"label": "Amount (paid while barred)",
+              "value": (f"${_perse['amount']:,.0f} {_perse['amount_label']} "
+                        f"(total Medicaid paid {first_m} to {last_m}: ${total_paid:,.0f})"),
+              "note": "Use this for the portal's 'Estimated dollar amount'. The barred amount is "
+                      "the improper part; the total is context."}
+             if _perse and _perse["amount"] else
+             {"label": "Amount (Medicaid paid, total exposure)", "value": f"${total_paid:,.0f}",
+              "note": "Exposure, not a proven loss. Say so if the portal asks."}),
             {"label": "How do you know?",
              "value": "My own independent analysis of public HHS T-MSIS Medicaid spending data, "
                       "NPPES, the OIG LEIE and SAM.gov. No insider information; no other witness."},
@@ -3184,11 +3227,17 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         f"  Complaint category: {category}\n"
         "\n"
         "NATURE OF THE ALLEGATION\n"
-        f"  Automated analysis of public CMS/HHS Medicaid payment data flagged this provider\n"
-        f"  with a composite risk score of {risk:.0f}/100 across {len(flags)} independent fraud\n"
-        f"  indicator(s). The indicators below are statistical/anomaly findings consistent with\n"
-        f"  patterns in OIG enforcement actions; they are leads for investigation, not proof of fraud.\n"
-        "\n"
+        + (
+            "  Payments to a provider barred from billing Medicaid, found by cross-checking public\n"
+            "  CMS/HHS Medicaid payment data against public enrollment and exclusion records.\n"
+            if _perse and not flags else
+            f"  Automated analysis of public CMS/HHS Medicaid payment data flagged this provider\n"
+            f"  with a composite risk score of {risk:.0f}/100 across {len(flags)} independent fraud\n"
+            f"  indicator(s). The indicators below are statistical/anomaly findings consistent with\n"
+            f"  patterns in OIG enforcement actions; they are leads for investigation, not proof of fraud.\n"
+        )
+        + "\n"
+        f"{_perse_block}"
         f"{exclusion_block}"
         f"  TIME PERIOD OF ACTIVITY: {first_m} to {last_m}\n"
         f"  TOTAL MEDICAID PAID TO SUBJECT (period): ${total_paid:,.0f}\n"
@@ -3251,6 +3300,8 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
                 flagged_signals=[f.get("signal", "") for f in flags],
                 filings=_doj_filings, oig_excluded=oig_excluded,
                 details_answer=_doj_details,
+                barred_amount=(_perse or {}).get("amount") or 0.0,
+                barred_label=(_perse or {}).get("amount_label") or "",
             )
             guide_block = render_doj_filing_guide(filing_guide)
         except Exception:

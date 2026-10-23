@@ -172,7 +172,8 @@ def build_doj_filing_guide(*, npi: str, name: str, taxonomies: list[str], state:
                            total_paid: float, address: str, phone: str,
                            entity_type: str | None, flagged_signals: list[str],
                            filings: list[dict], oig_excluded: bool,
-                           details_answer: str = "") -> dict:
+                           details_answer: str = "", barred_amount: float = 0.0,
+                           barred_label: str = "") -> dict:
     pri = doj_priority(taxonomies)
     subject_type = "Individual" if _norm(entity_type) == "npi-1" else "Business"
     period = f"{first_month or '?'} to {last_month or '?'}"
@@ -204,8 +205,15 @@ def build_doj_filing_guide(*, npi: str, name: str, taxonomies: list[str], state:
                            "and write 'Medicaid' in the text."),
         ("When did it happen?", f"{period} (most recent billed month in the public data: "
                                 f"{last_month or '?'}; still occurring: not sure)"),
-        ("Amount", f"${total_paid:,.0f} paid by Medicaid over {period} - total exposure, "
-                   "NOT a proven loss"),
+        # The DOJ chat fills 'Estimated dollar amount' from the narrative and
+        # took the TOTAL for a revoked provider ($1.26M vs $127K barred; Soft
+        # Touch Hospice, 2026-10-22). For a per-se lead, the barred amount is
+        # the number to give.
+        ("Amount (the chat's 'Estimated dollar amount')",
+         f"${barred_amount:,.0f} {barred_label} (total Medicaid paid over {period}: "
+         f"${total_paid:,.0f}). If the chat pre-fills the total, click the pencil and change it."
+         if barred_amount else
+         f"${total_paid:,.0f} paid by Medicaid over {period} - total exposure, NOT a proven loss"),
         ("How do you know?", "My own independent analysis of public HHS T-MSIS Medicaid "
                              "spending data, NPPES, OIG LEIE and SAM.gov. No insider "
                              "knowledge; no other witness."),
