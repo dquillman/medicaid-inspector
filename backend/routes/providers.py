@@ -2991,10 +2991,15 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         from services.doj_filing_guide import (
             DOJ_DESC_CAP, prior_filings as _doj_prior, prior_filing_sentence as _doj_prior_s)
         _doj_filings = _doj_prior(npi)
+        # One wording for the first box AND the "How do you know?" answer card,
+        # so what the filer pastes and what the card shows never differ.
+        _doj_how_known = ("My own independent analysis of public HHS T-MSIS Medicaid spending "
+                          "data, NPPES, the OIG LEIE and SAM.gov. No insider information; "
+                          "no other witness.")
         _doj_lead = f"Suspected Medicaid fraud by {name} (NPI {npi}), {address_str}. " + _lead
         _doj_close = " ".join(x for x in [
             _close,
-            "Source: my own independent analysis of public data (no insider information).",
+            "How I know: " + _doj_how_known,
             _doj_prior_s(_doj_filings),
         ] if x)
         short_narrative = _fit(_doj_lead, _doj_close, DOJ_DESC_CAP)
@@ -3146,12 +3151,12 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
              if _perse and _perse["amount"] else
              {"label": "Amount (Medicaid paid, total exposure)", "value": f"${total_paid:,.0f}",
               "note": "Exposure, not a proven loss. Say so if the portal asks."}),
-            {"label": "How do you know?",
-             "value": "My own independent analysis of public HHS T-MSIS Medicaid spending data, "
-                      "NPPES, the OIG LEIE and SAM.gov. No insider information; no other witness."},
+            {"label": "How do you know?", "value": _doj_how_known,
+             "note": "Already at the end of the first-box text above."},
             {"label": "Previously reported", "value": _doj_prior_s(_doj_filings) or "No",
-             "note": "Keep this in the report: DOJ counts you as an original source only if you were "
-                     "the source of the earlier report."},
+             "note": ("Already at the end of the first-box text above. " if _doj_filings else "")
+                     + "DOJ counts you as an original source only if you were the source of the "
+                       "earlier report."},
         ]
     for _f in form_fields:
         _f["chars"] = len(_f["value"])

@@ -64,6 +64,9 @@ def test_doj_short_version_fits_portal_box_and_names_subject(client, auth_header
     assert "independent analysis" in short
     first = doj["form_fields"][0]
     assert first["value"] == short and first["chars"] == len(short)
+    # The "How do you know?" card's words are pasted with the first box too.
+    how = next(f for f in doj["form_fields"] if f["label"] == "How do you know?")
+    assert how["value"] in short
 
 
 def test_doj_filing_guide_rendered_above_copy_line(client, auth_headers):
@@ -84,6 +87,8 @@ def test_doj_discloses_prior_oig_filing(client, auth_headers, queued):
     doj = _tip(client, auth_headers, "doj")
     assert "previously reported" in doj["short_narrative"].lower()
     assert "HHS-OIG" in doj["short_narrative"]
+    prior = next(f for f in doj["form_fields"] if f["label"] == "Previously reported")
+    assert prior["value"] in doj["short_narrative"]
     assert doj["filing_guide"]["prior_filings"]
 
 
