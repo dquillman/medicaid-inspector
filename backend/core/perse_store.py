@@ -31,12 +31,13 @@ _loaded = False
 # Ranked worst-first. active_exclusion is billing DURING an exclusion (per-se
 # fraud); recovery_lead is billing that predates it (a clawback, not active
 # fraud) and must never be presented as the former.
-KINDS = ("active_exclusion", "medicare_revoked_billing", "deactivated_billing",
-         "deactivated_window", "recovery_lead")
+KINDS = ("active_exclusion", "medicare_revoked_billing", "paid_while_terminated",
+         "deactivated_billing", "deactivated_window", "recovery_lead")
 
 KIND_LABELS = {
     "active_exclusion": "Billing while excluded",
     "medicare_revoked_billing": "Billing after Medicare revocation",
+    "paid_while_terminated": "Paid after state terminated enrollment",
     "deactivated_billing": "Billing under a dead NPI",
     "deactivated_window": "Billed while NPI was deactivated",
     "recovery_lead": "Recovery lead (excluded later)",
@@ -142,10 +143,12 @@ def get_summary() -> dict:
     by_kind: dict[str, dict] = {}
     for r in _with_live_scan_state(_payload.get("leads", []), scanned):
         k = by_kind.setdefault(r.get("kind", "unknown"), {
-            "count": 0, "total_paid": 0.0,
+            "count": 0, "total_paid": 0.0, "weak": 0,
             "outside_scan_cache": 0, "outside_scan_cache_paid": 0.0})
         paid = float(r.get("total_paid") or 0)
         k["count"] += 1
+        if r.get("weak"):
+            k["weak"] += 1
         k["total_paid"] += paid
         if r.get("in_scan_cache") is False:
             k["outside_scan_cache"] += 1
@@ -171,7 +174,8 @@ def count() -> int:
 # Per-se kinds that are NOT an OIG exclusion — Medicare revocation and the
 # deactivated-NPI findings. The OIG ones are caught by oig_store, which is
 # authoritative and always loaded.
-_NON_OIG_PERSE_KINDS = ("medicare_revoked_billing", "deactivated_billing", "deactivated_window")
+_NON_OIG_PERSE_KINDS = ("medicare_revoked_billing", "paid_while_terminated",
+                        "deactivated_billing", "deactivated_window")
 
 
 def is_on_excluded_page(npi: str) -> bool:

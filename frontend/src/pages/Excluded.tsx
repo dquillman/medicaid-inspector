@@ -7,12 +7,13 @@ import { threatColor } from '../lib/threat'
 import Breadcrumbs from '../components/Breadcrumbs'
 import ProviderFlags from '../components/ProviderFlags'
 
-const KIND_ORDER = ['active_exclusion', 'medicare_revoked_billing', 'deactivated_billing', 'deactivated_window', 'recovery_lead'] as const
+const KIND_ORDER = ['active_exclusion', 'medicare_revoked_billing', 'paid_while_terminated', 'deactivated_billing', 'deactivated_window', 'recovery_lead'] as const
 
 /** Per-se kinds are not equally damning — colour them by how provable they are. */
 const KIND_STYLE: Record<string, string> = {
   active_exclusion:    'bg-red-950/60 border-red-800 text-red-300',
   medicare_revoked_billing: 'bg-rose-950/60 border-rose-800 text-rose-300',
+  paid_while_terminated: 'bg-fuchsia-950/60 border-fuchsia-800 text-fuchsia-300',
   deactivated_billing: 'bg-orange-950/60 border-orange-800 text-orange-300',
   deactivated_window:  'bg-amber-950/60 border-amber-800 text-amber-300',
   recovery_lead:       'bg-slate-800/60 border-slate-700 text-slate-300',
@@ -52,6 +53,13 @@ export default function Excluded() {
     [data],
   )
 
+  const counts = useMemo(() => {
+    const all = data?.providers ?? []
+    const recovery = all.filter(p => p.kind === 'recovery_lead').length
+    const weak = all.filter(p => p.weak).length
+    return { recovery, weak, provable: all.length - recovery - weak }
+  }, [data])
+
   const kindsPresent = useMemo(() => {
     const seen = new Set((data?.providers ?? []).map(p => p.kind).filter(Boolean))
     return KIND_ORDER.filter(k => seen.has(k))
@@ -64,8 +72,9 @@ export default function Excluded() {
       <div>
         <h1 className="text-xl font-bold text-gray-200">Barred From Billing — And Billed Anyway</h1>
         <p className="text-sm text-gray-500 mt-1 max-w-3xl">
-          Providers on the federal OIG LEIE exclusion list, providers Medicare revoked, and
-          NPIs CMS deactivated, that still drew Medicaid payments. These are per-se findings: no statistical inference,
+          Providers on the federal OIG LEIE exclusion list, providers Medicare revoked, providers
+          a state Medicaid program terminated for cause, and NPIs CMS deactivated, that still
+          drew Medicaid payments. These are per-se findings: no statistical inference,
           no peer comparison — a barred party was paid. They are removed from the Providers
           list, Anomalies, Review Queue, and Fraud Brain, so this page is their single home.
         </p>
@@ -77,8 +86,12 @@ export default function Excluded() {
       {data && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 max-w-3xl">
           <div className="card py-3">
-            <p className="text-[10px] text-gray-600 uppercase tracking-wider">Barred &amp; Billing</p>
-            <p className="text-xl font-bold text-red-400">{data.total.toLocaleString()}</p>
+            <p className="text-[10px] text-gray-600 uppercase tracking-wider">Billed While Barred</p>
+            <p className="text-xl font-bold text-red-400">{counts.provable.toLocaleString()}</p>
+            <p className="text-[10px] text-gray-600 mt-0.5">
+              + {counts.recovery.toLocaleString()} recovery leads (billed before the bar)
+              {counts.weak > 0 && <> &middot; {counts.weak.toLocaleString()} weak (short NPI lapses)</>}
+            </p>
           </div>
           <div className="card py-3">
             <p className="text-[10px] text-gray-600 uppercase tracking-wider">Total Paid</p>
@@ -171,8 +184,8 @@ export default function Excluded() {
             </thead>
             <tbody>
               {rows.map(p => {
-                const barred = p.paid_after_exclusion ?? p.paid_after_revocation ?? p.paid_after_deactivation ?? p.paid_during_deactivation
-                const since = p.exclusion_date || p.revocation_date || p.deactivation_date || p.excl_date
+                const barred = p.paid_after_exclusion ?? p.paid_after_revocation ?? p.paid_while_terminated ?? p.paid_after_deactivation ?? p.paid_during_deactivation
+                const since = p.exclusion_date || p.revocation_date || p.terminated_since || p.deactivation_date || p.excl_date
                 return (
                   <tr
                     key={p.npi}
@@ -199,9 +212,9 @@ export default function Excluded() {
                       <span className={`text-[10px] px-2 py-0.5 border rounded ${KIND_STYLE[p.kind ?? ''] ?? 'border-gray-800 text-gray-500'}`}>
                         {labels[p.kind ?? ''] ?? p.excl_type ?? '—'}
                       </span>
-                      {p.kind === 'deactivated_window' && gapDays(p) !== null && gapDays(p)! < 180 && (
+                      {p.weak && (
                         <span className="ml-1.5 text-[9px] text-gray-500 cursor-help"
-                              title={`The NPI was off for ${gapDays(p)} days, then reactivated. A short gap is usually a paperwork lapse, so this lead is weak and is not on the DOJ shortlist.`}>
+                              title={`The NPI was off for ${p.gap_days ?? gapDays(p) ?? '?'} days, then reactivated. A short gap is usually a paperwork lapse, so this lead is weak and is not on the DOJ shortlist.`}>
                           WEAK
                         </span>
                       )}

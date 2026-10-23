@@ -128,6 +128,12 @@ def _finish_prescan_load():
     set_prescan_status(0, msg)
     log.info(msg)
 
+    # Score the Fraud Brain board now, in the background, so the first page
+    # after a deploy doesn't wait ~20s for it. The OIG store is loaded before
+    # this runs; a request that arrives mid-warm-up joins this compute.
+    from services.fraud_brain import warm_cache
+    warm_cache()
+
     # Enrich providers missing NPPES data
     # Filter to providers that genuinely lack any NPPES data. If a provider
     # already has a name/state/city (e.g., from a previous run that landed in

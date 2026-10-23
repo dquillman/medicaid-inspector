@@ -265,6 +265,7 @@ def _run_perse_steps() -> None:
     """The Medicare revocation list is refreshed quarterly by CMS and the
     per-se sweep depends on it, so both rebuild on every update."""
     _run_step("Medicare revocation list (CMS)", [str(_SCRIPTS / "build_revocations.py")])
+    _run_step("Medicaid enrollment terminations (HHS)", [str(_SCRIPTS / "build_enrollment_leads.py")])
     _run_step("Per-se sweep (LEIE / revocation / dead NPI)", [str(_SCRIPTS / "build_perse_sweep.py")])
 
 

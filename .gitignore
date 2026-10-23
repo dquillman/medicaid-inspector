@@ -116,5 +116,8 @@ backend/auto_prep_state.json
 backend/feedback_data.json
 # built by scripts/build_revocations.py (CMS quarterly extract)
 backend/medicare_revocations.json
+# built by scripts/build_enrollment_leads.py (HHS enrollment segments)
+backend/enrollment_leads.json
+backend/npi_states.json
 # TypeScript incremental build byproduct
 *.tsbuildinfo

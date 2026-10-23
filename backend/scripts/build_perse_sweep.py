@@ -98,6 +98,17 @@ def _ym(s) -> int | None:
     return None
 
 
+WEAK_WINDOW_GAP_DAYS = 180
+
+
+def _gap_days(start: str, end: str) -> int | None:
+    import datetime as _dt
+    try:
+        return (_dt.datetime.strptime(end, "%m/%d/%Y") - _dt.datetime.strptime(start, "%m/%d/%Y")).days
+    except (TypeError, ValueError):
+        return None
+
+
 def _add_months(m: int, n: int) -> int:
     y, mo = divmod(m, 100)
     idx = y * 12 + (mo - 1) + n
@@ -166,6 +177,16 @@ def main() -> int:
         windows = {}
     import core.revocation_store as rev_store
     revocations = dict(rev_store.all_revocations())
+    # Built by build_enrollment_leads.py from the HHS enrollment segments.
+    try:
+        enroll = json.loads((_BACKEND / "enrollment_leads.json").read_text(encoding="utf-8"))["leads"]
+    except (OSError, ValueError, KeyError):
+        enroll = {}
+    try:
+        npi_states = json.loads((_BACKEND / "npi_states.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        npi_states = {}
+    print(f"State-terminated-but-paid leads: {len(enroll):,}  ·  NPIs with an enrolled state: {len(npi_states):,}")
     print(f"Medicare revocations: {len(revocations):,}  (built {rev_store.generated_at()})")
     print(f"OIG LEIE records: {len(exclusions):,}  (store reports "
           f"{(get_oig_stats() or {}).get('record_count')})")
@@ -179,7 +200,7 @@ def main() -> int:
         print("WARN: deactivation store is empty — the deactivated_billing "
               "portion of this sweep will be blank.")
 
-    raw_targets = set(exclusions) | set(deacts) | set(windows) | set(revocations)
+    raw_targets = set(exclusions) | set(deacts) | set(windows) | set(revocations) | set(enroll)
     targets = {n for n in raw_targets if _NPI_RE.match(str(n))}
     dropped = len(raw_targets) - len(targets)
     print(f"target NPIs to check against billing: {len(targets):,}"
@@ -317,6 +338,24 @@ def main() -> int:
                 })
                 continue
 
+        el = enroll.get(npi)
+        if el:
+            leads.append({
+                **base,
+                "kind": "paid_while_terminated",
+                "provider_name": "",
+                "state": el.get("terminated_state") or "",
+                "specialty": "",
+                "enrollment_status": el.get("enrollment_status"),
+                "terminated_since": el.get("terminated_since"),
+                "paid_while_terminated": el.get("paid_while_terminated"),
+                "months_while_terminated": el.get("months_while_terminated"),
+                "caveat": el.get("caveat") or "",
+                "citation": ("42 CFR § 455.416 (termination of provider participation); "
+                             "42 U.S.C. § 1320a-7b(a) (false claims)"),
+            })
+            continue
+
         dt = deacts.get(npi)
         if dt:
             dd = _ym(dt)
@@ -348,6 +387,7 @@ def main() -> int:
             inside = sum(p for m, p in a["months"] if dd < m < rd)
             if inside <= 0:
                 continue  # billed only outside the window — the NPI was valid then
+            gap = _gap_days(win[0], win[1])
             leads.append({
                 **base,
                 "kind": "deactivated_window",
@@ -356,16 +396,26 @@ def main() -> int:
                 "specialty": "",
                 "deactivation_date": win[0],
                 "reactivation_date": win[1],
+                "gap_days": gap,
+                # A short gap the provider closed is usually a paperwork lapse
+                # (median 40 days, measured 2026-10-21) — real but weak.
+                "weak": gap is None or gap < WEAK_WINDOW_GAP_DAYS,
                 "paid_during_deactivation": round(inside, 2),
                 "citation": "42 U.S.C. § 1320a-7b(a)(1) (false statements — billing while the NPI was deactivated)",
             })
 
+    # The spend parquet has no state; fill it from Medicaid enrollment.
+    for r in leads:
+        if not r.get("state") and npi_states.get(r["npi"]):
+            r["state"] = npi_states[r["npi"]][0]
+
     # Rank: active per-se fraud first, then by the dollars billed while barred.
-    _ORDER = {"active_exclusion": 0, "medicare_revoked_billing": 1, "deactivated_billing": 2,
-              "deactivated_window": 3, "recovery_lead": 4}
+    _ORDER = {"active_exclusion": 0, "medicare_revoked_billing": 1, "paid_while_terminated": 2,
+              "deactivated_billing": 3, "deactivated_window": 4, "recovery_lead": 5}
     leads.sort(key=lambda r: (
         _ORDER.get(r["kind"], 9),
         -(r.get("paid_after_exclusion") or r.get("paid_after_revocation")
+          or r.get("paid_while_terminated")
           or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0),
         -r["total_paid"],
     ))

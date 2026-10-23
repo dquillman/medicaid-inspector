@@ -41,12 +41,14 @@ MIN_WINDOW_GAP_DAYS = 180
 _PERSE_KIND_ORDER = {
     "active_exclusion": 0,
     "medicare_revoked_billing": 1,
-    "deactivated_billing": 2,
-    "deactivated_window": 3,
+    "paid_while_terminated": 2,
+    "deactivated_billing": 3,
+    "deactivated_window": 4,
 }
 _PERSE_REASON = {
     "active_exclusion": "Billed Medicaid while on the OIG exclusion list",
     "medicare_revoked_billing": "Billed Medicaid after Medicare revoked the provider",
+    "paid_while_terminated": "Paid by Medicaid after the state terminated its enrollment for cause",
     "deactivated_billing": "Billed Medicaid under a deactivated NPI",
     "deactivated_window": "Billed Medicaid while the NPI was deactivated",
 }
@@ -157,8 +159,8 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
         if r.get("kind") not in _PERSE_KIND_ORDER:
             continue
         if r["kind"] == "deactivated_window":
-            gap = _gap_days(r)
-            if gap is None or gap < MIN_WINDOW_GAP_DAYS:
+            gap = r.get("gap_days") if r.get("gap_days") is not None else _gap_days(r)
+            if r.get("weak") or gap is None or gap < MIN_WINDOW_GAP_DAYS:
                 dropped["short_lapse"] += 1
                 continue
             r = {**r, "caveat": (f"The NPI was deactivated for about {gap // 30} months, then "
@@ -168,6 +170,7 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
     statuses = get_queue_statuses([r["npi"] for r in perse])
     for r in perse:
         barred = (r.get("paid_after_exclusion") or r.get("paid_after_revocation")
+                  or r.get("paid_while_terminated")
                   or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0)
         _add(2, r["npi"], r, _PERSE_REASON[r["kind"]], barred, "Paid while barred",
              r.get("last_month"), statuses, {"kind": r["kind"]})

@@ -128,8 +128,11 @@ def test_excluded_page_and_worklist_are_disjoint(sweep, monkeypatch):
     monkeypatch.setattr(perse_store, "_by_npi", {
         **perse_store._by_npi,
         "7777777777": {"npi": "7777777777", "kind": "medicare_revoked_billing"},
+        "7777777778": {"npi": "7777777778", "kind": "paid_while_terminated"},
     })
     assert perse_store.is_on_excluded_page("7777777777") is True
+    # Paid after a state terminated its enrollment for cause -> Excluded page.
+    assert perse_store.is_on_excluded_page("7777777778") is True
     # A recovery lead is NOT a deactivation; it stays out unless OIG says so.
     assert perse_store.is_on_excluded_page("3333333333") is False
     # An ordinary provider stays in the worklist.
@@ -237,6 +240,20 @@ def test_brain_counts_only_PROVABLE_unworked_leads(sweep):
     assert s["provable"] == 2          # the two active_exclusion rows
     assert s["recovery"] == 1          # counted, but kept out of 'provable'
     assert s["below_cutoff"] == 1      # only the out-of-cache provable one
+    assert s["paid_while_barred"] == 1_500_000.0
+
+
+def test_brain_does_not_count_a_weak_lapse_as_provable(sweep, monkeypatch):
+    """A short NPI lapse the provider fixed is real but weak; counting it as
+    'provable' overstated the banner by 60 leads (2026-10-22)."""
+    from services.fraud_brain import _perse_waiting_summary
+    rows = perse_store._payload["leads"] + [
+        {"npi": "8888888888", "kind": "deactivated_window", "weak": True,
+         "total_paid": 5_000.0, "paid_during_deactivation": 5_000.0, "in_scan_cache": False},
+    ]
+    monkeypatch.setattr(perse_store, "_payload", {**perse_store._payload, "leads": rows})
+    s = _perse_waiting_summary()
+    assert s["provable"] == 2
     assert s["paid_while_barred"] == 1_500_000.0
 
 

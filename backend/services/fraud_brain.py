@@ -360,9 +360,12 @@ def _perse_waiting_summary() -> dict:
     _worked = {"confirmed", "referred", "tip_filed", "doj_filed", "archived", "dismissed"}
     open_rows = [r for r in rows if statuses.get(r["npi"]) not in _worked]
 
+    # A short NPI lapse the provider fixed (weak=True) is not "provable".
     provable = [r for r in open_rows
                 if r.get("kind") in ("active_exclusion", "medicare_revoked_billing",
-                                     "deactivated_billing", "deactivated_window")]
+                                     "paid_while_terminated",
+                                     "deactivated_billing", "deactivated_window")
+                and not r.get("weak")]
     return {
         "available": True,
         "provable": len(provable),
@@ -371,6 +374,7 @@ def _perse_waiting_summary() -> dict:
         "below_cutoff": len([r for r in provable if r.get("in_scan_cache") is False]),
         "paid_while_barred": round(sum(
             (r.get("paid_after_exclusion") or r.get("paid_after_revocation")
+             or r.get("paid_while_terminated")
              or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0)
             for r in provable), 2),
         "generated_at": summary.get("generated_at"),
@@ -861,6 +865,14 @@ def _refresh_in_background() -> None:
             _bg_refreshing.clear()
 
     threading.Thread(target=_run, name="fraud-brain-refresh", daemon=True).start()
+
+
+def warm_cache() -> None:
+    """Start a background compute if no board is cached yet (server start)."""
+    with _lock:
+        have = _cache["result"] is not None
+    if not have:
+        _refresh_in_background()
 
 
 def _get_top_frauds(limit: int, force_refresh: bool) -> dict:

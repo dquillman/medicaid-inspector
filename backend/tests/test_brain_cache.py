@@ -8,8 +8,16 @@ import pytest
 from services import fraud_brain as fb
 
 
+def _join_refresh_threads():
+    for t in threading.enumerate():
+        if t.name == "fraud-brain-refresh":
+            t.join(timeout=30)
+
+
 @pytest.fixture
 def brain(monkeypatch):
+    # The app warms the board at startup; let that finish before faking compute.
+    _join_refresh_threads()
     calls = {"n": 0}
 
     def fake_compute(limit=10):
@@ -61,6 +69,17 @@ def test_different_limits_do_not_evict_each_other(brain):
     fb._get_top_frauds(25, False)
     fb._get_top_frauds(500, False)
     fb._get_top_frauds(25, False)
+    assert brain["n"] == 1
+
+
+def test_warm_cache_fills_an_empty_board_once(brain):
+    fb.warm_cache()
+    fb.warm_cache()  # a second call while warming must not start another compute
+    _join_refresh_threads()
+    assert brain["n"] == 1
+    assert fb._cache["result"] is not None
+    fb.warm_cache()  # board present: nothing to do
+    _join_refresh_threads()
     assert brain["n"] == 1
 
 

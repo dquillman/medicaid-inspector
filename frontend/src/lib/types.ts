@@ -1838,6 +1838,7 @@ export interface FraudBrainResponse {
 export type PerSeKind =
   | 'active_exclusion'      // billed DURING an exclusion — per-se fraud
   | 'medicare_revoked_billing' // billed Medicaid after Medicare revoked the provider
+  | 'paid_while_terminated'    // paid after the state terminated its enrollment for cause
   | 'deactivated_billing'   // billed under an NPI CMS killed
   | 'deactivated_window'    // billed while deactivated; NPI later reactivated
   | 'recovery_lead'         // billing predates the exclusion — a clawback, not active fraud
@@ -1869,8 +1870,14 @@ export interface ExcludedProvider {
   /** Dollars paid while the provider was barred — the figure a referral needs. */
   paid_after_exclusion?: number
   paid_after_revocation?: number
+  paid_while_terminated?: number
+  terminated_since?: string
+  enrollment_status?: string
   /** Non-empty when the finding needs a check before filing. */
   caveat?: string
+  /** Short NPI lapse (deactivated < 6 months, then reactivated): real but weak. */
+  weak?: boolean
+  gap_days?: number | null
   paid_after_deactivation?: number
   paid_during_deactivation?: number
   citation?: string
