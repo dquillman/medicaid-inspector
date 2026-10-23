@@ -5,6 +5,7 @@ import { api } from '../lib/api'
 import { fmt } from '../lib/format'
 import CopyBlock from '../components/CopyBlock'
 import FormAnswerSheet from '../components/FormAnswerSheet'
+import ContactCopyCard from '../components/ContactCopyCard'
 
 /**
  * Dedicated OIG Hotline referral page — the federal counterpart to
@@ -204,6 +205,7 @@ export default function OigReferralPage() {
                     Subject fields &mdash; copy each straight into the wizard
                   </h3>
                   <FormAnswerSheet fields={formFields} formName="the OIG Hotline form" />
+                  <div className="mt-3"><ContactCopyCard /></div>
                 </div>
               )}
 

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import CopyBlock from './CopyBlock'
 import FormAnswerSheet from './FormAnswerSheet'
+import ContactCopyCard from './ContactCopyCard'
 
 export const DOJ_PORTAL = 'https://america.gov/fraud'
 const FIRST_BOX_MAX = 2000
@@ -274,6 +275,8 @@ export default function DojTipPanel({
           <FormAnswerSheet fields={followUpFields} formName="the DOJ portal" />
         </div>
       )}
+
+      <ContactCopyCard />
 
       <div className="mt-2 mb-2 border-t border-gray-800 pt-4">
         <h3 className="text-sm font-semibold text-gray-200">Your case record</h3>

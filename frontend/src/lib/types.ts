@@ -1772,6 +1772,17 @@ export interface MissingProvidersPreview {
   note?: string | null
 }
 
+/** The filer's own contact details, stored on their account. */
+export interface FilerContact {
+  name?: string
+  phone?: string
+  email?: string
+  address?: string
+  city?: string
+  state?: string
+  zip?: string
+}
+
 export interface DojShortlistLead {
   npi: string
   rank: number

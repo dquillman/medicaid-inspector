@@ -5,6 +5,7 @@ import { api, get, mutate } from '../lib/api'
 import { fmt } from '../lib/format'
 import CopyBlock from '../components/CopyBlock'
 import FormAnswerSheet from '../components/FormAnswerSheet'
+import ContactCopyCard from '../components/ContactCopyCard'
 import type { MFCUReferral } from '../lib/types'
 import { useProviderFlags } from '../hooks/useProviderFlags'
 
@@ -413,6 +414,7 @@ export default function MFCUReferralPage() {
                     Step 2 &mdash; Every other field on the state&rsquo;s form
                   </h3>
                   <FormAnswerSheet fields={formFields} />
+                  <div className="mt-3"><ContactCopyCard /></div>
                 </div>
               )}
 

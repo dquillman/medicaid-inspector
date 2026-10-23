@@ -295,6 +295,20 @@ def create_or_get_google_user(email: str, display_name: str, default_role: str =
     return _safe_user(user)
 
 
+# The filer's own contact details, copied into fraud-tip intake forms (DOJ
+# requires them for a reward). Kept on the account so every device has them.
+CONTACT_FIELDS = ("name", "phone", "email", "address", "city", "state", "zip")
+
+
+def clean_contact(contact: dict | None) -> dict:
+    out = {}
+    for k in CONTACT_FIELDS:
+        v = (contact or {}).get(k)
+        if isinstance(v, str) and v.strip():
+            out[k] = v.strip()[:200]
+    return out
+
+
 def update_user(username: str, updates: dict) -> Optional[dict]:
     """Update user fields (role, display_name, password). Returns updated user or None."""
     user = _users.get(username)
@@ -311,6 +325,9 @@ def update_user(username: str, updates: dict) -> Optional[dict]:
 
     if "plan" in updates:
         user["plan"] = updates["plan"]
+
+    if "contact" in updates:
+        user["contact"] = clean_contact(updates["contact"])
 
     password_changed = False
     if "password" in updates:
@@ -475,4 +492,5 @@ def _safe_user(user: dict) -> dict:
         "role": user.get("role", "viewer"),
         "display_name": user.get("display_name", user["username"]),
         "created_at": user.get("created_at"),
+        "contact": dict(user.get("contact") or {}),
     }

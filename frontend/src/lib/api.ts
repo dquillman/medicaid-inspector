@@ -60,6 +60,7 @@ import type {
   LicenseFlagsResponse,
   FraudBrainResponse,
   DojShortlistResponse,
+  FilerContact,
   MissingProvidersPreview,
   ExcludedProvidersResponse,
   MethodsResponse,
@@ -989,6 +990,11 @@ export const api = {
 
   // Fraud Brain — cross-source meta-analysis
   dojShortlist: () => get<DojShortlistResponse>('/doj/shortlist'),
+
+  myContact: () =>
+    get<{ user: { contact?: FilerContact } }>('/auth/me').then(r => r.user.contact ?? {}),
+  saveMyContact: (contact: FilerContact) =>
+    mutate<{ contact: FilerContact }>('PUT', '/auth/me/contact', contact).then(r => r.contact),
 
   fraudBrainTop: (limit = 10, refresh = false, dojOnly = false) =>
     get<FraudBrainResponse>('/fraud-brain/top', { limit, refresh, doj_only: dojOnly }),

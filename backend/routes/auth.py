@@ -115,10 +115,21 @@ class CreateUserRequest(BaseModel):
     display_name: str = ""
 
 
+class ContactInfo(BaseModel):
+    name: str = ""
+    phone: str = ""
+    email: str = ""
+    address: str = ""
+    city: str = ""
+    state: str = ""
+    zip: str = ""
+
+
 class UpdateUserRequest(BaseModel):
     role: Optional[str] = None
     display_name: Optional[str] = None
     password: Optional[str] = None
+    contact: Optional[ContactInfo] = None
 
 
 @router.post("/login")
@@ -253,6 +264,16 @@ async def me(user: dict = Depends(require_user)):
     return {"user": user}
 
 
+@router.put("/me/contact")
+async def set_my_contact(req: ContactInfo, user: dict = Depends(require_user)):
+    """Your own contact details for fraud-tip intake forms (name, phone,
+    email, address). Stored on your account; only you and admins see them."""
+    updated = update_user(user["username"], {"contact": req.model_dump()})
+    if not updated:
+        raise HTTPException(404, "User not found")
+    return {"contact": updated["contact"]}
+
+
 # ── User management (admin only) ─────────────────────────────────────────────
 
 @router.get("/users")
@@ -283,6 +304,8 @@ async def update_existing_user(username: str, req: UpdateUserRequest, admin: dic
         updates["display_name"] = req.display_name
     if req.password is not None:
         updates["password"] = req.password
+    if req.contact is not None:
+        updates["contact"] = req.contact.model_dump()
 
     if not updates:
         raise HTTPException(400, "No updates provided")
