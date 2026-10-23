@@ -66,7 +66,11 @@ export default function DojTipPanel({
   const guide = tip?.filing_guide
   const priorFilings = guide?.prior_filings ?? []
   // The first form-field row IS the short version, shown in its own box.
-  const followUpFields = (tip?.form_fields ?? []).slice(1)
+  // The two long answers the portal's chat asks for get their own copy cards;
+  // the short facts stay in the answer sheet.
+  const CHAT_CARD_LABELS = ['Provider details (with NPI)', 'Risk to patients']
+  const chatCards = (tip?.form_fields ?? []).filter(f => CHAT_CARD_LABELS.includes(f.label) && f.value)
+  const followUpFields = (tip?.form_fields ?? []).slice(1).filter(f => !CHAT_CARD_LABELS.includes(f.label))
   const inCase = !!tip && (tip.saved_to_case || !!tip.save_skipped?.startsWith('an identical'))
 
   const [pdfBusy, setPdfBusy] = useState(false)
@@ -273,6 +277,18 @@ export default function DojTipPanel({
       )}
 
       <ContactCopyCard />
+
+      {chatCards.map(f => (
+        <CopyBlock
+          key={f.label}
+          text={f.value}
+          tone="secondary"
+          rows={8}
+          buttonLabel="Copy"
+          title={<>{f.label}</>}
+          subtitle={f.note}
+        />
+      ))}
 
       {followUpFields.length > 0 && (
         <div className="mt-1">
