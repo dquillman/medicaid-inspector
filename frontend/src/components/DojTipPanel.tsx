@@ -272,6 +272,8 @@ export default function DojTipPanel({
         </div>
       )}
 
+      <ContactCopyCard />
+
       {followUpFields.length > 0 && (
         <div className="mt-1">
           <h3 className="text-sm font-semibold text-gray-200 mb-2">
@@ -280,8 +282,6 @@ export default function DojTipPanel({
           <FormAnswerSheet fields={followUpFields} formName="the DOJ portal" />
         </div>
       )}
-
-      <ContactCopyCard />
 
       {/* Closed by default: the full narrative goes in as the PDF attachment,
           so it is rarely pasted, and open it pushed everything else down. */}
