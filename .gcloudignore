@@ -37,6 +37,10 @@ backend/*.tmp
 # Brain can cache that degraded ranking for the 15-min TTL. So they MUST ship.
 # Keep them reasonably fresh by re-downloading during the rescore/deploy cycle.
 backend/enrollment_cache.json
+# Offline build inputs for the per-se sweep — never read by the server.
+backend/npi_states.json
+backend/enrollment_leads.json
+backend/medicare_revocations.json
 backend/users.json
 backend/sessions.json
 backend/review_queue.json
