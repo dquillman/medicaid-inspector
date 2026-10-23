@@ -202,9 +202,9 @@ export default function DojTipPanel({
       </div>
 
       {guide && (
-        <details className="border border-gray-700 rounded-lg overflow-hidden" open>
+        <details className="border border-gray-700 rounded-lg overflow-hidden">
           <summary className="px-4 py-2.5 border-b border-gray-700 bg-gray-900/40 cursor-pointer">
-            <span className="text-sm font-bold text-gray-200">Filing guide &mdash; step by step</span>
+            <span className="text-sm font-bold text-gray-200">Filing guide &mdash; step by step &mdash; click to show</span>
             <span className="text-[11px] text-gray-500 ml-2">
               Derived for THIS provider. The portal is an AI chat, so its follow-up questions can vary &mdash; answer from these lines and never guess.
             </span>
