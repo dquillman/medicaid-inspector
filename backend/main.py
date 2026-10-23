@@ -128,11 +128,14 @@ def _finish_prescan_load():
     set_prescan_status(0, msg)
     log.info(msg)
 
-    # Score the Fraud Brain board now, in the background, so the first page
-    # after a deploy doesn't wait ~20s for it. The OIG store is loaded before
-    # this runs; a request that arrives mid-warm-up joins this compute.
+    # Score the Fraud Brain board now so the first page doesn't wait ~20s for
+    # it (nearly every page asks for Brain ranks). On Cloud Run it must run
+    # INSIDE startup: an instance only gets CPU while starting or serving a
+    # request, so a background warm-up crawled until the first request came
+    # (measured 22.7s, v3.60.0). Locally it runs in the background.
+    import os as _os_w
     from services.fraud_brain import warm_cache
-    warm_cache()
+    warm_cache(blocking=_os_w.environ.get("K_SERVICE") is not None)
 
     # Enrich providers missing NPPES data
     # Filter to providers that genuinely lack any NPPES data. If a provider

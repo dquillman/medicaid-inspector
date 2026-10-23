@@ -83,6 +83,12 @@ def test_warm_cache_fills_an_empty_board_once(brain):
     assert brain["n"] == 1
 
 
+def test_blocking_warm_cache_computes_before_returning(brain):
+    fb.warm_cache(blocking=True)
+    assert brain["n"] == 1
+    assert fb._cache["result"] is not None
+
+
 def test_recompute_button_still_forces_a_fresh_board(brain):
     fb._get_top_frauds(10, False)
     fb._get_top_frauds(10, True)

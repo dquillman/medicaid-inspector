@@ -867,12 +867,21 @@ def _refresh_in_background() -> None:
     threading.Thread(target=_run, name="fraud-brain-refresh", daemon=True).start()
 
 
-def warm_cache() -> None:
-    """Start a background compute if no board is cached yet (server start)."""
+def warm_cache(blocking: bool = False) -> None:
+    """Compute the board if none is cached yet (server start). blocking=True
+    computes in the caller's thread, for hosts that only give CPU to startup
+    and requests."""
     with _lock:
         have = _cache["result"] is not None
-    if not have:
-        _refresh_in_background()
+    if have:
+        return
+    if blocking:
+        try:
+            _compute_and_store(force=True)
+        except Exception:  # noqa: BLE001 — never fail startup over a warm-up
+            log.warning("fraud_brain: startup warm-up failed", exc_info=True)
+        return
+    _refresh_in_background()
 
 
 def _get_top_frauds(limit: int, force_refresh: bool) -> dict:
