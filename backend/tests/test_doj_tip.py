@@ -143,6 +143,47 @@ def test_doj_priority_negative(taxonomies):
     assert doj_priority(taxonomies)["priority"] is False
 
 
+def test_provider_details_answer_for_the_chat_followup():
+    """The DOJ chat asks to 'confirm or clarify details about the provider,
+    facility, care setting, program or service ... include the NPI'."""
+    from services.doj_filing_guide import provider_details_answer
+    a = provider_details_answer(
+        npi="1922018118", name="TEXAS BEST CARE HOME HEALTH, INC.",
+        address="123 MAIN ST, HOUSTON, TX, 77001", phone="713-555-0100",
+        taxonomies=["Home Health Agency", "", "Home Health Agency"], state="TX",
+        entity_type="NPI-2", top_code="G0156", top_code_desc="Home health aide services",
+    )
+    assert "NPI 1922018118" in a
+    assert "Texas Medicaid" in a
+    assert "Provider type: Home Health Agency." in a        # de-duplicated
+    assert "Main service billed: G0156 (Home health aide services)." in a
+    assert "(business)" in a
+    # Nothing invented when a field is missing.
+    b = provider_details_answer(npi="1000000001", name="X", address="", phone="",
+                                taxonomies=[], state="", entity_type="NPI-1")
+    assert "Location" not in b and "Phone" not in b and "Program: Medicaid" in b
+
+
+def test_patient_risk_answer_claims_no_harm_it_cannot_know():
+    from services.doj_filing_guide import patient_risk_answer
+    a = patient_risk_answer(patients=3396, period="2021-12 to 2023-04",
+                            taxonomies=["Home Health Agency"])
+    assert a.startswith("I have no direct knowledge of harm")
+    assert "3,396 patients, often elderly or disabled" in a
+    assert "2021-12 to 2023-04" in a
+
+
+def test_doj_tip_offers_the_chat_followup_answers(client, auth_headers):
+    r = client.get(f"/api/providers/{NPI}/oig-tip?destination=doj&save_note=false", headers=auth_headers)
+    assert r.status_code == 200
+    rows = {f["label"]: f["value"] for f in r.json()["form_fields"]}
+    assert f"NPI {NPI}" in rows["Provider details (with NPI)"]
+    assert rows["Risk to patients"].startswith("I have no direct knowledge of harm")
+    steps = [s[0] for s in r.json()["filing_guide"]["steps"]]
+    assert any("Include the NPI" in s for s in steps)
+    assert any("risk to patients" in s for s in steps)
+
+
 def test_doj_filing_keeps_the_text_as_filed(client, auth_headers, tmp_path, monkeypatch):
     """Most DOJ-shortlist leads have no case to hold a case note, so the filing
     record is where the submitted text lives."""

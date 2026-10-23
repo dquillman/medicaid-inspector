@@ -122,11 +122,57 @@ def prior_filing_sentence(filings: list[dict]) -> str:
             "; I am the original source of this analysis.")
 
 
+def provider_details_answer(*, npi: str, name: str, address: str, phone: str,
+                            taxonomies: list[str], state: str, entity_type: str | None,
+                            top_code: str = "", top_code_desc: str = "") -> str:
+    """Answer for the portal's follow-up 'Can you confirm or clarify any
+    additional details related to the provider, facility, care setting, benefit
+    program, or service involved? Include the NPI' (seen on a live filing,
+    2026-10-22). Only facts the app holds; nothing guessed."""
+    from core.mfcu_directory import _STATE_NAMES
+    st = (state or "").strip().upper()
+    program = f"{_STATE_NAMES.get(st, st)} Medicaid" if st else "Medicaid"
+    kind = "individual practitioner" if _norm(entity_type) == "npi-1" else "business"
+    types = [t for t in (taxonomies or []) if t]
+    parts = [
+        f"Provider: {name or 'name not on file'} ({kind}), NPI {npi}.",
+        f"Location: {address}." if address else "",
+        f"Phone: {phone}." if phone else "",
+        f"Provider type: {', '.join(dict.fromkeys(types))}." if types else "",
+        f"Program: {program} (federal Title XIX funds).",
+        (f"Main service billed: {top_code}" + (f" ({top_code_desc})" if top_code_desc else "") + ".")
+        if top_code else "",
+        "Source: public HHS T-MSIS Medicaid spending data (2018-2024) and the NPPES registry.",
+    ]
+    return " ".join(p for p in parts if p)
+
+
+def patient_risk_answer(*, patients: float, period: str, taxonomies: list[str]) -> str:
+    """Answer for 'Can you confirm or clarify any additional details related to
+    actual or potential risk to patients, beneficiaries, or the public?' (live
+    filing, 2026-10-22). Public payment data shows no patient harm, so say so
+    and describe only the potential risk."""
+    area = doj_priority(taxonomies)["area"]
+    who = {
+        "Hospice": ", often terminally ill,",
+        "Home health care": ", often elderly or disabled people cared for at home,",
+        "Day care": ", often children or disabled adults in day programs,",
+        "Special services": ", often people with disabilities,",
+    }.get(area, "")
+    n = f"{patients:,.0f} " if patients else ""
+    return ("I have no direct knowledge of harm to any patient; my information comes only from "
+            f"public Medicaid payment data. Potential risk: Medicaid paid this provider for "
+            f"services to {n}patients{who} over {period}. If those services were not provided, "
+            "not needed, or delivered by unqualified staff, these patients may not have received "
+            "care they needed, and Medicaid money meant for their care was lost.")
+
+
 def build_doj_filing_guide(*, npi: str, name: str, taxonomies: list[str], state: str,
                            first_month: str | None, last_month: str | None,
                            total_paid: float, address: str, phone: str,
                            entity_type: str | None, flagged_signals: list[str],
-                           filings: list[dict], oig_excluded: bool) -> dict:
+                           filings: list[dict], oig_excluded: bool,
+                           details_answer: str = "") -> dict:
     pri = doj_priority(taxonomies)
     subject_type = "Individual" if _norm(entity_type) == "npi-1" else "Business"
     period = f"{first_month or '?'} to {last_month or '?'}"
@@ -146,6 +192,14 @@ def build_doj_filing_guide(*, npi: str, name: str, taxonomies: list[str], state:
          "Attach the FULL narrative as .txt ('Download full narrative'). Optional: the "
          "referral packet printed to PDF. .html is NOT accepted."),
         ("Who was involved?", f"{who} ({subject_type})"),
+        ("'Confirm or clarify details about the provider, facility, care setting, program "
+         "or service? Include the NPI'",
+         "Copy the 'Provider details (with NPI)' answer below and paste it."
+         if details_answer else "Give the provider name, NPI, address and provider type."),
+        ("'Confirm or clarify details about actual or potential risk to patients, "
+         "beneficiaries, or the public?'",
+         "Copy the 'Risk to patients' answer below. It says plainly that the data shows no "
+         "patient harm and describes only the potential risk. Do not claim harm you don't know of."),
         ("Which program?", "Medicaid. If Medicaid is not a choice, pick the health-care one "
                            "and write 'Medicaid' in the text."),
         ("When did it happen?", f"{period} (most recent billed month in the public data: "

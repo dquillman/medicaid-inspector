@@ -3065,7 +3065,16 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
     # Length is not cosmetic here: an over-long paste is either truncated
     # mid-word or rejected outright, which is exactly how Dave lost the full
     # narrative on PA's form. Ship the count so the UI can warn BEFORE filing.
+    _doj_details = ""
     if dest == "doj":
+        from services.doj_filing_guide import provider_details_answer, patient_risk_answer
+        _top = (cached.get("top_hcpcs") or "").strip().upper()
+        _doj_details = provider_details_answer(
+            npi=npi, name=name, address=address_str, phone=npp_phone,
+            taxonomies=[specialty] + _other_tax,
+            state=(addr.get("state") or cached.get("state") or ""),
+            entity_type=_ent, top_code=_top, top_code_desc=_CPT_DESCRIPTIONS.get(_top, ""),
+        )
         # The DOJ portal is an AI chat, not a fixed form: one 2,000-char box,
         # attachments, then follow-up questions. These are the answers to keep
         # at hand for those follow-ups — the state-form fields (victim name,
@@ -3073,6 +3082,16 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         form_fields = [
             {"label": "What raised your concern? (first box)", "value": short_narrative,
              "note": "Paste this first. The portal box takes 2,000 characters."},
+            {"label": "Provider details (with NPI)", "value": _doj_details,
+             "note": "For the chat's 'confirm or clarify details about the provider, facility, "
+                     "care setting, program or service' question."},
+            {"label": "Risk to patients",
+             "value": patient_risk_answer(
+                 patients=total_benes,
+                 period=f"{first_m} to {last_m}" if first_m != "?" else "the period in the data",
+                 taxonomies=[specialty] + _other_tax),
+             "note": "For the chat's 'actual or potential risk to patients, beneficiaries, or the "
+                     "public' question. Never claim harm you don't know of."},
             {"label": "Provider / business name", "value": name},
             {"label": "NPI", "value": npi},
             {"label": "Address (NPPES)", "value": address_str},
@@ -3231,6 +3250,7 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
                 entity_type=nppes.get("entity_type"),
                 flagged_signals=[f.get("signal", "") for f in flags],
                 filings=_doj_filings, oig_excluded=oig_excluded,
+                details_answer=_doj_details,
             )
             guide_block = render_doj_filing_guide(filing_guide)
         except Exception:
