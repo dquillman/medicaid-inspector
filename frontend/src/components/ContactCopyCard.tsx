@@ -93,7 +93,8 @@ export default function ContactCopyCard() {
         </button>
         <div className="flex gap-2">
           {!editing && allText && (
-            <button type="button" className={btn} onClick={() => copy(allText, 'all')}>
+            <button type="button" onClick={() => copy(allText, 'all')}
+              className="shrink-0 px-2 py-1 text-[10px] font-semibold bg-amber-600 hover:bg-amber-500 text-black rounded transition-colors">
               {copied === 'all' ? 'Copied ✓' : 'Copy all'}
             </button>
           )}
