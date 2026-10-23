@@ -17,6 +17,8 @@ const FIELDS: { key: keyof FilerContact; label: string }[] = [
  * The filer's own contact details with one-click copy, for the "your
  * information" part of OIG, MFCU and DOJ intake forms (DOJ needs it for a
  * reward). Stored on the user's account, so it follows them across devices.
+ * Closed by default: the details are the same every time, and "Copy all"
+ * stays in the header so a closed card still does its main job.
  */
 export default function ContactCopyCard() {
   const qc = useQueryClient()
@@ -25,6 +27,7 @@ export default function ContactCopyCard() {
     queryFn: () => api.myContact(),
     staleTime: 10 * 60_000,
   })
+  const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<FilerContact>({})
   const [saving, setSaving] = useState(false)
@@ -79,10 +82,15 @@ export default function ContactCopyCard() {
       <textarea ref={scratch} readOnly aria-hidden="true" tabIndex={-1}
         className="fixed -top-96 left-0 opacity-0 h-px w-px" />
       <div className="px-4 py-2.5 border-b border-gray-700 bg-gray-900/40 flex items-center justify-between gap-2">
-        <div>
-          <h3 className="text-sm font-bold text-gray-200">Your contact info</h3>
-          <p className="text-[11px] text-gray-500">For the form&rsquo;s &ldquo;your information&rdquo; part. Saved on your account.</p>
-        </div>
+        <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open || editing}
+          className="text-left group">
+          <h3 className="text-sm font-bold text-gray-200 group-hover:text-white">
+            <span className="inline-block w-3 text-gray-500">{open || editing ? '▾' : '▸'}</span>
+            Your contact info
+            {!open && !editing && <span className="ml-2 text-[11px] font-normal text-gray-500">click to show</span>}
+          </h3>
+          <p className="text-[11px] text-gray-500 ml-3">For the form&rsquo;s &ldquo;your information&rdquo; part. Saved on your account.</p>
+        </button>
         <div className="flex gap-2">
           {!editing && allText && (
             <button type="button" className={btn} onClick={() => copy(allText, 'all')}>
@@ -91,13 +99,14 @@ export default function ContactCopyCard() {
           )}
           {!editing && (
             <button type="button" className={btn}
-              onClick={() => { setDraft({ ...(contact ?? {}) }); setEditing(true) }}>
+              onClick={() => { setDraft({ ...(contact ?? {}) }); setEditing(true); setOpen(true) }}>
               {filled.length ? 'Edit' : 'Add'}
             </button>
           )}
         </div>
       </div>
 
+      {(open || editing) && <>
       {isLoading && <p className="px-4 py-2 text-xs text-gray-500">Loading…</p>}
 
       {!editing && !isLoading && filled.length === 0 && (
@@ -140,6 +149,7 @@ export default function ContactCopyCard() {
           </div>
         </div>
       )}
+      </>}
 
       {failed && (
         <p className="px-4 py-2 text-[11px] text-red-400 border-t border-gray-800">
