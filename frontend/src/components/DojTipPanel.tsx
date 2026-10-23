@@ -290,13 +290,20 @@ export default function DojTipPanel({
         />
       ))}
 
+      {/* Closed by default: the short facts (name, NPI, address, amount) are
+          only needed when the portal's chat asks for one. */}
       {followUpFields.length > 0 && (
-        <div className="mt-1">
-          <h3 className="text-sm font-semibold text-gray-200 mb-2">
-            Answers for the portal&rsquo;s follow-up questions
-          </h3>
-          <FormAnswerSheet fields={followUpFields} formName="the DOJ portal" />
-        </div>
+        <details className="border border-gray-700 rounded-lg">
+          <summary className="px-4 py-2.5 cursor-pointer text-sm font-semibold text-gray-300 hover:text-gray-100">
+            Form answers &mdash; click to show
+            <span className="ml-2 text-[11px] font-normal text-gray-500">
+              Name, NPI, address, amount and other short answers for the portal&rsquo;s follow-up questions.
+            </span>
+          </summary>
+          <div className="px-3 pb-3">
+            <FormAnswerSheet fields={followUpFields} formName="the DOJ portal" />
+          </div>
+        </details>
       )}
 
       {/* Closed by default: the full narrative goes in as the PDF attachment,
