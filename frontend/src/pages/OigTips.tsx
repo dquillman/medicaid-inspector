@@ -1,4 +1,5 @@
-import { Link } from 'react-router-dom'
+import { useMemo } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import Breadcrumbs from '../components/Breadcrumbs'
@@ -22,6 +23,20 @@ export default function OigTips() {
     queryFn: () => api.oigTipsList(),
     staleTime: 60_000,
   })
+
+  // ?channel=doj|oig so a filtered view can be linked and survives a reload.
+  const [params, setParams] = useSearchParams()
+  const channel = (['doj', 'oig'].includes(params.get('channel') ?? '') ? params.get('channel') : 'all') as 'all' | 'doj' | 'oig'
+  const setChannel = (c: 'all' | 'doj' | 'oig') => setParams(c === 'all' ? {} : { channel: c }, { replace: true })
+  const tips = useMemo(
+    () => (data?.tips ?? []).filter(t => channel === 'all' || (t.destination ?? 'oig') === channel),
+    [data, channel],
+  )
+  const statusCounts = useMemo(() => {
+    const c: Record<string, number> = {}
+    for (const t of tips) c[t.status] = (c[t.status] ?? 0) + 1
+    return c
+  }, [tips])
 
   async function patch(id: string, body: Parameters<typeof api.updateOigTip>[1]) {
     await api.updateOigTip(id, body)
@@ -65,11 +80,33 @@ export default function OigTips() {
       </div>
 
       {data && (
+        <div className="inline-flex rounded border border-hairline overflow-hidden">
+          {([
+            ['all', `All (${data.tips.length})`],
+            ['doj', `DOJ (${data.counts.by_destination?.doj ?? 0})`],
+            ['oig', `OIG (${data.counts.by_destination?.oig ?? 0})`],
+          ] as const).map(([key, label], i) => (
+            <button
+              key={key}
+              onClick={() => setChannel(key)}
+              className={`px-3 py-1 text-[11px] font-mono uppercase tracking-wider transition-colors ${i ? 'border-l border-hairline' : ''} ${
+                channel === key
+                  ? key === 'doj' ? 'bg-amber-400/10 text-amber-300' : key === 'oig' ? 'bg-teal-400/10 text-teal-300' : 'bg-surface-2 text-filament-core'
+                  : 'text-ink-tertiary hover:text-ink-secondary'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {data && (
         <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
           {STATUSES.map((s) => (
             <div key={s} className="card py-2.5">
               <p className="text-[10px] text-ink-tertiary uppercase tracking-[0.12em]">{s.replace('_', ' ')}</p>
-              <p className={`text-lg font-mono tabular-nums ${STATUS_TONE[s]}`}>{data.counts.by_status?.[s] ?? 0}</p>
+              <p className={`text-lg font-mono tabular-nums ${STATUS_TONE[s]}`}>{statusCounts[s] ?? 0}</p>
             </div>
           ))}
         </div>
@@ -86,7 +123,11 @@ export default function OigTips() {
         </div>
       )}
 
-      {data && data.tips.length > 0 && (
+      {data && data.tips.length > 0 && tips.length === 0 && (
+        <div className="card"><p className="text-sm text-ink-tertiary">No {channel.toUpperCase()} tips logged yet.</p></div>
+      )}
+
+      {tips.length > 0 && (
         <div className="card overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
@@ -101,7 +142,7 @@ export default function OigTips() {
               </tr>
             </thead>
             <tbody>
-              {data.tips.map((t) => (
+              {tips.map((t) => (
                 <tr key={t.id} className="border-b border-hairline/60 hover:bg-surface-2/40">
                   <td className="py-2 pr-4">
                     <Link to={`/providers/${t.npi}`} className="text-filament-core hover:underline">{t.provider_name || t.npi}</Link>
@@ -146,7 +187,7 @@ export default function OigTips() {
                       defaultValue={t.reference_number}
                       onBlur={(e) => { if (e.target.value !== t.reference_number) patch(t.id, { reference_number: e.target.value }) }}
                       placeholder="—"
-                      className="bg-surface-2 border border-hairline rounded px-2 py-1 text-xs font-mono text-ink-secondary w-28"
+                      className="bg-surface-2 border border-hairline rounded px-2 py-1 text-xs font-mono text-ink-secondary w-48"
                     />
                   </td>
                   <td className="py-2">
