@@ -256,17 +256,6 @@ export default function DojTipPanel({
         </div>
       )}
 
-      {fullNarrative && (
-        <CopyBlock
-          text={fullNarrative}
-          tone="secondary"
-          rows={12}
-          buttonLabel="Copy full narrative"
-          title={<>Full narrative (the evidence)</>}
-          subtitle={<>The same text as the .txt above. Paste it in if the portal asks for more detail.</>}
-        />
-      )}
-
       {followUpFields.length > 0 && (
         <div className="mt-1">
           <h3 className="text-sm font-semibold text-gray-200 mb-2">
@@ -277,6 +266,28 @@ export default function DojTipPanel({
       )}
 
       <ContactCopyCard />
+
+      {/* Closed by default: the full narrative goes in as the .txt attachment,
+          so it is rarely pasted, and open it pushed everything else down. */}
+      {fullNarrative && (
+        <details className="border border-gray-700 rounded-lg">
+          <summary className="px-4 py-2.5 cursor-pointer text-sm font-semibold text-gray-300 hover:text-gray-100">
+            Full narrative (the evidence) &mdash; click to show
+            <span className="ml-2 text-[11px] font-normal text-gray-500">
+              Same text as the .txt attachment. Only needed if the portal asks for more detail.
+            </span>
+          </summary>
+          <div className="px-3 pb-3">
+            <CopyBlock
+              text={fullNarrative}
+              tone="secondary"
+              rows={12}
+              buttonLabel="Copy full narrative"
+              title={<>Full narrative</>}
+            />
+          </div>
+        </details>
+      )}
 
       <div className="mt-2 mb-2 border-t border-gray-800 pt-4">
         <h3 className="text-sm font-semibold text-gray-200">Your case record</h3>
