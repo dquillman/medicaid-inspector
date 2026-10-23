@@ -190,7 +190,7 @@ def build_doj_filing_guide(*, npi: str, name: str, taxonomies: list[str], state:
          "Paste the SHORT version (button 'Copy short version'). It already names the "
          "provider, NPI, period, dollars and the top findings."),
         ("Add supporting documents (up to 5, 50MB each)",
-         "Attach the FULL narrative as .txt ('Download full narrative'). Optional: the "
+         "Attach the FULL narrative as a PDF ('Download full narrative (PDF)'). Optional: the "
          "referral packet printed to PDF. .html is NOT accepted."),
         ("Who was involved?", f"{who} ({subject_type})"),
         ("'Confirm or clarify details about the provider, facility, care setting, program "
@@ -259,6 +259,6 @@ def render_doj_filing_guide(guide: dict) -> str:
         lines.append(f"      -> {a}")
     lines += ["", "  Notes:"]
     lines += [f"    - {n}" for n in guide["notes"]]
-    lines += ["", "  Everything below the COPY line is the FULL narrative: attach it as a .txt.",
+    lines += ["", "  Everything below the COPY line is the FULL narrative: attach it as the PDF.",
               "", "=" * 30 + " COPY FROM HERE " + "=" * 30, ""]
     return "\n".join(lines)

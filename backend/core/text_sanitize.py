@@ -43,6 +43,11 @@ _REPLACEMENTS = {
     "©": "(C)",  # copyright
     "™": "(TM)",  # trademark
     "°": " deg",  # degree
+    # Section sign: dropping it left every citation as "42 CFR  455.23".
+    # "Sec." is how the KEY FINDING block already writes it.
+    "§§ ": "Secs. ",
+    "§ ": "Sec. ",
+    "§": "Sec. ",
 }
 
 

@@ -66,6 +66,7 @@ import type {
   MethodsResponse,
   OigTipResponse,
   OigTip,
+  TipSupplementsResponse,
   OigTipsResponse,
   OigTipsFiledResponse,
   ReferralDestination,
@@ -382,6 +383,26 @@ export const api = {
     const a = document.createElement('a')
     a.href = url
     a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  },
+
+  // The full narrative laid out as a PDF for the intake's attachment step.
+  downloadTipPdf: async (body: { npi: string; text: string; provider_name?: string; destination?: string }) => {
+    const res = await fetch(`${BASE}/oig-tips/pdf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify(body),
+    })
+    if (res.status === 401) throw new Error('Session expired — sign in again to download')
+    if (!res.ok) throw new Error(`PDF failed: ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${(body.destination ?? 'doj').toUpperCase()}-tip-${body.npi}.pdf`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -1026,6 +1047,10 @@ export const api = {
     mutate<OigTip>('POST', '/oig-tips', body),
   updateOigTip: (id: string, body: Partial<Pick<OigTip, 'status' | 'reference_number' | 'notes' | 'outcome_notes'>>) =>
     mutate<OigTip>('PATCH', `/oig-tips/${id}`, body),
+  // Filed tips that left out the per-se key finding, each with an update note.
+  tipSupplements: () => get<TipSupplementsResponse>('/oig-tips/supplements'),
+  logTipSupplement: (id: string, body: { text: string; reference_number?: string }) =>
+    mutate<OigTip>('POST', `/oig-tips/${id}/supplement`, body),
 
   // License & Credential Verification
   providerLicense: (npi: string) => get<LicenseVerification>(`/license/providers/${npi}`),

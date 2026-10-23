@@ -15,7 +15,7 @@ export function dojTipQueryKey(npi: string) {
 /**
  * Everything needed to file one provider with the DOJ Criminal Tip Rewards
  * portal: the per-provider guide, the short version for the 2,000-char box,
- * the full narrative as a .txt attachment, the follow-up answers, and the log
+ * the full narrative as a PDF attachment, the follow-up answers, and the log
  * that records the portal's reference number. Used by the single-provider DOJ
  * page and by Filing mode, so the two can never drift.
  */
@@ -69,6 +69,18 @@ export default function DojTipPanel({
   const followUpFields = (tip?.form_fields ?? []).slice(1)
   const inCase = !!tip && (tip.saved_to_case || !!tip.save_skipped?.startsWith('an identical'))
 
+  const [pdfBusy, setPdfBusy] = useState(false)
+  const handlePdf = async () => {
+    setDownloadError(''); setPdfBusy(true)
+    try {
+      await api.downloadTipPdf({ npi, text: fullNarrative, provider_name: providerName, destination: 'doj' })
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : 'PDF download failed')
+    } finally {
+      setPdfBusy(false)
+    }
+  }
+
   const handleDownload = () => {
     setDownloadError('')
     try {
@@ -104,7 +116,7 @@ export default function DojTipPanel({
         notes: notes || undefined,
         destination: 'doj',
         reference_number: refNumber.trim() || undefined,
-        filed_text: `SHORT VERSION (first box):\n${shortVersion}\n\nFULL NARRATIVE (attached .txt):\n${fullNarrative}`,
+        filed_text: `SHORT VERSION (first box):\n${shortVersion}\n\nFULL NARRATIVE (attached PDF):\n${fullNarrative}`,
       })
       setLogged(true)
       queryClient.invalidateQueries({ queryKey: ['oig-tips-filed'] })
@@ -242,16 +254,20 @@ export default function DojTipPanel({
             <h3 className="text-sm font-semibold text-gray-200">Attach the full narrative</h3>
             <p className="text-[11px] text-gray-500 mt-0.5">
               The portal takes up to 5 files (.txt, .pdf, .docx, .csv, &hellip; &mdash; NOT .html).
-              Download this .txt and attach it with &ldquo;Add supporting documents&rdquo;.
+              Download the PDF and attach it with &ldquo;Add supporting documents&rdquo;.{' '}
+              <button type="button" onClick={handleDownload} className="underline hover:text-gray-300">
+                Plain .txt instead
+              </button>
             </p>
             {downloadError && <p className="text-[11px] text-red-400 mt-1">{downloadError}</p>}
           </div>
           <button
             type="button"
-            onClick={handleDownload}
-            className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-black rounded transition-colors"
+            onClick={handlePdf}
+            disabled={pdfBusy}
+            className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-black rounded transition-colors disabled:opacity-50"
           >
-            Download full narrative (.txt)
+            {pdfBusy ? 'Building PDF…' : 'Download full narrative (PDF)'}
           </button>
         </div>
       )}
@@ -267,14 +283,14 @@ export default function DojTipPanel({
 
       <ContactCopyCard />
 
-      {/* Closed by default: the full narrative goes in as the .txt attachment,
+      {/* Closed by default: the full narrative goes in as the PDF attachment,
           so it is rarely pasted, and open it pushed everything else down. */}
       {fullNarrative && (
         <details className="border border-gray-700 rounded-lg">
           <summary className="px-4 py-2.5 cursor-pointer text-sm font-semibold text-gray-300 hover:text-gray-100">
             Full narrative (the evidence) &mdash; click to show
             <span className="ml-2 text-[11px] font-normal text-gray-500">
-              Same text as the .txt attachment. Only needed if the portal asks for more detail.
+              Same text as the PDF attachment. Only needed if the portal asks for more detail.
             </span>
           </summary>
           <div className="px-3 pb-3">

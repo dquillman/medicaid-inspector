@@ -49,6 +49,51 @@ async def filed():
             "doj_npis": sorted(oig_tips_store.filed_npis("doj"))}
 
 
+class SupplementBody(BaseModel):
+    text: str
+    # The DOJ portal gives the update its own reference number.
+    reference_number: str = ""
+
+
+@router.get("/supplements")
+async def supplements():
+    """Filed tips that left out the per-se key finding, each with an update note."""
+    from services.tip_supplements import find_supplements
+    return find_supplements()
+
+
+@router.post("/{tip_id}/supplement")
+async def log_supplement(tip_id: str, body: SupplementBody):
+    if not (body.text or "").strip():
+        raise HTTPException(400, "text is required")
+    updated = oig_tips_store.add_supplement(tip_id, body.text, body.reference_number)
+    if updated is None:
+        raise HTTPException(404, f"Tip not found: {tip_id}")
+    return updated
+
+
+class TipPdfBody(BaseModel):
+    npi: str
+    text: str
+    provider_name: str = ""
+    destination: str = "doj"
+
+
+@router.post("/pdf")
+async def tip_pdf(body: TipPdfBody, user: dict = Depends(require_user)):
+    """The full narrative laid out as a PDF for the intake's attachment step.
+    Same text the generator wrote; only the layout is added."""
+    from fastapi.responses import Response
+    from services.tip_pdf import narrative_pdf
+    if not body.text.strip():
+        raise HTTPException(400, "text is required")
+    pdf = narrative_pdf(body.text, npi=body.npi.strip(), provider_name=body.provider_name,
+                        destination=body.destination, contact=user.get("contact") or None)
+    name = f"{body.destination.upper()}-tip-{body.npi.strip()}.pdf"
+    return Response(pdf, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
 @router.post("")
 async def add_tip(body: AddTipBody, user: dict = Depends(require_user)):
     if not (body.npi or "").strip():

@@ -2038,6 +2038,29 @@ export interface OigTip {
   history?: { at: number; status: string; note: string }[]
 }
 
+/** A filed tip that left out the per-se key finding, with its update note. */
+export interface TipSupplement {
+  tip_id: string
+  npi: string
+  destination: 'oig' | 'doj'
+  provider_name: string
+  reference_number: string
+  filed_at: number
+  kind: string
+  // 'missing' = the saved text was checked; 'likely_missing' = no text was saved
+  coverage?: 'missing' | 'likely_missing'
+  headline?: string
+  amount?: number
+  amount_label?: string
+  text?: string
+  reason?: string
+}
+
+export interface TipSupplementsResponse {
+  items: TipSupplement[]
+  skipped: TipSupplement[]
+}
+
 export interface OigTipsResponse {
   tips: OigTip[]
   counts: { total: number; by_status: Record<string, number>; by_destination?: Record<string, number> }
