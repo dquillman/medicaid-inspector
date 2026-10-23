@@ -4,7 +4,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import Breadcrumbs from '../components/Breadcrumbs'
 import Magnitude from '../components/Magnitude'
-import TipUpdatesCard from '../components/TipUpdatesCard'
 import type { OigTip, MFCUReferral } from '../lib/types'
 
 type Channel = 'oig' | 'doj' | 'mfcu'
@@ -139,8 +138,6 @@ export default function OigTips() {
           lifecycle and outcome.
         </p>
       </div>
-
-      <TipUpdatesCard />
 
       <div className="card border-amber-400/30 bg-amber-400/5">
         <p className="text-xs text-ink-secondary leading-relaxed">

@@ -49,29 +49,6 @@ async def filed():
             "doj_npis": sorted(oig_tips_store.filed_npis("doj"))}
 
 
-class SupplementBody(BaseModel):
-    text: str
-    # The DOJ portal gives the update its own reference number.
-    reference_number: str = ""
-
-
-@router.get("/supplements")
-async def supplements():
-    """Filed tips that left out the per-se key finding, each with an update note."""
-    from services.tip_supplements import find_supplements
-    return find_supplements()
-
-
-@router.post("/{tip_id}/supplement")
-async def log_supplement(tip_id: str, body: SupplementBody):
-    if not (body.text or "").strip():
-        raise HTTPException(400, "text is required")
-    updated = oig_tips_store.add_supplement(tip_id, body.text, body.reference_number)
-    if updated is None:
-        raise HTTPException(404, f"Tip not found: {tip_id}")
-    return updated
-
-
 class TipPdfBody(BaseModel):
     npi: str
     text: str

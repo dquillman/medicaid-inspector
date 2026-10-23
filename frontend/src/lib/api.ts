@@ -66,7 +66,6 @@ import type {
   MethodsResponse,
   OigTipResponse,
   OigTip,
-  TipSupplementsResponse,
   OigTipsResponse,
   OigTipsFiledResponse,
   ReferralDestination,
@@ -1047,10 +1046,6 @@ export const api = {
     mutate<OigTip>('POST', '/oig-tips', body),
   updateOigTip: (id: string, body: Partial<Pick<OigTip, 'status' | 'reference_number' | 'notes' | 'outcome_notes'>>) =>
     mutate<OigTip>('PATCH', `/oig-tips/${id}`, body),
-  // Filed tips that left out the per-se key finding, each with an update note.
-  tipSupplements: () => get<TipSupplementsResponse>('/oig-tips/supplements'),
-  logTipSupplement: (id: string, body: { text: string; reference_number?: string }) =>
-    mutate<OigTip>('POST', `/oig-tips/${id}/supplement`, body),
 
   // License & Credential Verification
   providerLicense: (npi: string) => get<LicenseVerification>(`/license/providers/${npi}`),

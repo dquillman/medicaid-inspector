@@ -163,28 +163,6 @@ def update_tip(tip_id: str, status: str | None = None, reference_number: str | N
     return result
 
 
-def add_supplement(tip_id: str, text: str, reference_number: str = "") -> dict | None:
-    """Record an update note sent after the tip (services/tip_supplements.py).
-    The original filed_text is never changed — it is what the agency got."""
-    _load()
-    with _lock:
-        tip = next((t for t in _tips if t.get("id") == tip_id), None)
-        if tip is None:
-            return None
-        now = time.time()
-        tip.setdefault("supplements", []).append({
-            "at": now, "text": text[:MAX_FILED_TEXT],
-            "reference_number": (reference_number or "").strip(),
-        })
-        tip.setdefault("history", []).append({
-            "at": now, "status": tip.get("status", "filed"),
-            "note": "Update sent: added the key finding the first report left out"})
-        tip["updated_at"] = now
-        result = dict(tip)
-    _save()
-    return result
-
-
 def counts() -> dict:
     _load()
     with _lock:
