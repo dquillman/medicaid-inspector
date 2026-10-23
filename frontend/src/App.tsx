@@ -58,6 +58,9 @@ import { mutate } from './lib/api'
 import { notifyAuthChanged } from './lib/auth'
 
 const SESSION_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
+// Pages anyone may open without signing in. /methods is linked from every
+// filed OIG/MFCU/DOJ report, and investigators have no account.
+const PUBLIC_PATHS = new Set(['/methods'])
 
 interface AuthUser {
   email: string
@@ -238,7 +241,7 @@ function AnimatedRoutes() {
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [view, setView] = useState<'landing' | 'login' | 'app'>('landing')
+  const [view, setView] = useState<'landing' | 'login' | 'public' | 'app'>('landing')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed()
   const sidebarMargin = collapsed ? 'lg:ml-16' : 'lg:ml-56'
@@ -279,7 +282,9 @@ export default function App() {
     // router resolves it after authentication.
     if (!restored) {
       const path = window.location.pathname
-      if (path && path !== '/') {
+      if (PUBLIC_PATHS.has(path.replace(/\/+$/, ''))) {
+        setView('public')
+      } else if (path && path !== '/') {
         setView('login')
       }
     }
@@ -358,6 +363,20 @@ export default function App() {
     <BrowserRouter>
       {view === 'landing' ? (
         <Landing onLogin={() => setView('login')} />
+      ) : view === 'public' ? (
+        <div className="min-h-screen" lang="en">
+          <header className="h-12 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4">
+            <span className="text-sm font-bold text-gray-200 tracking-wide">Medicaid Inspector</span>
+            <button onClick={() => setView('login')} className="text-xs text-gray-400 hover:text-gray-200">
+              Sign in
+            </button>
+          </header>
+          <main className="max-w-4xl mx-auto px-4 py-6">
+            <Suspense fallback={<div className="text-sm text-gray-500">Loading…</div>}>
+              <Methods />
+            </Suspense>
+          </main>
+        </div>
       ) : view === 'login' ? (
         <Login
           onLogin={handleLogin}
