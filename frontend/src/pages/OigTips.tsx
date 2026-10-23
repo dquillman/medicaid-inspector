@@ -16,6 +16,18 @@ const STATUS_TONE: Record<string, string> = {
   closed: 'text-ink-tertiary',
 }
 
+function ChannelBadge({ channel, dim, small, title }: { channel: string; dim?: boolean; small?: boolean; title?: string }) {
+  const tone = channel === 'doj'
+    ? 'border-amber-400/50 bg-amber-400/10 text-amber-300'
+    : 'border-teal-400/50 bg-teal-400/10 text-teal-300'
+  return (
+    <span title={title}
+      className={`${small ? 'text-[9px] px-1 py-0' : 'text-[10px] px-1.5 py-0.5'} font-mono uppercase tracking-wider rounded border ${tone} ${dim ? 'opacity-40' : ''}`}>
+      {dim ? `also ${channel}` : channel}
+    </span>
+  )
+}
+
 export default function OigTips() {
   const qc = useQueryClient()
   const { data, isLoading, error } = useQuery({
@@ -37,6 +49,36 @@ export default function OigTips() {
     for (const t of tips) c[t.status] = (c[t.status] ?? 0) + 1
     return c
   }, [tips])
+
+  // One row per provider: a provider filed with both OIG and DOJ shows both
+  // channels together instead of as two unrelated rows. `all` = every channel
+  // this provider was filed to, so a DOJ/OIG-only view can still say "also".
+  const groups = useMemo(() => {
+    const allByNpi = new Map<string, OigTip[]>()
+    for (const t of data?.tips ?? []) {
+      const list = allByNpi.get(t.npi) ?? []
+      list.push(t)
+      allByNpi.set(t.npi, list)
+    }
+    const order: string[] = []
+    const shown = new Map<string, OigTip[]>()
+    for (const t of tips) {
+      if (!shown.has(t.npi)) { order.push(t.npi); shown.set(t.npi, []) }
+      shown.get(t.npi)!.push(t)
+    }
+    return order.map(npi => {
+      const rows = [...shown.get(npi)!].sort((a, b) => a.filed_at - b.filed_at)
+      const all = allByNpi.get(npi) ?? rows
+      return {
+        npi,
+        rows,
+        name: rows.find(r => r.provider_name)?.provider_name || npi,
+        state: rows.find(r => r.state)?.state || '',
+        risk: Math.max(...rows.map(r => r.risk_score || 0)),
+        channels: Array.from(new Set(all.map(r => r.destination ?? 'oig'))),
+      }
+    })
+  }, [data, tips])
 
   async function patch(id: string, body: Parameters<typeof api.updateOigTip>[1]) {
     await api.updateOigTip(id, body)
@@ -142,61 +184,83 @@ export default function OigTips() {
               </tr>
             </thead>
             <tbody>
-              {tips.map((t) => (
-                <tr key={t.id} className="border-b border-hairline/60 hover:bg-surface-2/40">
+              {groups.map((g) => (
+                <tr key={g.npi} className="border-b border-hairline/60 hover:bg-surface-2/40 align-top">
                   <td className="py-2 pr-4">
-                    <Link to={`/providers/${t.npi}`} className="text-filament-core hover:underline">{t.provider_name || t.npi}</Link>
-                    <span className="block font-mono text-[11px] text-ink-tertiary">{t.npi}{t.state ? ` · ${t.state}` : ''}</span>
-                    {t.filed_text && (
-                      <details className="mt-1">
-                        <summary className="text-[11px] text-ink-tertiary cursor-pointer hover:text-ink-secondary">Text as filed</summary>
+                    <Link to={`/providers/${g.npi}`} className="text-filament-core hover:underline">{g.name}</Link>
+                    <span className="block font-mono text-[11px] text-ink-tertiary">{g.npi}{g.state ? ` · ${g.state}` : ''}</span>
+                    {g.rows.filter(t => t.filed_text).map(t => (
+                      <details key={t.id} className="mt-1">
+                        <summary className="text-[11px] text-ink-tertiary cursor-pointer hover:text-ink-secondary">
+                          Text as filed{g.rows.length > 1 ? ` (${(t.destination ?? 'oig').toUpperCase()})` : ''}
+                        </summary>
                         <pre className="mt-1 max-h-64 max-w-xl overflow-auto whitespace-pre-wrap text-[11px] text-ink-secondary bg-surface-2 border border-hairline rounded p-2">{t.filed_text}</pre>
                       </details>
-                    )}
+                    ))}
                   </td>
                   <td className="py-2 pr-4">
-                    {(t.destination ?? 'oig') === 'doj' ? (
-                      <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-amber-400/50 bg-amber-400/10 text-amber-300">DOJ</span>
-                    ) : (
-                      <span className="text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded border border-teal-400/50 bg-teal-400/10 text-teal-300">OIG</span>
-                    )}
+                    <div className="flex flex-wrap gap-1">
+                      {(channel === 'doj' ? ['doj', 'oig'] as const : ['oig', 'doj'] as const)
+                        .filter(c => g.channels.includes(c)).map(c => (
+                        <ChannelBadge key={c} channel={c}
+                          dim={channel !== 'all' && channel !== c}
+                          title={channel !== 'all' && channel !== c ? `Also filed with ${c.toUpperCase()}` : undefined} />
+                      ))}
+                    </div>
                   </td>
-                  <td className="py-2 pr-4"><Magnitude score={t.risk_score} size="sm" /></td>
+                  <td className="py-2 pr-4"><Magnitude score={g.risk} size="sm" /></td>
                   <td className="py-2 pr-4 font-mono text-xs text-ink-tertiary">
-                    {new Date(t.filed_at * 1000).toLocaleDateString()}
-                    {t.foia_eligible_at && (
-                      <span
-                        className="block text-[10px] text-ink-ghost"
-                        title="Earliest date to file a FOIA records request about this complaint"
-                      >
-                        FOIA: {new Date(t.foia_eligible_at * 1000).toLocaleDateString()}
-                      </span>
-                    )}
+                    {g.rows.map(t => (
+                      <div key={t.id} className="flex items-start gap-1.5 min-h-[30px]">
+                        {g.rows.length > 1 && <ChannelBadge channel={t.destination ?? 'oig'} small />}
+                        <span>
+                          {new Date(t.filed_at * 1000).toLocaleDateString()}
+                          {t.foia_eligible_at && (
+                            <span className="block text-[10px] text-ink-ghost"
+                                  title="Earliest date to file a FOIA records request about this complaint">
+                              FOIA: {new Date(t.foia_eligible_at * 1000).toLocaleDateString()}
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                    ))}
                   </td>
                   <td className="py-2 pr-4">
-                    <select
-                      value={t.status}
-                      onChange={(e) => patch(t.id, { status: e.target.value as OigTip['status'] })}
-                      className="bg-surface-2 border border-hairline rounded px-2 py-1 text-xs font-mono text-ink-secondary"
-                    >
-                      {STATUSES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
-                    </select>
+                    {g.rows.map(t => (
+                      <div key={t.id} className="min-h-[30px]">
+                        <select
+                          value={t.status}
+                          onChange={(e) => patch(t.id, { status: e.target.value as OigTip['status'] })}
+                          className="bg-surface-2 border border-hairline rounded px-2 py-1 text-xs font-mono text-ink-secondary"
+                        >
+                          {STATUSES.map((s) => <option key={s} value={s}>{s.replace('_', ' ')}</option>)}
+                        </select>
+                      </div>
+                    ))}
                   </td>
                   <td className="py-2 pr-4">
-                    <input
-                      defaultValue={t.reference_number}
-                      onBlur={(e) => { if (e.target.value !== t.reference_number) patch(t.id, { reference_number: e.target.value }) }}
-                      placeholder="—"
-                      className="bg-surface-2 border border-hairline rounded px-2 py-1 text-xs font-mono text-ink-secondary w-48"
-                    />
+                    {g.rows.map(t => (
+                      <div key={t.id} className="min-h-[30px]">
+                        <input
+                          defaultValue={t.reference_number}
+                          onBlur={(e) => { if (e.target.value !== t.reference_number) patch(t.id, { reference_number: e.target.value }) }}
+                          placeholder="—"
+                          className="bg-surface-2 border border-hairline rounded px-2 py-1 text-xs font-mono text-ink-secondary w-48"
+                        />
+                      </div>
+                    ))}
                   </td>
                   <td className="py-2">
-                    <input
-                      defaultValue={t.outcome_notes}
-                      onBlur={(e) => { if (e.target.value !== t.outcome_notes) patch(t.id, { outcome_notes: e.target.value }) }}
-                      placeholder="—"
-                      className="bg-surface-2 border border-hairline rounded px-2 py-1 text-xs text-ink-secondary w-full min-w-[180px]"
-                    />
+                    {g.rows.map(t => (
+                      <div key={t.id} className="min-h-[30px]">
+                        <input
+                          defaultValue={t.outcome_notes}
+                          onBlur={(e) => { if (e.target.value !== t.outcome_notes) patch(t.id, { outcome_notes: e.target.value }) }}
+                          placeholder="—"
+                          className="bg-surface-2 border border-hairline rounded px-2 py-1 text-xs text-ink-secondary w-full min-w-[180px]"
+                        />
+                      </div>
+                    ))}
                   </td>
                 </tr>
               ))}
