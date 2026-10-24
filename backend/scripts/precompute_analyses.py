@@ -287,10 +287,12 @@ def main() -> int:
               "Precompute needs the FULL cache.")
         return 1
 
+    from services.claim_patterns import SPEC_VERSION as _CLAIM_PATTERNS_SPEC_VERSION
     out: dict = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "provider_count": len(providers),
         "limit": _LIMIT,
+        "spec_version": _CLAIM_PATTERNS_SPEC_VERSION,
     }
 
     print("Computing claim patterns…")

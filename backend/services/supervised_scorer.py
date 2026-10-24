@@ -229,17 +229,25 @@ def train_model() -> dict:
     from core.review_store import get_review_queue
     from core.store import get_prescanned
 
-    # Gather labeled data from the review queue. Labels come from the
-    # case-ledger (queue_status) — the pipeline's source of truth:
-    #   positive: confirmed / Reported (referred=MFCU, tip_filed=OIG, doj_filed=DOJ)
-    #   negative: dismissed (a human ruled it not-fraud)
+    # Gather labeled data. Two tiers of evidence, deliberately NOT treated the
+    # same (audit 2026-10-24, item 3 — filing/reporting status is not a fraud
+    # finding):
+    #   TIER 1 (strongest): an outside agency independently substantiated or
+    #     rejected an MFCU referral (core.referral_workflow outcome). This
+    #     overrides anything else below for that NPI.
+    #   TIER 2 (analyst assessment, weaker): queue_status "confirmed" (a human
+    #     said this IS fraud, with no independent check yet) / "dismissed" (a
+    #     human said it is NOT). "referred" / "tip_filed" / "doj_filed" are
+    #     WORKFLOW status, not an assessment — filing a report proves nothing
+    #     by itself, so they are deliberately absent from ledger_positive and
+    #     stay unlabeled unless/until Tier 1 resolves them.
     # The retired workflow `status` field is still read as a FALLBACK so labels
     # recorded before the pipeline migration keep teaching the model; when both
     # fields are set, queue_status wins.
     all_review = get_review_queue()
-    ledger_positive = {"confirmed", "referred", "tip_filed", "doj_filed"}
+    ledger_positive = {"confirmed"}
     ledger_negative = {"dismissed"}
-    legacy_positive = {"confirmed_fraud", "referred"}
+    legacy_positive = {"confirmed_fraud"}
     legacy_negative = {"dismissed"}
 
     labeled_npis: dict[str, int] = {}
@@ -264,6 +272,24 @@ def train_model() -> dict:
                 labeled_npis[npi] = 1
             elif status in legacy_negative:
                 labeled_npis[npi] = 0
+
+    # TIER 1 override: an independently substantiated/rejected referral
+    # outcome is stronger evidence than the analyst's own assessment.
+    try:
+        from core.referral_workflow import (
+            get_referrals, SUBSTANTIATED_OUTCOMES, REJECTED_OUTCOMES,
+        )
+        for ref in get_referrals():
+            outcome = ref.get("outcome")
+            npi = ref.get("npi")
+            if not npi or not outcome:
+                continue
+            if outcome in SUBSTANTIATED_OUTCOMES:
+                labeled_npis[npi] = 1
+            elif outcome in REJECTED_OUTCOMES:
+                labeled_npis[npi] = 0
+    except Exception:
+        log.warning("Could not apply referral-outcome labels", exc_info=True)
 
     total_labeled = len(labeled_npis)
     positive_count = sum(1 for v in labeled_npis.values() if v == 1)
@@ -481,18 +507,41 @@ def _label_readiness() -> dict:
     the minimum training prerequisites before the user clicks Train.
     """
     from core.review_store import get_review_queue
-    positive_statuses = {"confirmed_fraud", "referred"}
+    # "referred" dropped (audit 2026-10-24, item 3) — filing a report is a
+    # workflow action, not an assessment; see train_model()'s longer note.
+    positive_statuses = {"confirmed_fraud"}
     negative_statuses = {"dismissed"}
     positive = 0
     negative = 0
+    labeled_npis_seen: set[str] = set()
     for item in get_review_queue():
         status = item.get("status", "")
-        if not item.get("npi"):
+        npi = item.get("npi")
+        if not npi:
             continue
         if status in positive_statuses:
             positive += 1
+            labeled_npis_seen.add(npi)
         elif status in negative_statuses:
             negative += 1
+            labeled_npis_seen.add(npi)
+
+    try:
+        from core.referral_workflow import get_referrals, SUBSTANTIATED_OUTCOMES, REJECTED_OUTCOMES
+        for ref in get_referrals():
+            outcome = ref.get("outcome")
+            npi = ref.get("npi")
+            if not npi or not outcome or npi in labeled_npis_seen:
+                continue
+            if outcome in SUBSTANTIATED_OUTCOMES:
+                positive += 1
+                labeled_npis_seen.add(npi)
+            elif outcome in REJECTED_OUTCOMES:
+                negative += 1
+                labeled_npis_seen.add(npi)
+    except Exception:
+        pass
+
     total = positive + negative
     if total < 10:
         return {

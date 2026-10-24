@@ -246,7 +246,7 @@ function EvidencePanel({ npi, signal }: { npi: string; signal: string }) {
               <p className="text-white font-bold text-lg">{(ev.total_claims as number).toLocaleString()}</p>
             </div>
             <div className="bg-gray-800/50 border border-gray-700/50 rounded p-2 text-center">
-              <p className="text-gray-500">Beneficiaries</p>
+              <p className="text-gray-500" title="Summed across billing months/codes — not a deduplicated patient count">Beneficiaries (summed)*</p>
               <p className="text-white font-bold text-lg">{(ev.total_beneficiaries as number).toLocaleString()}</p>
             </div>
             <div className="bg-red-950/40 border border-red-900/50 rounded p-2 text-center">

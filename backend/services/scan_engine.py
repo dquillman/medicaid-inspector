@@ -184,15 +184,29 @@ async def run_scan_batch(batch_size: int, state_filter: Optional[str], force: bo
         _scan_start_time = _time_mod.time()
 
         progress = get_scan_progress()
-        if progress.get("offset", 0) == 0 and is_local():
-            # Only run validation on local data — remote Parquet is too slow
+        if progress.get("offset", 0) == 0:
+            # Schema check is cheap (parquet metadata only) — runs every time,
+            # local or remote. A missing/renamed column must be visible, not
+            # silently read as all-null downstream (audit 2026-10-24, item 6).
             try:
-                from services.data_validator import run_validation
-                set_prescan_status(1, "Running data quality validation…")
-                await run_validation(sample_limit=2000)
-                log.info("Pre-scan data validation complete")
-            except Exception as val_err:
-                log.warning("Data validation failed (non-fatal): %s", val_err)
+                from services.data_validator import check_schema
+                schema_result = await check_schema()
+                if schema_result.get("status") != "ok":
+                    log.error("Dataset schema check failed: %s", schema_result)
+            except Exception as schema_err:
+                log.warning("Schema check failed (non-fatal): %s", schema_err)
+
+            if is_local():
+                # The full row-sampling validation (NPI/amount/date content
+                # checks) actually scans data — too slow against the remote
+                # 227M-row Parquet, so it stays local-only.
+                try:
+                    from services.data_validator import run_validation
+                    set_prescan_status(1, "Running data quality validation…")
+                    await run_validation(sample_limit=2000)
+                    log.info("Pre-scan data validation complete")
+                except Exception as val_err:
+                    log.warning("Data validation failed (non-fatal): %s", val_err)
 
         active_filter = state_filter or progress.get("state_filter")
         if state_filter and state_filter != progress.get("state_filter") and progress.get("offset", 0) > 0:

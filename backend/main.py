@@ -22,6 +22,15 @@ from core.rate_limiter import RateLimitMiddleware, check_login_rate
 
 from core.config import settings
 
+# A test run must never trigger real network downloads, paid API calls, or
+# background case-prep writes just because it imported `main` (and therefore
+# ran the lifespan). PYTEST_CURRENT_TEST is set by pytest for the duration of
+# every test; MFI_DISABLE_BACKGROUND_JOBS is an explicit opt-out for any other
+# offline context (scripts, CI).
+BACKGROUND_JOBS_DISABLED = bool(
+    os.environ.get("PYTEST_CURRENT_TEST") or os.environ.get("MFI_DISABLE_BACKGROUND_JOBS")
+)
+
 
 def _validate_state_filter(state: Optional[str]) -> Optional[str]:
     """Whitelist validation for state codes — only allow 2-letter uppercase codes."""
@@ -173,8 +182,11 @@ def _finish_prescan_load():
             await asyncio.sleep(30)
             await enrich_batch_with_nppes(missing_nppes)
 
-        asyncio.create_task(_delayed_enrich())
-        log.info("Queued NPPES enrichment for %d providers (starts in 30s)", len(missing_nppes))
+        if BACKGROUND_JOBS_DISABLED:
+            log.info("Background jobs disabled — skipping NPPES enrichment for %d providers", len(missing_nppes))
+        else:
+            asyncio.create_task(_delayed_enrich())
+            log.info("Queued NPPES enrichment for %d providers (starts in 30s)", len(missing_nppes))
     else:
         log.info("NPPES enrichment skipped — all cached providers already have identity data")
 
@@ -227,7 +239,7 @@ async def lifespan(app: FastAPI):
     )
 
     # Load OIG exclusion list — try cache first, download if missing
-    if not load_oig_from_disk():
+    if not load_oig_from_disk() and not BACKGROUND_JOBS_DISABLED:
         async def _oig_bg():
             try:
                 await download_oig_list()
@@ -236,12 +248,15 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_oig_bg())
 
     # Load Medicaid enrollment data (disk cache or CMS API)
-    async def _enrollment_bg():
-        try:
-            await load_or_fetch_enrollment()
-        except Exception as exc:
-            log.error("Enrollment load failed: %s", exc)
-    asyncio.create_task(_enrollment_bg())
+    if not BACKGROUND_JOBS_DISABLED:
+        async def _enrollment_bg():
+            try:
+                await load_or_fetch_enrollment()
+            except Exception as exc:
+                log.error("Enrollment load failed: %s", exc)
+        asyncio.create_task(_enrollment_bg())
+    else:
+        log.info("Background jobs disabled — skipping OIG download / enrollment fetch")
 
     # Load prescan data — use slim index (54MB) on Cloud Run, full cache locally
     import os as _os
@@ -295,8 +310,11 @@ async def lifespan(app: FastAPI):
     # Nightly auto-prepare: ONE Fraud Brain lead per day gets steps 2-6 run
     # automatically (case opened, corroboration noted, packet attached). Date-
     # guarded state in auto_prep_state.json (GCS-synced) makes restarts safe.
-    from services.case_prep import auto_prep_loop
-    asyncio.create_task(auto_prep_loop())
+    if BACKGROUND_JOBS_DISABLED:
+        log.info("Background jobs disabled — skipping nightly auto-prepare loop")
+    else:
+        from services.case_prep import auto_prep_loop
+        asyncio.create_task(auto_prep_loop())
 
     yield
 

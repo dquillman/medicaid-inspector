@@ -1,5 +1,8 @@
 """
-Claim-level fraud pattern detection API routes.
+Aggregate code-mix pattern heuristic API routes — NOT claim-level detection.
+This dataset has no claim-line, modifier, or place-of-service fields; see
+services/claim_patterns.py's module docstring for exactly what each endpoint
+actually infers.
 """
 import re as _re
 
@@ -93,7 +96,7 @@ async def impossible_day_patterns(limit: int = Query(100, ge=1, le=500)):
 
 @router.get("/provider/{npi}")
 async def provider_claim_patterns(npi: str):
-    """All claim-level patterns for a single provider."""
+    """All aggregate code-mix pattern heuristics for a single provider (not claim-level)."""
     npi = _validate_npi(npi)
     from services.claim_patterns import get_provider_claim_patterns
     return await get_provider_claim_patterns(npi)

@@ -13,7 +13,8 @@ composite is capped at 100 by min(composite, 100) in the scorer):
   claims_per_bene_anomaly        15  — claims/beneficiary z-score vs. SAME-top-code peers (cohort-normalized)
   billing_ramp_rate              15  — explosive growth + large absolute dollars (OIG new-provider screen)
   bust_out_pattern               15  — peak-then-exit pattern (documented in OIG enforcement actions)
-  ghost_billing                   5  — CMS 12-beneficiary suppression floor abuse
+  ghost_billing                   5  — QUARANTINED (2026-10-24): never flags, no documented
+                                       suppression-floor source for this dataset — see the function's docstring
   total_spend_outlier            10  — total payments z-score vs. all providers (OIG #1 predictor)
   billing_consistency             5  — unnaturally flat monthly billing (OIG automated-claims flag)
   bene_concentration              8  — extremely high claims-per-bene ratio / phantom billing
@@ -263,18 +264,25 @@ def bust_out_pattern(timeline: list[dict]) -> SignalResult:
     return _result("bust_out_pattern", score, 15, reason, flagged)
 
 
-# ── 6. Ghost billing ──────────────────────────────────────────────────────────
+# ── 6. Ghost billing — QUARANTINED (audit 2026-10-24, item 4) ────────────────
+# This signal asserted "CMS suppresses exact beneficiary counts when fewer
+# than 11 unique beneficiaries received a service, replacing the count with
+# 12" as fact, with NO citation for this specific dataset. The actual
+# documented CMS convention (<11 suppression) belongs to a DIFFERENT dataset
+# (Medicare MUP — see diagnosis_procedure_mismatch's handling of MUP-suppressed
+# cells elsewhere in this file, which correctly treats them as "insufficient
+# evidence" rather than a fraud signal). No suppression-floor convention for
+# THIS dataset (the Medicaid T-MSIS-derived spending file) is documented
+# anywhere in this repo. Until someone finds that documentation, "exactly 12
+# beneficiaries" must not be presented as a confirmed CMS rule or scored as a
+# fraud signal — it is quarantined to always return unflagged/zero, with the
+# raw observation still computed and shown as an informational count only.
 def ghost_billing(provider: dict, timeline: list[dict]) -> SignalResult:
     """
-    Billing with revenue > $0 but beneficiary count consistently at exactly
-    12 — the CMS data suppression floor for privacy protection.
-
-    OIG basis: CMS suppresses exact beneficiary counts when fewer than 11
-    unique beneficiaries received a service, replacing the count with 12.
-    When a provider consistently shows exactly 12 beneficiaries across many
-    months with non-zero payments, it may indicate fabricated claims designed
-    to remain just below detection thresholds. This pattern has appeared in
-    OIG phantom billing investigations.
+    QUARANTINED — see comment above. Reports how many months a provider shows
+    exactly 12 beneficiaries with nonzero payments as an INFORMATIONAL count
+    only. Never flags and never contributes to the composite score until a
+    documented source for a suppression-floor value in this dataset exists.
     """
     if not timeline:
         return _result("ghost_billing", 0.0, 5, "No timeline data", False)
@@ -284,17 +292,12 @@ def ghost_billing(provider: dict, timeline: list[dict]) -> SignalResult:
         if (r.get("total_paid") or 0) > 0 and (r.get("total_unique_beneficiaries") or 0) == 12
     )
     total_months = len(timeline)
-    ghost_pct = ghost_months / total_months if total_months else 0
-
-    flagged = ghost_pct > 0.5 and total_months >= 6
-    score = min(ghost_pct, 1.0) if flagged else 0.0
     reason = (
         f"{ghost_months}/{total_months} billing months show exactly 12 beneficiaries "
-        f"(CMS suppression floor — possible phantom billing)"
-        if flagged
-        else f"{ghost_months}/{total_months} months at suppression floor (not flagged)"
+        f"— informational only; NOT scored (no documented suppression-floor source "
+        f"for this dataset, see code comment)"
     )
-    return _result("ghost_billing", score, 5, reason, flagged)
+    return _result("ghost_billing", 0.0, 5, reason, False)
 
 
 # ── 7. Total spend outlier ────────────────────────────────────────────────────

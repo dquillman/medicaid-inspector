@@ -168,6 +168,14 @@ def provider_aggregate_sql(
     limit: int | None = 100,
     offset: int = 0,
 ) -> str:
+    # NOTE on total_beneficiaries (audit 2026-10-24, item 4): TOTAL_UNIQUE_BENEFICIARIES
+    # in the source file is a count at provider x HCPCS_CODE x CLAIM_FROM_MONTH
+    # grain — summing it across months/codes here, as every caller does, is
+    # NOT a deduplicated unique-patient count. A beneficiary seen across 3
+    # months under 2 codes is counted up to 6 times. Every place this value
+    # (or revenue_per_beneficiary / claims_per_beneficiary, which divide by
+    # it) is surfaced to a user must say so — see services/narrative_generator.py
+    # for the wording used in referral narratives.
     src = f"read_parquet('{get_parquet_path()}')"
     where_clause = f"WHERE {where}" if where else ""
     limit_clause = f"LIMIT {limit} OFFSET {offset}" if limit is not None else ""

@@ -97,7 +97,9 @@ async def _corroborate_network(npi: str) -> list[str]:
 
 
 async def _corroborate_claim_patterns(npi: str) -> list[str]:
-    """Claim-level pattern hits (unbundling, duplicates, impossible days…)."""
+    """Aggregate code-mix pattern heuristic hits (unbundling, impossible days…)
+    — inferred from HCPCS-code mix, NOT actual claim lines. This dataset has
+    no modifier or place-of-service fields; see services/claim_patterns.py."""
     try:
         from services.claim_patterns import get_provider_claim_patterns
         res = await asyncio.wait_for(get_provider_claim_patterns(npi), timeout=NETWORK_TIMEOUT_S)
@@ -106,7 +108,7 @@ async def _corroborate_claim_patterns(npi: str) -> list[str]:
     pats = res.get("patterns") if isinstance(res, dict) else res
     if not pats:
         return ["Claim patterns: no unbundling / duplicate / impossible-day hits."]
-    lines = [f"Claim patterns: {len(pats)} hit(s):"]
+    lines = [f"Claim patterns (code-mix heuristic, not claim-level — leads for review, not confirmed): {len(pats)} hit(s):"]
     for p in pats[:6]:
         if isinstance(p, dict):
             kind = p.get("pattern_type") or p.get("type") or "pattern"

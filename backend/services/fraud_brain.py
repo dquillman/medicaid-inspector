@@ -100,7 +100,13 @@ def recency_badge(last_month: str | None, newest_idx: int | None = None) -> str 
     ~6 years) and takes precedence — it's the deepest tier, separating likely-
     unrecoverable providers from recoverable 'stale' ones. The other three are
     dataset-relative (vs the newest claim month); pass newest_idx to avoid
-    recomputing it per-row in a batch."""
+    recomputing it per-row in a batch.
+
+    This is a prioritization filter, not a legal eligibility determination —
+    'expired' leads still show on the board with the badge, they just rank
+    lower. See services/doj_shortlist.py's LIMITATION_YEARS (5yr, the
+    CRIMINAL statute of limitations) for the other, deliberately different,
+    age cutoff in this codebase (audit 2026-10-24, item 11)."""
     idx = _ym_index(last_month)
     if idx is None:
         return None
@@ -120,7 +126,10 @@ def recency_badge(last_month: str | None, newest_idx: int | None = None) -> str 
 # Component weights — must sum to 1.0 (boosts apply on top, capped at 100)
 W_RULE_SIGNALS = 0.35   # composite risk_score from the 18 signals
 W_ML_ANOMALY   = 0.25   # Isolation Forest score
-W_CORROBORATION = 0.20  # independent claim-level analyses that also flagged the NPI
+W_CORROBORATION = 0.20  # genuinely independent analyses (pharmacy/DME/doctor-shopping/
+                        # Medicare-proxy diagnosis mismatch) that also flagged the NPI —
+                        # NOT the aggregate code-mix heuristics, which score zero here
+                        # (see _CORRELATED_NOT_INDEPENDENT, audit 2026-10-24)
 W_DOLLARS      = 0.10   # total_paid percentile
 W_FLAG_BREADTH = 0.10   # how many distinct signals fired
 
@@ -181,18 +190,36 @@ def invalidate_cache() -> None:
         _cache["result"] = None
         _cache["computed_at"] = 0.0
 
-# Precomputed-section name -> (label shown in evidence, points per hit)
+# Precomputed-section name -> (label shown in evidence, points per hit).
+#
+# This dataset has NO claim-line fields — no modifier codes, no
+# place-of-service codes, no individual claim records (see routes/methods.py's
+# public disclosure). "unbundling" / "pos" / "modifiers" below are HCPCS-code-
+# prefix heuristics inferred from the SAME per-provider monthly/code
+# aggregates the rule-based 18-signal composite already scores
+# (billing_concentration, upcoding_pattern, revenue_per_bene_outlier) — they
+# are a correlated restatement of that data, not independent claim-level
+# evidence, and were previously labeled "(claim-level)" and scored as
+# "Independent analysis" despite that (audit 2026-10-24). They still surface
+# as leads below (see _CORRELATED_NOT_INDEPENDENT) but no longer add points.
 _ANALYSIS_SOURCES = {
-    "unbundling":  ("Unbundling pattern (claim-level)", 25),
-    "duplicates":  ("Duplicate billing pattern (claim-level)", 25),
-    "pos":         ("Place-of-service anomaly (claim-level)", 20),
-    "modifiers":   ("Modifier abuse pattern (claim-level)", 20),
-    "impossible":  ("Extreme daily volume — verify vs group/facility billing (claim-level)", 15),
+    "unbundling":  ("Unbundling pattern (code-mix heuristic, aggregate data — not claim-level)", 25),
+    "duplicates":  ("Duplicate billing pattern (aggregate data)", 25),
+    "pos":         ("Place-of-service anomaly (code-mix heuristic, aggregate data — no POS field exists in this dataset)", 20),
+    "modifiers":   ("Modifier abuse pattern (code-mix heuristic, aggregate data — no modifier field exists in this dataset)", 20),
+    "impossible":  ("Extreme daily volume — verify vs group/facility billing (aggregate data)", 15),
     "pharmacy":    ("Pharmacy high-risk profile", 25),
     "dme":         ("DME high-risk profile", 25),
     "doctor_shopping": ("Doctor-shopping beneficiary overlap", 25),
     "diagnosis_flags": ("Diagnosis-procedure mismatch (Medicare proxy)", 20),
 }
+
+# These reuse the exact aggregate billing columns the rule-based signals
+# already score — summing them into "corroboration" as if they were
+# independent claim-level proof double-counts one data source. They remain
+# visible in the evidence list (still a useful lead for an investigator) but
+# contribute zero points to the composite score.
+_CORRELATED_NOT_INDEPENDENT = {"unbundling", "pos", "modifiers"}
 
 # Human labels for the ML feature columns, so the anomaly evidence can name
 # WHICH features made a provider an outlier instead of emitting a black-box
@@ -568,6 +595,15 @@ def compute_top_frauds(limit: int = 10) -> dict:
             if s in _INDIVIDUAL_ONLY_SOURCES and is_org:
                 continue
             label, pts = _ANALYSIS_SOURCES.get(s, (s, 15))
+            if s in _CORRELATED_NOT_INDEPENDENT:
+                # Aggregate code-mix heuristic, not independent of the
+                # rule-based signals above — shown as a lead, scored as zero.
+                evidence.append({
+                    "source": "Aggregate heuristic (not independent corroboration)",
+                    "detail": label,
+                    "points": 0.0,
+                })
+                continue
             corr_raw += pts
             evidence.append({
                 "source": "Independent analysis",

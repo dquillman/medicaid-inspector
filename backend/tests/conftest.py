@@ -48,27 +48,59 @@ os.environ.pop("TRUSTED_PROXY", None)
 # ── 1. redirect all state files into a throwaway directory ───────────────────
 _TMP_STATE = pathlib.Path(tempfile.mkdtemp(prefix="mfi-test-state-"))
 
-_STATE_MODULES = [
-    "core.review_store", "core.auth_store", "core.evidence_store",
-    "core.audit_log", "core.watchlist_store", "core.oig_tips_store",
-    "core.referral_workflow", "core.notification_store", "core.roi_store",
-    "core.phi_logger", "core.saved_searches", "core.alert_rules",
-    "core.store", "core.history_store", "core.lineage",
-    "core.database",   # app.db — users/sessions/audit live here too
-    "core.perse_store",  # perse_leads.json — read-only, but a test must not read the real sweep
-]
+# Historical note (audit 2026-10-24): this used to be a hand-maintained list
+# of module names. It drifted out of sync with the actual files — three
+# entries named modules that don't exist (core.alert_rules, core.saved_searches,
+# core.history_store; the real files are alert_store, saved_search_store,
+# score_history) and several real store modules were simply never listed
+# (core.enrollment_store, core.deactivation_store, core.news_store,
+# core.revocation_store, core.oig_store — and, critically,
+# services.feedback_tracker). Because the module-not-found case was swallowed
+# silently, none of this caused a test failure: it just meant those stores
+# kept reading/writing real on-disk state during test runs. A synthetic test
+# NPI ("1234567890", conftest's own SAMPLE_PROVIDERS fixture) ended up
+# permanently baked into the real backend/feedback_data.json this way.
+#
+# Fix: discover candidate state modules by walking the actual files in core/
+# and services/, instead of maintaining a name list that can silently go
+# stale. Any module that defines a backend-relative module-level `Path` is
+# redirected automatically — a newly added store is covered for free.
+_STATE_PACKAGES = ("core", "services")
+
+
+def _discover_state_modules() -> list[str]:
+    names: list[str] = []
+    for pkg in _STATE_PACKAGES:
+        pkg_dir = _BACKEND_DIR / pkg
+        if not pkg_dir.is_dir():
+            continue
+        for py_file in sorted(pkg_dir.glob("*.py")):
+            if py_file.stem == "__init__":
+                continue
+            names.append(f"{pkg}.{py_file.stem}")
+    return names
+
+
+_STATE_MODULES = _discover_state_modules()
 
 
 def _redirect_state_paths() -> None:
     """Point every module-level Path that lives under the backend dir at the
-    temp dir instead. Done by inspection rather than a hand-maintained list of
-    filenames, so a newly added store can't quietly start writing real state."""
+    temp dir instead. Done by inspection (both which modules exist AND which
+    attributes are state paths), so a newly added store can't quietly start
+    writing real state."""
     import importlib
+    import sys as _sys
     for mod_name in _STATE_MODULES:
         try:
             mod = importlib.import_module(mod_name)
-        except Exception:
-            continue  # optional/renamed module — nothing to redirect
+        except Exception as exc:
+            # A real import failure (bad syntax, missing dependency) must stay
+            # visible — the old version swallowed this unconditionally, which
+            # is exactly how three dead module names went unnoticed.
+            print(f"[conftest] WARNING: could not import {mod_name} for state "
+                  f"redirection: {exc}", file=_sys.stderr)
+            continue
         for attr, val in list(vars(mod).items()):
             if not isinstance(val, pathlib.Path):
                 continue

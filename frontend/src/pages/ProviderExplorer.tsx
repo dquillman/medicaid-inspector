@@ -287,7 +287,7 @@ const COLUMNS: ColDef[] = [
   { key: 'city',                label: 'City',         filterable: true },
   { key: 'total_paid',          label: 'Total Paid',   filterable: true },
   { key: 'total_claims',        label: 'Claims',       filterable: true },
-  { key: 'total_beneficiaries', label: 'Beneficiaries' },
+  { key: 'total_beneficiaries', label: 'Beneficiaries (summed)' },
   { key: 'active_months',       label: 'Mo. Active',   filterable: true },
   { key: 'review_status',       label: 'Review' },
   { key: 'trend',                label: 'Trend',    sortable: false },

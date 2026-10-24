@@ -23,6 +23,16 @@ Filters that apply to every tier:
   * The general federal limitation period is 5 years (18 U.S.C. 3282), so a
     lead whose most recent billing is older than that is dropped. DOJ decides
     timeliness; this keeps clearly stale leads off the list.
+
+NOTE on the other age cutoff in this codebase (audit 2026-10-24, item 11):
+services/fraud_brain.py's recency_badge() marks a provider "expired" at ~6
+years, based on the FCA CIVIL recovery window, not this file's 5-year
+CRIMINAL statute of limitations — they are deliberately different numbers
+for different legal bases, not an inconsistency. Both are reversible
+prioritization filters, not a legal eligibility determination: the Fraud
+Brain board still shows expired/stale leads with a badge rather than hiding
+them, and routes/review.py's queue auto-backfill is the only place recency
+silently skips a candidate (for picking NEW queue slots, not for search).
 """
 from __future__ import annotations
 

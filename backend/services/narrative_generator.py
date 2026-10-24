@@ -37,10 +37,12 @@ _SIGNAL_META: dict[str, dict] = {
     "revenue_per_bene_outlier": {
         "label": "Revenue Per Beneficiary Outlier",
         "explanation": (
-            "The revenue generated per unique Medicaid beneficiary is statistically "
+            "Revenue divided by the dataset's beneficiary count (summed across billing "
+            "months/codes, NOT a deduplicated unique-patient count) is statistically "
             "anomalous relative to peer providers billing primarily for the same "
-            "procedure codes. Elevated per-beneficiary revenue may indicate upcoding, "
-            "unbundling, or phantom service delivery."
+            "procedure codes. An elevated ratio may indicate upcoding, unbundling, or "
+            "phantom service delivery — or simply that the same patients return across "
+            "many months, which this denominator cannot distinguish."
         ),
         "citations": [
             "42 CFR § 455.14 (State plan requirement for fraud detection)",
@@ -51,9 +53,11 @@ _SIGNAL_META: dict[str, dict] = {
     "claims_per_bene_anomaly": {
         "label": "Claims Per Beneficiary Anomaly",
         "explanation": (
-            "The volume of claims submitted per unique beneficiary exceeds statistical "
-            "norms. Excessive per-beneficiary claims volume may indicate service "
-            "duplication, phantom billing, or medically unnecessary services."
+            "Claims divided by the dataset's beneficiary count (summed across billing "
+            "months/codes, NOT a deduplicated unique-patient count) exceeds statistical "
+            "norms. An elevated ratio may indicate service duplication, phantom billing, "
+            "or medically unnecessary services — or simply repeat visits by the same "
+            "patients, which this denominator cannot distinguish."
         ),
         "citations": [
             "42 CFR § 456.3 (Utilization control — State plan requirements)",
@@ -87,25 +91,29 @@ _SIGNAL_META: dict[str, dict] = {
         ],
     },
     "ghost_billing": {
-        "label": "Ghost Billing / Beneficiary Suppression",
+        "label": "Ghost Billing / Beneficiary Suppression (QUARANTINED — informational only)",
         "explanation": (
-            "The reported beneficiary count sits at or near the CMS 12-beneficiary "
-            "suppression floor while claim volume or revenue is disproportionately high. "
-            "This pattern may indicate manipulation of beneficiary-level data to avoid "
-            "detection, or billing for services to phantom beneficiaries."
+            "This signal is quarantined: it reports how often a provider's beneficiary "
+            "count sits at exactly 12 while payments are nonzero, but no documented source "
+            "ties a '12' suppression floor to THIS dataset (the commonly-cited CMS <11 "
+            "convention applies to a different dataset, Medicare MUP). It never flags and "
+            "never contributes to the composite score — informational count only, not a "
+            "finding."
         ),
         "citations": [
-            "42 CFR § 455.18 (Provider disclosure requirements)",
-            "42 U.S.C. § 1320a-7b(a)(1) (False statements — material misrepresentation)",
+            "No citation currently supports a suppression-floor value for this dataset — "
+            "see services/anomaly_detector.py ghost_billing() for detail.",
         ],
     },
     "bene_concentration": {
         "label": "Beneficiary Concentration",
         "explanation": (
-            "An extremely high claims-per-beneficiary ratio suggests that a small "
-            "number of beneficiaries are being billed at an unusually intensive rate. "
-            "This may indicate phantom billing, unnecessary services, or patient "
-            "captivity schemes."
+            "An extremely high claims-to-beneficiary-count ratio (the denominator is "
+            "summed across billing months/codes, NOT a deduplicated unique-patient "
+            "count) suggests claims are concentrated relative to how many beneficiary-"
+            "instances the dataset recorded. This may indicate phantom billing, "
+            "unnecessary services, or patient captivity schemes — or simply a small, "
+            "returning patient panel, which this denominator cannot distinguish."
         ),
         "citations": [
             "42 CFR § 456.3 (Utilization control — State plan requirements)",
@@ -401,15 +409,19 @@ def _build_billing_section(provider: dict) -> dict:
         f"During the observation period of {first} through {last} "
         f"({active} active billing months), this provider submitted "
         f"{_fmt_number(total_claims)} claims to Medicaid for total "
-        f"reimbursement of {_fmt_currency(total_paid)}, serving "
-        f"{_fmt_number(total_bene)} unique beneficiaries across "
-        f"{distinct_hcpcs} distinct HCPCS procedure codes."
+        f"reimbursement of {_fmt_currency(total_paid)}, across "
+        f"{distinct_hcpcs} distinct HCPCS procedure codes. The dataset's "
+        f"beneficiary count ({_fmt_number(total_bene)}) is summed across billing "
+        f"months and procedure codes — it is NOT a deduplicated unique-patient "
+        f"count, since one patient seen in multiple months or billed under "
+        f"multiple codes is counted more than once."
     )
 
     content += (
-        f"\n\nOn a per-beneficiary basis, average revenue was "
-        f"{_fmt_currency(rpb)} per beneficiary with an average of "
-        f"{_fmt_number(cpb)} claims per beneficiary."
+        f"\n\nOn a per-beneficiary-count basis (same caveat — this denominator is "
+        f"summed, not a deduplicated patient count), average revenue was "
+        f"{_fmt_currency(rpb)} and average claim volume was "
+        f"{_fmt_number(cpb)} claims."
     )
 
     if total_claims > 0:
@@ -627,15 +639,29 @@ def _build_patterns_section(provider: dict) -> dict:
 
 
 def _build_actions_section(provider: dict) -> dict:
-    """Section (f): Recommended actions based on risk tier and flags."""
+    """Section (f): Recommended actions based on risk tier, flags, AND whether
+    enrichment/corroboration actually completed (audit 2026-10-24, item 7).
+
+    A high anomaly score alone used to be enough for "PRIORITY REFERRAL" +
+    "credible allegation of fraud" + "initiate payment suspension" — even
+    when NPPES identity enrichment failed and peer-cohort stats fell back to
+    (0, 0) (see services/scan_engine.py's peer-stats fallback). A statistical
+    outlier is not referral-readiness; referral readiness also needs a
+    verified identity and at least some corroboration beyond the score.
+    """
     score = provider.get("risk_score", 0)
     signals = provider.get("signal_results") or provider.get("flags") or []
     flags = [s for s in signals if s.get("flagged")]
     flag_names = {s["signal"] for s in flags}
 
+    # Cheap, already-used-elsewhere proxy for "NPPES enrichment actually
+    # landed" (see services/fraud_brain.py's _needs_nppes check).
+    enrichment_complete = bool(provider.get("provider_name") and provider.get("specialty"))
+    corroborated = len(flags) >= 2  # more than the one statistical outlier alone
+
     actions = []
 
-    if score >= 50:
+    if score >= 50 and enrichment_complete and corroborated:
         actions.append(
             "PRIORITY REFERRAL: Forward this case to the State Medicaid "
             "Fraud Control Unit (MFCU) for full investigation pursuant to "
@@ -643,8 +669,22 @@ def _build_actions_section(provider: dict) -> dict:
         )
         actions.append(
             "PAYMENT SUSPENSION: Consider initiating a payment suspension "
-            "under 42 CFR § 455.23 pending investigation, given the "
-            "credible allegation of fraud indicated by the risk score."
+            "under 42 CFR § 455.23 pending investigation — subject to the "
+            "agency's own credible-allegation determination; this system's "
+            "risk score alone does not establish one."
+        )
+    elif score >= 50:
+        missing = []
+        if not enrichment_complete:
+            missing.append("provider identity enrichment did not complete")
+        if not corroborated:
+            missing.append("only one signal fired — no corroborating signal")
+        actions.append(
+            "HIGH SCORE, NOT YET REFERRAL-READY: This provider's statistical "
+            "score alone (" + "; ".join(missing) + ") is not sufficient grounds "
+            "for a referral recommendation. Complete identity verification and "
+            "seek at least one corroborating finding before considering MFCU "
+            "referral or payment suspension."
         )
     elif score >= 25:
         actions.append(
@@ -667,8 +707,9 @@ def _build_actions_section(provider: dict) -> dict:
         actions.append(
             "IMMEDIATE ACTION — OIG EXCLUSION: Verify exclusion status "
             "against the current LEIE database. If confirmed, immediately "
-            "terminate provider participation and initiate overpayment "
-            "recovery for all claims paid during the exclusion period "
+            "terminate provider participation and open a suspected-overpayment "
+            "review for claims paid during the exclusion period, pending the "
+            "agency's own determination of the confirmed recoverable amount "
             "(42 U.S.C. § 1320a-7)."
         )
 
@@ -676,7 +717,8 @@ def _build_actions_section(provider: dict) -> dict:
         actions.append(
             "NPI VERIFICATION: Confirm NPI status with NPPES. If "
             "deactivated, refer to OIG for potential identity theft "
-            "investigation and recover all post-deactivation payments."
+            "investigation and open a suspected-overpayment review for "
+            "post-deactivation payments, pending confirmation."
         )
 
     if "geographic_impossibility" in flag_names:

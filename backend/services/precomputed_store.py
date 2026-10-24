@@ -38,9 +38,11 @@ def get_precomputed(section: str) -> Any | None:
                 _state["data"] = json.load(f)
             _state["mtime"] = mtime
             log.info(
-                "[precomputed] Loaded %s (generated_at=%s)",
+                "[precomputed] Loaded %s (generated_at=%s, spec_version=%s)",
                 _PATH.name, (_state["data"] or {}).get("generated_at", "?"),
+                (_state["data"] or {}).get("spec_version", "?"),
             )
+            _warn_if_stale(_state["data"] or {})
         data = _state["data"] or {}
         return data.get(section)
     except Exception as e:
@@ -48,8 +50,39 @@ def get_precomputed(section: str) -> Any | None:
         return None
 
 
+def _warn_if_stale(data: dict) -> None:
+    """Visibly flag a precomputed file produced by older detection logic
+    (audit 2026-10-24, item 9) — a silent reload would keep serving
+    unbundling/pos/modifiers results scored by a since-changed spec without
+    anyone knowing. Logs only; a UI staleness banner is a reasonable
+    follow-up this doesn't attempt."""
+    from services.claim_patterns import SPEC_VERSION as current_version
+    file_version = data.get("spec_version")
+    if file_version != current_version:
+        log.warning(
+            "[precomputed] %s was generated with claim_patterns spec_version=%r, "
+            "current code expects %r — claim-pattern leads (unbundling/pos/modifiers/"
+            "impossible) may reflect stale detection logic until the next "
+            "precompute run.", _PATH.name, file_version, current_version,
+        )
+
+
 def get_generated_at() -> str | None:
     """Timestamp string of the current precomputed file, if loaded."""
     if get_precomputed("generated_at") is not None:
         return _state["data"].get("generated_at")
     return None
+
+
+def get_staleness_info() -> dict:
+    """Explicit {is_stale, file_version, current_version} for callers that
+    want to surface this rather than only grep the logs."""
+    from services.claim_patterns import SPEC_VERSION as current_version
+    get_precomputed("generated_at")  # ensure loaded
+    data = _state["data"] or {}
+    file_version = data.get("spec_version")
+    return {
+        "is_stale": file_version != current_version,
+        "file_version": file_version,
+        "current_version": current_version,
+    }

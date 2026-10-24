@@ -360,23 +360,29 @@ def set_queue_status(
         result = dict(item)
     save_review_to_disk()
 
-    # ── Signal-level feedback (audit 2026-07-25, #4) ─────────────────────────
-    # A human labelling a case is the only ground truth this system gets:
-    # dismissed => the signals that fired were false positives; confirmed or
-    # reported => they were true positives. feedback_tracker turns that into a
-    # per-signal multiplier that both scoring paths apply. Recorded here, on the
-    # audited transition, so it can't be bypassed by a different call path.
+    # ── Signal-level feedback (audit 2026-07-25, #4; corrected 2026-10-24) ───
+    # A human's own ANALYST ASSESSMENT ("confirmed" / "dismissed") is weak but
+    # real ground truth. Filing a report (tip_filed / referred / doj_filed) is
+    # NOT an assessment at all — it is a workflow action with no outcome yet,
+    # and used to be wired to record_confirmation() as if filing a tip proved
+    # the fraud (audit 2026-10-24, item 3). Reporting-only statuses now record
+    # NOTHING: they stay unlabeled until an agency actually substantiates or
+    # rejects the case (see core.referral_workflow.update_referral(outcome=...),
+    # which is the real "independently substantiated" signal this system has
+    # and — before this fix — was collected but never used for training).
     # Idempotent + reversible inside _apply(), so re-labelling corrects rather
     # than double-counts. Best-effort: feedback must never fail a status change.
     try:
         if new_status == "dismissed":
             from services.feedback_tracker import record_dismissal
             record_dismissal(npi)
-        elif new_status == "confirmed" or new_status in REPORTED_QUEUE_STATUSES:
+        elif new_status == "confirmed":
             from services.feedback_tracker import record_confirmation
             record_confirmation(npi)
         # NOTE: "archived" deliberately records nothing — archiving closes a case
         # WITHOUT judgment (see the bulk stale-cleanup), so it is not a label.
+        # NOTE: tip_filed / referred / doj_filed deliberately record nothing —
+        # filing a report is not a fraud finding, see comment above.
     except Exception:
         import logging as _l
         _l.getLogger(__name__).warning("feedback recording failed for %s", npi, exc_info=True)

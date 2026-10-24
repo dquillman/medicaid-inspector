@@ -100,10 +100,10 @@ _SIGNAL_META: dict[str, dict] = {
         "citation": "OIG Special Fraud Alert: Bust-Out Schemes; CMS Medicaid Integrity Institute",
     },
     "ghost_billing": {
-        "name": "Ghost Billing",
-        "explanation": "Submitting claims with zero or near-zero unique beneficiaries means services were supposedly rendered but no real patients can be identified. This strongly indicates claims were fabricated entirely.",
+        "name": "Ghost Billing (QUARANTINED — informational only, does not flag or score)",
+        "explanation": "Reports how often a provider's beneficiary count sits at exactly 12 while payments are nonzero. This is quarantined: no documented source ties a '12' suppression floor to this dataset, so it is shown as an informational count only, never as a finding.",
         "evidence_files": ["monthly_timeline.csv"],
-        "citation": "OIG: Phantom Billing — OEI-01-20-00100; 42 USC § 1320a-7b(a)",
+        "citation": "No citation currently supports a suppression-floor value for this dataset.",
     },
     "total_spend_outlier": {
         "name": "Total Spend Outlier",

@@ -10,6 +10,8 @@ import threading
 import uuid
 from typing import Optional
 
+from core.safe_io import atomic_write_json
+
 _REFERRALS_FILE = pathlib.Path(__file__).parent.parent / "referrals.json"
 
 _referrals: list[dict] = []
@@ -34,6 +36,15 @@ VALID_OUTCOMES = [
     "pending",
 ]
 
+# The only INDEPENDENTLY SUBSTANTIATED outcomes — an agency outside this app
+# actually investigated and agreed. Everything else (filing the referral,
+# "pending", the analyst's own "confirmed" assessment) is weaker evidence and
+# must not be presented as a verified fraud label (audit 2026-10-24, item 3).
+SUBSTANTIATED_OUTCOMES = {"substantiated", "settlement", "criminal_charges", "civil_action"}
+# An agency reviewed the case and found it did NOT hold up — genuine negative
+# signal, stronger than an internal "dismissed".
+REJECTED_OUTCOMES = {"unsubstantiated", "declined"}
+
 
 # ── disk persistence ──────────────────────────────────────────────────────────
 
@@ -53,10 +64,10 @@ def load_referrals_from_disk() -> None:
 
 def _save_to_disk() -> None:
     try:
-        _REFERRALS_FILE.write_text(
-            json.dumps({"referrals": _referrals}, default=str),
-            encoding="utf-8",
-        )
+        # Was a raw write_text — a crash mid-write truncated referrals.json
+        # (audit 2026-10-24, item 10). atomic_write_json writes to a temp file
+        # and os.replace()s it, so a crash leaves the original file intact.
+        atomic_write_json(_REFERRALS_FILE, {"referrals": _referrals})
         # Sync to GCS — the container's local disk is ephemeral on Cloud Run,
         # so without this every submit/update/delete is lost on restart.
         try:
@@ -178,6 +189,21 @@ def update_referral(
                 "by": updated_by,
                 "note": f"Outcome received: {outcome}",
             })
+            # This is the one place a referral's outcome is INDEPENDENTLY
+            # substantiated or rejected by an outside agency — feed it to the
+            # feedback loop as real ground truth. Best-effort: an outcome
+            # update must never fail because feedback recording failed.
+            try:
+                from services.feedback_tracker import record_confirmation, record_dismissal
+                if outcome in SUBSTANTIATED_OUTCOMES:
+                    record_confirmation(ref["npi"])
+                elif outcome in REJECTED_OUTCOMES:
+                    record_dismissal(ref["npi"])
+                # "pending" records nothing — no outcome yet.
+            except Exception:
+                import logging as _l
+                _l.getLogger(__name__).warning(
+                    "feedback recording failed for referral outcome on %s", ref.get("npi"), exc_info=True)
 
         if outcome_notes is not None:
             ref["outcome_notes"] = outcome_notes

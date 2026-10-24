@@ -55,8 +55,16 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
     )
 
     peer = peer_rows[0] if peer_rows else {}
-    peer_mean = float(peer.get("mean_rpb") or 0)
-    peer_std = float(peer.get("std_rpb") or 0)
+    peer_n = int(peer.get("peer_n") or 0)
+    # Require the same minimum cohort size as the batch path
+    # (services.scan_engine._build_peer_stats: `if len(vals) >= 3`) — below
+    # that, both ratios fall back to their own insufficient-data branch
+    # instead of a statistically meaningless 1-or-2-peer stddev.
+    has_cohort = peer_n >= 3
+    peer_mean = float(peer.get("mean_rpb") or 0) if has_cohort else 0.0
+    peer_std = float(peer.get("std_rpb") or 0) if has_cohort else 0.0
+    cpb_mean = float(peer.get("mean_cpb") or 0) if has_cohort else 0.0
+    cpb_std = float(peer.get("std_cpb") or 0) if has_cohort else 0.0
 
     # Pre-compute cluster sizes from prescan cache
     cluster_sizes = compute_address_clusters()
@@ -65,7 +73,7 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
     signals: list[SignalResult] = [
         billing_concentration(provider_agg, hcpcs_rows),
         revenue_per_bene_outlier(provider_agg, peer_mean, peer_std),
-        claims_per_bene_anomaly(provider_agg),
+        claims_per_bene_anomaly(provider_agg, cpb_mean, cpb_std),
         billing_ramp_rate(timeline_rows),
         bust_out_pattern(timeline_rows),
         ghost_billing(provider_agg, timeline_rows),
@@ -153,8 +161,18 @@ def _timeline_sql(npi: str) -> tuple[str, tuple]:
 
 def _peer_stats_sql(npi: str) -> tuple[str, tuple]:
     """
-    Compute mean and std of revenue_per_beneficiary for providers
-    sharing the same top HCPCS code as this NPI.
+    Compute mean/std of revenue_per_beneficiary AND claims_per_beneficiary for
+    providers sharing the same top HCPCS code as this NPI.
+
+    Audit 2026-10-24, item 5: claims_per_bene_anomaly used to be called with
+    NO peer stats on this (live) path — it always fell back to the absolute
+    >100-claims/beneficiary threshold, while the batch path (scan_engine.py)
+    compared against this SAME peer cohort whenever >=3 peers existed. The
+    same provider could be flagged by one path's threshold and not the
+    other's cohort comparison, or vice versa, for no reason but which code
+    path scored it. Both ratios now come from one query over the same peer
+    group, so both signals compare against the same cohort on both paths.
+
     Uses parameterized query to prevent SQL injection.
     """
     _validate_npi(npi)
@@ -172,14 +190,19 @@ def _peer_stats_sql(npi: str) -> tuple[str, tuple]:
         SELECT
             BILLING_PROVIDER_NPI_NUM AS npi,
             CAST(SUM(TOTAL_PAID) AS DOUBLE) /
-                NULLIF(SUM(TOTAL_UNIQUE_BENEFICIARIES), 0) AS rpb
+                NULLIF(SUM(TOTAL_UNIQUE_BENEFICIARIES), 0) AS rpb,
+            CAST(SUM(TOTAL_CLAIMS) AS DOUBLE) /
+                NULLIF(SUM(TOTAL_UNIQUE_BENEFICIARIES), 0) AS cpb
         FROM {src}
         WHERE HCPCS_CODE = (SELECT HCPCS_CODE FROM this_top)
         GROUP BY BILLING_PROVIDER_NPI_NUM
     )
     SELECT
         AVG(rpb) AS mean_rpb,
-        STDDEV(rpb) AS std_rpb
+        STDDEV(rpb) AS std_rpb,
+        AVG(cpb) AS mean_cpb,
+        STDDEV(cpb) AS std_cpb,
+        COUNT(*) AS peer_n
     FROM peers
     """
     return sql, (npi,)

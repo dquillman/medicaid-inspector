@@ -659,13 +659,16 @@ export default function ProviderDetail() {
         {[
           { label: 'Total Paid',    value: fmt(detail.spending?.total_paid ?? 0),                            color: 'text-blue-400' },
           { label: 'Total Claims',  value: (detail.spending?.total_claims ?? 0).toLocaleString(),             color: 'text-purple-400' },
-          { label: 'Beneficiaries', value: (detail.spending?.total_beneficiaries ?? 0).toLocaleString(),      color: 'text-green-400' },
+          { label: 'Beneficiaries (summed)*', value: (detail.spending?.total_beneficiaries ?? 0).toLocaleString(),      color: 'text-green-400' },
           { label: 'Active Months', value: detail.spending?.active_months ?? 0,                               color: 'text-yellow-400' },
           { label: 'Fraud Signals', value: `${(detail.signal_results ?? []).filter(s => s.flagged).length} / ${(detail.signal_results ?? []).length}`, color: (detail.signal_results ?? []).some(s => s.flagged) ? 'text-red-400' : 'text-green-400' },
           { label: 'Avg $/Claim',   value: detail.spending?.total_claims ? fmt(Math.round((detail.spending?.total_paid ?? 0) / detail.spending.total_claims)) : '--', color: 'text-cyan-400' },
         ].map(kpi => (
           <div key={kpi.label} className="flex-1 px-5 py-4 text-center">
-            <p className="text-xs text-gray-500 uppercase tracking-wider font-medium">{kpi.label}</p>
+            <p className="text-xs text-gray-500 uppercase tracking-wider font-medium"
+               title={kpi.label.includes('*') ? 'Summed across billing months/codes — not a deduplicated patient count' : undefined}>
+              {kpi.label}
+            </p>
             <p className={`text-xl font-bold mt-1 ${kpi.color}`}>{kpi.value}</p>
           </div>
         ))}

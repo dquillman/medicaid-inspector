@@ -15,7 +15,7 @@ from core.evidence_store import (
     add_custody_event,
 )
 from core.phi_logger import log_phi_access
-from routes.auth import require_user, get_current_user
+from routes.auth import require_user, require_investigator, get_current_user
 
 router = APIRouter(prefix="/api/cases", tags=["evidence"], dependencies=[Depends(require_user)])
 
@@ -27,7 +27,10 @@ async def upload_evidence(
     file: UploadFile = File(...),
     description: str = Form(""),
     evidence_type: str = Form("document"),
-    user: dict = Depends(require_user),
+    # Was require_user (viewer-level) — every comparable write (referral
+    # updates, case mutations) requires investigator; evidence upload is a
+    # chain-of-custody write and must match (audit 2026-10-24, item 10).
+    user: dict = Depends(require_investigator),
 ):
     """Upload an evidence file for a case. Computes and stores SHA-256 hash."""
     if not file.filename:

@@ -361,7 +361,7 @@ export default function MLModel() {
                       <th className="px-4 py-2">State</th>
                       <th className="px-4 py-2 text-right">Total Paid</th>
                       <th className="px-4 py-2 text-right">Risk Score</th>
-                      <th className="px-4 py-2 text-right">Fraud Prob.</th>
+                      <th className="px-4 py-2 text-right" title="A relative model score from labeled cases so far — NOT a calibrated, independently-validated probability of fraud.">Model Score*</th>
                       <th className="px-4 py-2">Label</th>
                       <th className="px-4 py-2 text-right">Probability Bar</th>
                     </tr>
@@ -420,6 +420,12 @@ export default function MLModel() {
                     )}
                   </tbody>
                 </table>
+                <p className="px-4 py-2 text-xs text-gray-600">
+                  * Model Score is a relative ranking from labeled cases so far, not a calibrated or
+                  independently validated probability of fraud. "Label" reflects an analyst's own
+                  assessment or an agency's referral outcome — filing a tip or referral by itself is
+                  never a label (see /methods).
+                </p>
               </div>
             </div>
           )}

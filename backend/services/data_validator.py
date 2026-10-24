@@ -113,6 +113,63 @@ def validate_date(date_val, field_name: str = "date") -> list[str]:
     return issues
 
 
+# The columns every query in this app assumes exist (data/duckdb_client.py,
+# services/scan_engine.py, services/risk_scorer.py). A silently missing or
+# renamed column doesn't raise — DuckDB would error loudly on an unknown
+# column name in a SELECT, but a column that's merely EMPTY/all-null, or a
+# new unexpected extra column, passes silently today. This check is cheap
+# (a DESCRIBE reads only parquet metadata, not row data) so it can run
+# unconditionally — unlike run_validation() below, which samples actual rows
+# and is gated to local data only (see its own docstring for why).
+EXPECTED_COLUMNS = {
+    "BILLING_PROVIDER_NPI_NUM", "HCPCS_CODE", "CLAIM_FROM_MONTH",
+    "TOTAL_PAID", "TOTAL_CLAIMS", "TOTAL_UNIQUE_BENEFICIARIES",
+}
+
+_schema_check_result: dict = {"last_run": None, "status": "never_run"}
+
+
+async def check_schema() -> dict:
+    """Cheap, unconditional (safe on remote data) schema-presence check.
+
+    Returns explicit missing/unexpected-column state rather than letting an
+    absent column silently read as all-null/zero everywhere downstream
+    (audit 2026-10-24, item 6).
+    """
+    global _schema_check_result
+    from data.duckdb_client import query_async, get_parquet_path
+    src = get_parquet_path()
+    try:
+        rows = await query_async(f"DESCRIBE SELECT * FROM read_parquet('{src}') LIMIT 0")
+        actual_columns = {r.get("column_name") for r in rows if r.get("column_name")}
+        missing = sorted(EXPECTED_COLUMNS - actual_columns)
+        unexpected = sorted(actual_columns - EXPECTED_COLUMNS)
+        _schema_check_result = {
+            "last_run": time.time(),
+            "status": "ok" if not missing else "missing_columns",
+            "missing_columns": missing,
+            "unexpected_columns": unexpected,
+            "actual_columns": sorted(actual_columns),
+        }
+    except Exception as exc:
+        # Unknown must stay unknown, not silently "ok" — any downstream
+        # reader of this result must treat status != "ok" as "do not trust
+        # column-dependent computations without checking further."
+        _schema_check_result = {
+            "last_run": time.time(),
+            "status": "error",
+            "error": str(exc),
+            "missing_columns": None,
+            "unexpected_columns": None,
+        }
+        log.error("Schema check failed: %s", exc)
+    return _schema_check_result
+
+
+def get_schema_check_result() -> dict:
+    return dict(_schema_check_result)
+
+
 async def run_validation(sample_limit: int = 5000) -> dict:
     """
     Run data validation against the active Parquet dataset.

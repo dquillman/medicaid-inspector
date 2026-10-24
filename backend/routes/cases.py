@@ -17,7 +17,7 @@ from core.review_store import (
 )
 from core.store import get_provider_by_npi
 
-from routes.auth import require_user
+from routes.auth import require_user, require_investigator
 
 router = APIRouter(prefix="/api/cases", tags=["cases"], dependencies=[Depends(require_user)])
 
@@ -39,7 +39,7 @@ class AddDocumentBody(BaseModel):
 
 
 @router.post("/{npi}/documents")
-async def add_case_document(npi: str, body: AddDocumentBody):
+async def add_case_document(npi: str, body: AddDocumentBody, _user: dict = Depends(require_investigator)):
     """Add document metadata to a case."""
     updated = add_document(npi, body.model_dump())
     if updated is None:
@@ -55,7 +55,7 @@ class LogHoursBody(BaseModel):
 
 
 @router.post("/{npi}/hours")
-async def log_case_hours(npi: str, body: LogHoursBody):
+async def log_case_hours(npi: str, body: LogHoursBody, _user: dict = Depends(require_investigator)):
     """Log investigator hours on a case."""
     if body.hours <= 0:
         raise HTTPException(400, "Hours must be positive")
@@ -72,7 +72,7 @@ class SetPriorityBody(BaseModel):
 
 
 @router.patch("/{npi}/priority")
-async def set_case_priority(npi: str, body: SetPriorityBody):
+async def set_case_priority(npi: str, body: SetPriorityBody, _user: dict = Depends(require_investigator)):
     """Set case priority (low, medium, high, critical)."""
     try:
         updated = set_priority(npi, body.priority)
@@ -90,7 +90,7 @@ class SetDueDateBody(BaseModel):
 
 
 @router.patch("/{npi}/due-date")
-async def set_case_due_date(npi: str, body: SetDueDateBody):
+async def set_case_due_date(npi: str, body: SetDueDateBody, _user: dict = Depends(require_investigator)):
     """Set or clear a case due date (ISO date string, e.g. '2026-04-01')."""
     updated = set_due_date(npi, body.due_date)
     if updated is None:

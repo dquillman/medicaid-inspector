@@ -1,12 +1,25 @@
 """
-Claim-level fraud pattern detection.
+Aggregate code-mix pattern heuristics (NOT claim-level detection).
 
-Detects five categories of claim-level fraud:
-  1. Unbundling — billing component codes separately instead of bundled code
-  2. Duplicate claims — identical/near-identical claims
-  3. Place-of-service violations — procedure/setting mismatches
-  4. Modifier abuse — unusual modifier usage rates
-  5. Impossible day patterns — physically impossible billing volumes
+The source data is provider x HCPCS-code x month totals — there are no
+claim-line records, no modifier fields, and no place-of-service fields in
+this dataset (see routes/methods.py's public disclosure). Everything here
+infers a pattern from HCPCS-code mix and monthly totals, not from actual
+claim lines:
+  1. Unbundling — component codes vs. bundled code, inferred from monthly
+     per-code totals (NOT from seeing component+bundled codes on one claim)
+  2. Duplicate claims — NOT detectable from this dataset (would need
+     row-level claims); always returns empty, kept for API shape only
+  3. "Place-of-service" — surgical-code share of total claims, inferred from
+     code mix (there is no actual place-of-service field)
+  4. "Modifier abuse" — E&M-vs-procedure code-range ratio (there is no actual
+     modifier field)
+  5. Impossible day patterns — beneficiaries/claims per month divided by
+     business days; a genuine statistical heuristic on aggregate totals
+
+These are leads worth a human second look, not confirmed claim-level
+findings — see services/fraud_brain.py's _CORRELATED_NOT_INDEPENDENT for how
+unbundling/pos/modifiers are excluded from composite-score corroboration.
 
 Performance: all analyses run from the in-memory prescan cache (106k providers)
 — no Parquet queries needed.  Results cached for 10 minutes.
@@ -20,6 +33,13 @@ import asyncio
 import logging
 import time as _time
 from collections import defaultdict
+
+# Bump whenever the detection logic here changes (new bundle groups, new
+# thresholds, new category) — scripts/precompute_analyses.py stamps this into
+# precomputed_analyses.json, and services/precomputed_store.py warns when a
+# loaded file's version doesn't match (audit 2026-10-24, item 9: stale
+# evidence must be visible, not silently served as current).
+SPEC_VERSION = "2026-10-24.1"
 from typing import Any
 
 logger = logging.getLogger(__name__)
