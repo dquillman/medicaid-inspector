@@ -27,6 +27,7 @@ from pydantic import BaseModel
 
 from routes.auth import require_user
 from core.config import settings
+from core.simple_conversation import simple_conversation_reply
 
 logger = logging.getLogger(__name__)
 
@@ -222,6 +223,16 @@ async def hal_chat(req: HalChatRequest, user: dict = Depends(require_user)):
     falls back to relaying to qcode's HAL when no ANTHROPIC_API_KEY is set."""
     if not req.messages:
         raise HTTPException(400, "No messages.")
+
+    # Conversation is a core capability, not a paid-provider feature. Keep this
+    # ahead of the local expert, relay token, and qcode availability checks.
+    latest_user = next(
+        (message.content for message in reversed(req.messages) if message.role == "user"),
+        "",
+    )
+    simple_reply = simple_conversation_reply(latest_user, req.face)
+    if simple_reply:
+        return {"reply": simple_reply, "actions": [], "providers": []}
 
     # App-HAL pattern: run MFI's own expert loop in-process when we can. This is
     # the path that actually reaches the fraud data (top_risky_providers, etc.).

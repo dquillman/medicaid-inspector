@@ -69,7 +69,13 @@ PERSONAS = {
 }
 
 GROUNDING = (
-    "Keep replies tight and readable. When you list providers, give each on its "
+    "Dave is an INTJ operator. Lead with the answer or recommendation. Default "
+    "to at most 3 short sentences and roughly 60 spoken words. Give only the "
+    "decisive reason and next action. Do not restate the question, narrate your "
+    "process, add pleasantries, repeat the conclusion, or end with an unsolicited "
+    "offer. For decisions use: recommendation, reason, next action. Expand only "
+    "when Dave explicitly asks for detail, a walkthrough, comparison, analysis, "
+    "or a draft. State uncertainty exactly. When you list providers, give each on its "
     "own short line with the one or two signals that drive its risk. No markdown "
     "headers; plain sentences and simple lines only."
 )
@@ -299,7 +305,7 @@ async def run(messages: List[dict], face: str = "hal", npi: Optional[str] = None
 
     for _ in range(MAX_TOOL_ROUNDS):
         resp = await client.messages.create(
-            model=resolved, max_tokens=1024, system=_system(face, npi),
+            model=resolved, max_tokens=300, system=_system(face, npi),
             tools=tools, messages=convo,
         )
         tool_uses = [b for b in resp.content if getattr(b, "type", "") == "tool_use"]
