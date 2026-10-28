@@ -21,7 +21,7 @@ export default function BulkActionBar({
 
     const headers = [
       'NPI', 'Provider Name', 'Risk Score', 'Flags', 'State', 'City',
-      'Total Paid', 'Claims', 'Beneficiaries', 'Months Active',
+      'Total Paid', 'Claims', 'Summed beneficiary count (not unique patients)', 'Months Active',
     ]
 
     const rows = selected.map(p => [

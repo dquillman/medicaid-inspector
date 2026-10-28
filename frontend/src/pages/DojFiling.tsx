@@ -93,8 +93,8 @@ export default function DojFiling() {
         <div>
           <h1 className="text-xl font-bold text-gray-200">DOJ Filing Mode</h1>
           <p className="text-sm text-gray-500 mt-1 max-w-3xl">
-            One lead at a time, in shortlist order. Open the portal, paste, attach, submit, then paste
-            the reference number here and log it. The next report is already being drafted. You do the
+            Review one lead at a time, in shortlist order. Verify the evidence and decide whether referral is warranted before opening the portal. After filing, paste
+            the reference number here and log it. Drafts are screening leads, not proof of fraud or confirmed loss. You do the
             filing &mdash; DOJ needs your own signed statement.
           </p>
         </div>

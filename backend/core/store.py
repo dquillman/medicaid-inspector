@@ -80,6 +80,7 @@ _SLIM_FIELDS = (
     "active_months", "first_month", "last_month", "risk_score",
     "claims_per_beneficiary", "revenue_per_beneficiary", "top_hcpcs",
     "provider_name", "specialty", "state", "city", "zip", "nppes",
+    "scoring_metadata", "summed_beneficiary_count", "beneficiary_count_semantics",
 )
 
 

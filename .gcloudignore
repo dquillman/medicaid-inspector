@@ -58,3 +58,19 @@ backend/stderr*.log
 deploy-tmp/
 frontend/dist/
 .firebase/
+
+# Private investigator packets and sealed coordinator mappings
+backend/private_evaluations/
+backend/private_validations/
+
+# Default-deny backend operational JSON; only startup public reference stores
+# are intentional build inputs. Runtime state is restored from its own bucket.
+backend/**/*.json
+!backend/oig_exclusions.json
+!backend/npi_deactivations.json
+**/*sa-key*.json
+**/service-account*.json
+**/.env*
+.codex/
+.agents/
+**/*.log

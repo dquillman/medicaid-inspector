@@ -8,9 +8,13 @@ On startup: download files from GCS -> local disk
 After mutations: upload changed files to GCS (debounced)
 """
 import asyncio
+from contextlib import closing
+from contextvars import ContextVar
 import logging
 import os
 import pathlib
+import sqlite3
+import tempfile
 import threading
 import time
 
@@ -58,12 +62,55 @@ _bucket = None
 _upload_lock = threading.Lock()
 _last_upload: dict[str, float] = {}
 _pending_timers: dict[str, "threading.Timer"] = {}  # trailing-edge debounce
+_sync_lock = threading.RLock()
+_generations: dict[str, int] = {}
+_sync_status: dict[str, dict] = {}
+# Mutable request-owned event list propagates through asyncio.to_thread and
+# AnyIO threadpools; unrelated threads/tasks have no collection by default.
+_request_persistence_events: ContextVar[list[dict] | None] = ContextVar("mfi_persistence_events", default=None)
+
+
+def begin_request_persistence():
+    events: list[dict] = []
+    return _request_persistence_events.set(events), events
+
+
+def end_request_persistence(token) -> None:
+    _request_persistence_events.reset(token)
+
+
+
+def _set_status(name: str, state: str, error: str = "", *, request_write: bool = True) -> None:
+    with _sync_lock:
+        _sync_status[name] = {"state": state, "updated_at": time.time(), "error": error,
+                              "durable": state == "synced", "generation": _generations.get(name)}
+        events = _request_persistence_events.get()
+        if request_write and events is not None:
+            events.append({"object": name, "state": state})
+
+
+def get_sync_status() -> dict:
+    """Admin diagnostics contain only metadata, never state-file contents."""
+    with _sync_lock:
+        return {"storage_model": "whole-file optimistic concurrency; single instance required",
+                "objects": {name: dict(value) for name, value in _sync_status.items()},
+                "pending_count": sum(value["state"] == "pending" for value in _sync_status.values()),
+                "error_count": sum(value["state"] in ("conflict", "error", "unavailable", "untracked") for value in _sync_status.values())}
+
+
 _DEBOUNCE_SEC = 5  # min seconds between uploads of the same file
 
 
 def _get_bucket():
     """Lazy-init the GCS client and bucket."""
     global _client, _bucket
+    if not _BUCKET_NAME:
+        return None
+    # The aggregate-only public bucket must never receive cases, sessions,
+    # evidence, credentials, or state snapshots, even through a stale client.
+    if _BUCKET_NAME == "medicaid-inspector-public-aggregates":
+        log.error("Refusing public aggregate bucket as operational storage")
+        return None
     if _bucket is not None:
         return _bucket
     try:
@@ -96,6 +143,7 @@ def download_state_files() -> int:
     """
     bucket = _get_bucket()
     if not bucket:
+        _set_status("startup", "unavailable", "State storage unavailable; local files have no remote durability acknowledgement", request_write=False)
         return 0
 
     downloaded = 0
@@ -104,6 +152,8 @@ def download_state_files() -> int:
         blob = bucket.blob(filename)
         try:
             if not blob.exists():
+                _generations[filename] = 0
+                _set_status(filename, "absent", request_write=False)
                 continue
             # Size guard — fetch blob metadata so we can compare before downloading
             blob.reload()
@@ -113,6 +163,8 @@ def download_state_files() -> int:
                 local_size > _SHRINK_GUARD_MIN_LOCAL_BYTES
                 and blob_size < local_size * _SHRINK_GUARD_RATIO
             ):
+                _generations.pop(filename, None)
+                _set_status(filename, "untracked", "Remote size guard rejected download; reconcile before upload", request_write=False)
                 log.warning(
                     "[gcs_sync] Refusing to overwrite %s — local=%.1fMB but GCS blob=%.1fMB (<%.0f%%). "
                     "Keeping the larger local copy.",
@@ -122,11 +174,22 @@ def download_state_files() -> int:
                     _SHRINK_GUARD_RATIO * 100,
                 )
                 continue
-            blob.download_to_filename(str(local_path))
+            generation = int(blob.generation)
+            fd, downloaded_path = tempfile.mkstemp(dir=str(local_path.parent), suffix=".download")
+            os.close(fd)
+            try:
+                blob.download_to_filename(downloaded_path, if_generation_match=generation)
+                os.replace(downloaded_path, local_path)
+            finally:
+                pathlib.Path(downloaded_path).unlink(missing_ok=True)
+            _generations[filename] = generation
+            _set_status(filename, "synced", request_write=False)
             size_kb = local_path.stat().st_size / 1024
             log.info("[gcs_sync] Downloaded %s (%.1f KB)", filename, size_kb)
             downloaded += 1
         except Exception as e:
+            _generations.pop(filename, None)
+            _set_status(filename, "error", "State download failed; remote generation not adopted", request_write=False)
             log.warning("[gcs_sync] Failed to download %s: %s", filename, e)
 
     return downloaded
@@ -197,23 +260,71 @@ def download_all() -> int:
     return count
 
 
-def _do_upload(filename: str) -> bool:
-    """Actually push the file (no debounce logic). See upload_file()."""
-    bucket = _get_bucket()
-    if not bucket:
-        return False
-    local_path = _BACKEND_DIR / filename
+def _conditional_upload(object_path: str, uploader) -> bool:
+    """Refuse stale or unloaded whole-file overwrites, including metadata."""
+    with _sync_lock:
+        bucket = _get_bucket()
+        if not bucket:
+            _set_status(object_path, "unavailable", "Object storage unavailable")
+            return False
+        try:
+            blob = bucket.blob(object_path)
+            expected = _generations.get(object_path)
+            if expected is None:
+                if blob.exists():
+                    _set_status(object_path, "untracked", "Remote object not loaded; reconcile before overwrite")
+                    return False
+                expected = 0
+            uploader(blob, expected)
+            if blob.generation is None:
+                _set_status(object_path, "error", "Upload returned no generation; cannot acknowledge durability")
+                return False
+            _generations[object_path] = int(blob.generation)
+            _set_status(object_path, "synced")
+            return True
+        except Exception as error:
+            code = getattr(error, "code", None)
+            code = code() if callable(code) else code
+            conflict = code == 412 or type(error).__name__ in ("PreconditionFailed", "Conflict")
+            _set_status(object_path, "conflict" if conflict else "error",
+                        "Remote generation changed; reconcile before retry" if conflict else "Upload failed; local state remains unsynced")
+            log.warning("[gcs_sync] Conditional upload failed for %s: %s", object_path, error)
+            return False
+
+
+def _do_upload_snapshot(filename: str) -> bool:
+    """Upload immutable snapshot; SQLite backup includes committed WAL data."""
+    local_path = (_BACKEND_DIR / filename).resolve()
+    if not local_path.is_relative_to(_BACKEND_DIR.resolve()):
+        raise ValueError("State path must remain within backend directory")
     if not local_path.exists():
+        _set_status(filename, "error", "Local state file is missing")
         return False
+    fd, snapshot_path = tempfile.mkstemp(suffix=local_path.suffix)
+    os.close(fd)
     try:
-        blob = bucket.blob(filename)
-        blob.upload_from_filename(str(local_path))
-        log.info("[gcs_sync] Uploaded %s (%.1f KB)", filename,
-                 local_path.stat().st_size / 1024)
-        return True
-    except Exception as e:
-        log.warning("[gcs_sync] Failed to upload %s: %s", filename, e)
+        if local_path.suffix == ".db":
+            with closing(sqlite3.connect(local_path.as_uri() + "?mode=ro", uri=True)) as source:
+                with closing(sqlite3.connect(snapshot_path)) as destination:
+                    source.backup(destination)
+        else:
+            import shutil
+            with local_path.open("rb") as source, open(snapshot_path, "wb") as destination:
+                shutil.copyfileobj(source, destination)
+        return _conditional_upload(filename, lambda blob, expected: blob.upload_from_filename(snapshot_path, if_generation_match=expected))
+    except Exception as error:
+        _set_status(filename, "error", "Could not create consistent upload snapshot")
+        log.warning("[gcs_sync] Snapshot failed for %s: %s", filename, error)
         return False
+    finally:
+        pathlib.Path(snapshot_path).unlink(missing_ok=True)
+
+
+def _do_upload(filename: str) -> bool:
+    # Serialize snapshot capture as well as upload, so an older in-process
+    # snapshot cannot overtake a newer one while waiting for the upload lock.
+    with _sync_lock:
+        return _do_upload_snapshot(filename)
 
 
 def _flush_pending(filename: str) -> None:
@@ -245,48 +356,16 @@ def upload_file(filename: str) -> bool:
                 t.daemon = True          # never block interpreter shutdown
                 _pending_timers[filename] = t
                 t.start()
+            _set_status(filename, "pending", "Upload deferred; not yet durable")
             return False                 # deferred, NOT dropped
         _last_upload[filename] = now
 
-    bucket = _get_bucket()
-    if not bucket:
-        return False
+    return _do_upload(filename)
 
-    local_path = _BACKEND_DIR / filename
-    if not local_path.exists():
-        return False
-
-    try:
-        blob = bucket.blob(filename)
-        blob.upload_from_filename(str(local_path))
-        size_kb = local_path.stat().st_size / 1024
-        log.info("[gcs_sync] Uploaded %s (%.1f KB)", filename, size_kb)
-        return True
-    except Exception as e:
-        log.warning("[gcs_sync] Failed to upload %s: %s", filename, e)
-        return False
-
-
-# ── Durable object storage (evidence blobs) ──────────────────────────────────
-# upload_file() above is for STATE FILES: it reads from _BACKEND_DIR and is
-# DEBOUNCED, so a call inside the debounce window silently no-ops. That is fine
-# for a JSON file that gets rewritten constantly and wrong for evidence, where a
-# skipped write means the artifact is simply lost. These helpers take raw bytes,
-# never debounce, and report failure so the caller can refuse the upload.
 
 def upload_bytes(object_path: str, data: bytes, content_type: str = "application/octet-stream") -> bool:
     """Write raw bytes to GCS at `object_path`. Returns False if unavailable."""
-    bucket = _get_bucket()
-    if not bucket:
-        return False
-    try:
-        blob = bucket.blob(object_path)
-        blob.upload_from_string(data, content_type=content_type)
-        log.info("[gcs_sync] Uploaded object %s (%.1f KB)", object_path, len(data) / 1024)
-        return True
-    except Exception as e:
-        log.warning("[gcs_sync] Failed to upload object %s: %s", object_path, e)
-        return False
+    return _conditional_upload(object_path, lambda blob, expected: blob.upload_from_string(data, content_type=content_type, if_generation_match=expected))
 
 
 def download_bytes(object_path: str) -> bytes | None:
@@ -316,23 +395,7 @@ def object_exists(object_path: str) -> bool:
 
 def upload_all() -> int:
     """Upload all existing sync files to GCS. Returns count uploaded."""
-    bucket = _get_bucket()
-    if not bucket:
-        return 0
-
-    uploaded = 0
-    for filename in _SYNC_FILES:
-        local_path = _BACKEND_DIR / filename
-        if local_path.exists():
-            try:
-                blob = bucket.blob(filename)
-                blob.upload_from_filename(str(local_path))
-                size_kb = local_path.stat().st_size / 1024
-                log.info("[gcs_sync] Uploaded %s (%.1f KB)", filename, size_kb)
-                uploaded += 1
-            except Exception as e:
-                log.warning("[gcs_sync] Failed to upload %s: %s", filename, e)
-    return uploaded
+    return sum(_do_upload(filename) for filename in _SYNC_FILES if (_BACKEND_DIR / filename).exists())
 
 
 async def upload_file_async(filename: str) -> bool:

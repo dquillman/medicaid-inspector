@@ -133,7 +133,9 @@ def build_filing_guide(*, npi: str, name: str, taxonomy: str, state: str,
             ("Are you an HHS employee, contractor, or grantee?", "No"),
         ],
         "notes": [
-            f"Allegation = '{allegation}' because {why}.",
+            f"Suggested portal category = '{allegation}' because {why}; this is a screening hypothesis, not an established violation.",
+            "Verify identity, applicable Medicaid program rules, and effective dates. Statistical flags and Medicare status alone do not establish Medicaid fraud.",
+            "The first day shown is only a form placeholder for a monthly aggregate; disclose that the exact service day is unknown.",
             f"Program type / category derived from taxonomy '{taxonomy or 'unknown'}'.",
             "'Not sure' on still-occurring: the dataset ends at the last billed month; "
             "activity after that is unknown.",

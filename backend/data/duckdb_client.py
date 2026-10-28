@@ -185,6 +185,8 @@ def provider_aggregate_sql(
         SUM(TOTAL_PAID)                                     AS total_paid,
         SUM(TOTAL_CLAIMS)                                   AS total_claims,
         SUM(TOTAL_UNIQUE_BENEFICIARIES)                     AS total_beneficiaries,
+        SUM(TOTAL_UNIQUE_BENEFICIARIES)                     AS summed_beneficiary_count,
+        'provider_hcpcs_month_sum_not_unique_patients'       AS beneficiary_count_semantics,
         COUNT(DISTINCT HCPCS_CODE)                          AS distinct_hcpcs,
         COUNT(DISTINCT CLAIM_FROM_MONTH)                    AS active_months,
         MIN(CLAIM_FROM_MONTH)                               AS first_month,

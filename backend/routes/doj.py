@@ -8,7 +8,7 @@ router = APIRouter(prefix="/api/doj", tags=["doj"], dependencies=[Depends(requir
 
 
 @router.get("/shortlist")
-async def doj_shortlist():
+async def doj_shortlist(include_older: bool = False):
     """Leads ranked for the DOJ Criminal Tip Rewards program, most provable first."""
     from services.doj_shortlist import build_shortlist
-    return await asyncio.to_thread(build_shortlist)
+    return await asyncio.to_thread(build_shortlist, include_older=include_older)

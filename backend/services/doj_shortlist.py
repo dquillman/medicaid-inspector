@@ -1,38 +1,11 @@
 """
-DOJ shortlist: the leads most likely to earn a Criminal Tip Rewards award,
-ordered by how provable they are.
+DOJ research shortlist, ordered by existing workflow tiers.
 
-DOJ pays only when a tip leads to unsealed criminal charges, so the order is:
-
-  tier 1  Worked cases: confirmed fraud, or already reported to OIG / an MFCU,
-          and not yet sent to DOJ. A human has already judged these.
-  tier 2  Per-se findings: billing while OIG-excluded, after a Medicare
-          revocation, or under a deactivated NPI. Facts a prosecutor can check
-          in minutes. Recovery leads (all billing BEFORE the exclusion) are left
-          out: nothing was billed while barred.
-  tier 3  Statistical Brain leads in DOJ's priority areas (hospice, home
-          health, day care, special services).
-
-Inside a tier, DOJ priority areas come first, then the dollar figure.
-
-Filters that apply to every tier:
-  * Leads already logged with DOJ (any NPI of the same company), dismissed
-    (judged not fraud) or archived are dropped.
-  * One company billing under several NPIs is one row (DOJ pays per distinct
-    tip); the other NPIs are listed on it.
-  * The general federal limitation period is 5 years (18 U.S.C. 3282), so a
-    lead whose most recent billing is older than that is dropped. DOJ decides
-    timeliness; this keeps clearly stale leads off the list.
-
-NOTE on the other age cutoff in this codebase (audit 2026-10-24, item 11):
-services/fraud_brain.py's recency_badge() marks a provider "expired" at ~6
-years, based on the FCA CIVIL recovery window, not this file's 5-year
-CRIMINAL statute of limitations — they are deliberately different numbers
-for different legal bases, not an inconsistency. Both are reversible
-prioritization filters, not a legal eligibility determination: the Fraud
-Brain board still shows expired/stale leads with a badge rather than hiding
-them, and routes/review.py's queue auto-backfill is the only place recency
-silently skips a candidate (for picking NEW queue slots, not for search).
+Worked cases and administrative-status discrepancies remain screening leads.
+Neither filing nor Medicare revocation establishes Medicaid fraud. Money fields
+are payment totals, not established overpayment or recovery. The default
+five-year age preference is reversible with include_older=True; unknown periods
+remain visible. Timeliness and referral suitability require individual review.
 """
 from __future__ import annotations
 
@@ -80,7 +53,7 @@ def company_key(name: str | None) -> str:
     n = re.sub(r"[^A-Z0-9 ]", " ", (name or "").upper())
     return " ".join(_NAME_NOISE.sub(" ", n).split())
 _WORKED_REASON = {
-    "confirmed": "You confirmed this as fraud",
+    "confirmed": "Analyst marked confirmed; verify supporting evidence",
     "tip_filed": "You reported this to HHS-OIG",
     "referred": "You referred this to the state MFCU",
 }
@@ -98,7 +71,7 @@ def cutoff_month(today: _dt.date | None = None) -> int:
     return (today.year - LIMITATION_YEARS) * 100 + today.month
 
 
-def build_shortlist(today: _dt.date | None = None) -> dict:
+def build_shortlist(today: _dt.date | None = None, *, include_older: bool = False) -> dict:
     from core import perse_store
     from core.oig_tips_store import filed_npis, list_tips
     from core.review_store import get_queue_statuses, get_review_queue
@@ -128,7 +101,7 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
             dropped["closed"] += 1
             return
         lm = _ym_int(last_month)
-        if lm is None or lm < cutoff:
+        if not include_older and lm is not None and lm < cutoff:
             dropped["too_old"] += 1
             return
         p = _provider(npi)
@@ -145,6 +118,8 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
             "amount": round(float(amount or 0), 2),
             "amount_label": amount_label,
             "last_month": last_month,
+            "timeliness_review_required": lm is None or lm < cutoff,
+            "timeliness_status": "unknown_period" if lm is None else "older_evidence" if lm < cutoff else "within_priority_window",
             "doj_priority_area": doj_priority(specialty)["area"] or None,
             "queue_status": status,
             "risk_score": round(float(base.get("risk_score") or p.get("risk_score") or 0), 1),
@@ -182,8 +157,13 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
         barred = (r.get("paid_after_exclusion") or r.get("paid_after_revocation")
                   or r.get("paid_while_terminated")
                   or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0)
-        _add(2, r["npi"], r, _PERSE_REASON[r["kind"]], barred, "Paid while barred",
-             r.get("last_month"), statuses, {"kind": r["kind"]})
+        _add(2, r["npi"], r, _PERSE_REASON[r["kind"]], barred, "Payments during questioned period",
+             r.get("last_month"), statuses, {"kind": r["kind"],
+                 "evidence_class": "administrative_status_lead",
+                 "independent_corroboration_required": True,
+                 "program_scope_note": ("Medicare status does not establish Medicaid ineligibility; verify applicable Medicaid enrollment and effective dates."
+                                        if r["kind"] == "medicare_revoked_billing" else
+                                        "Verify identity, effective dates, billing period, and applicable program eligibility before asserting a violation.")})
 
     # Tier 3: statistical Brain leads in DOJ priority areas.
     brain = get_top_frauds(25, False, True).get("top", [])
@@ -242,4 +222,6 @@ def build_shortlist(today: _dt.date | None = None) -> dict:
         "dropped": dropped,
         "cutoff_month": f"{cutoff // 100:04d}-{cutoff % 100:02d}",
         "limitation_years": LIMITATION_YEARS,
+        "age_filter": {"include_older": include_older, "reversible": True,
+                       "note": "Age is a prioritization filter, not a legal eligibility determination. Unknown periods require review."},
     }

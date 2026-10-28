@@ -379,6 +379,9 @@ def set_queue_status(
         elif new_status == "confirmed":
             from services.feedback_tracker import record_confirmation
             record_confirmation(npi)
+        else:
+            from services.feedback_tracker import clear_label
+            clear_label(npi)
         # NOTE: "archived" deliberately records nothing — archiving closes a case
         # WITHOUT judgment (see the bulk stale-cleanup), so it is not a label.
         # NOTE: tip_filed / referred / doj_filed deliberately record nothing —

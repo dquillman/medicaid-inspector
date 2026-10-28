@@ -14,7 +14,7 @@ Schema (column names chosen so routes/network.py reads them directly):
     edge_type     VARCHAR   'billing_to_servicing' | 'servicing_from_billing'
                             | '__center__'  (the self aggregate)
     edge_weight   DOUBLE    SUM(TOTAL_PAID) for that edge / self total
-    claim_count   BIGINT    line-item count per edge; SUM(TOTAL_CLAIMS) for self
+    claim_count   BIGINT    aggregate row count per edge; SUM(TOTAL_CLAIMS) for self
 
 Both directed perspectives are emitted for every (biller, servicer) pair, so a
 pure-servicing provider is still found under its own center_npi. Each
@@ -53,15 +53,23 @@ def build_network_index(dataset: pathlib.Path = _DATASET,
     """
     import duckdb
 
-    if not (dataset.exists() and dataset.stat().st_size > 1_000_000):
+    if not (dataset.is_file() and dataset.stat().st_size > 0):
         raise SystemExit(
             f"ERROR: local dataset parquet not found at {dataset}. "
             "The network index must be built from the local dataset — "
             "download it first (gcs_sync.download_parquet) or point at it."
         )
 
+    # Permit direct CLI execution while sharing the same SQL contract as API.
+    if str(_BACKEND) not in sys.path:
+        sys.path.insert(0, str(_BACKEND))
+    from core.identity_contract import valid_npi_sql
+    valid_billing = valid_npi_sql("BILLING_PROVIDER_NPI_NUM")
+    valid_servicing = valid_npi_sql("SERVICING_PROVIDER_NPI_NUM")
     src = str(dataset).replace("\\", "/")
     out = str(out_path).replace("\\", "/")
+    if "'" in src or "'" in out:
+        raise ValueError("Dataset/output path cannot contain SQL quote characters")
 
     con = duckdb.connect()
     con.execute("PRAGMA threads=4")
@@ -75,8 +83,8 @@ def build_network_index(dataset: pathlib.Path = _DATASET,
                     SUM(TOTAL_PAID)            AS paid,
                     COUNT(*)                   AS claims
                 FROM read_parquet('{src}')
-                WHERE BILLING_PROVIDER_NPI_NUM   IS NOT NULL
-                  AND SERVICING_PROVIDER_NPI_NUM IS NOT NULL
+                WHERE {valid_billing}
+                  AND {valid_servicing}
                   AND BILLING_PROVIDER_NPI_NUM != SERVICING_PROVIDER_NPI_NUM
                 GROUP BY 1, 2
             ),
@@ -114,7 +122,7 @@ def build_network_index(dataset: pathlib.Path = _DATASET,
                     SUM(TOTAL_PAID)          AS edge_weight,
                     SUM(TOTAL_CLAIMS)        AS claim_count
                 FROM read_parquet('{src}')
-                WHERE BILLING_PROVIDER_NPI_NUM IS NOT NULL
+                WHERE {valid_billing}
                 GROUP BY 1
             )
             SELECT center_npi, neighbor_npi, edge_type, edge_weight, claim_count

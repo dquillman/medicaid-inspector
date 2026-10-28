@@ -639,52 +639,25 @@ def _build_patterns_section(provider: dict) -> dict:
 
 
 def _build_actions_section(provider: dict) -> dict:
-    """Section (f): Recommended actions based on risk tier, flags, AND whether
-    enrichment/corroboration actually completed (audit 2026-10-24, item 7).
+    """Section (f): Investigation steps, never automatic referral readiness.
 
-    A high anomaly score alone used to be enough for "PRIORITY REFERRAL" +
-    "credible allegation of fraud" + "initiate payment suspension" — even
-    when NPPES identity enrichment failed and peer-cohort stats fell back to
-    (0, 0) (see services/scan_engine.py's peer-stats fallback). A statistical
-    outlier is not referral-readiness; referral readiness also needs a
-    verified identity and at least some corroboration beyond the score.
+    Multiple correlated statistical flags and identity enrichment are not
+    independent corroboration. Legal/adverse-action decisions require review.
     """
     score = provider.get("risk_score", 0)
     signals = provider.get("signal_results") or provider.get("flags") or []
     flags = [s for s in signals if s.get("flagged")]
     flag_names = {s["signal"] for s in flags}
 
-    # Cheap, already-used-elsewhere proxy for "NPPES enrichment actually
-    # landed" (see services/fraud_brain.py's _needs_nppes check).
-    enrichment_complete = bool(provider.get("provider_name") and provider.get("specialty"))
-    corroborated = len(flags) >= 2  # more than the one statistical outlier alone
-
     actions = []
-
-    if score >= 50 and enrichment_complete and corroborated:
+    if score >= 50:
         actions.append(
-            "PRIORITY REFERRAL: Forward this case to the State Medicaid "
-            "Fraud Control Unit (MFCU) for full investigation pursuant to "
-            "42 CFR § 455.21."
-        )
-        actions.append(
-            "PAYMENT SUSPENSION: Consider initiating a payment suspension "
-            "under 42 CFR § 455.23 pending investigation — subject to the "
-            "agency's own credible-allegation determination; this system's "
-            "risk score alone does not establish one."
-        )
-    elif score >= 50:
-        missing = []
-        if not enrichment_complete:
-            missing.append("provider identity enrichment did not complete")
-        if not corroborated:
-            missing.append("only one signal fired — no corroborating signal")
-        actions.append(
-            "HIGH SCORE, NOT YET REFERRAL-READY: This provider's statistical "
-            "score alone (" + "; ".join(missing) + ") is not sufficient grounds "
-            "for a referral recommendation. Complete identity verification and "
-            "seek at least one corroborating finding before considering MFCU "
-            "referral or payment suspension."
+            "HIGH SCORE, NOT YET REFERRAL-READY: Prioritize investigator review. "
+            "Identity enrichment and multiple statistical flags do not establish "
+            "independent corroboration. Verify identity, program scope, effective "
+            "dates, underlying evidence, and alternative explanations before an "
+            "investigator considers referral. The score establishes neither "
+            "fraud nor grounds for adverse action."
         )
     elif score >= 25:
         actions.append(
@@ -706,8 +679,8 @@ def _build_actions_section(provider: dict) -> dict:
     if "oig_excluded" in flag_names:
         actions.append(
             "IMMEDIATE ACTION — OIG EXCLUSION: Verify exclusion status "
-            "against the current LEIE database. If confirmed, immediately "
-            "terminate provider participation and open a suspected-overpayment "
+            "against the current LEIE database, including identity and effective dates. "
+            "If applicable to the billing period, request agency eligibility and suspected-overpayment "
             "review for claims paid during the exclusion period, pending the "
             "agency's own determination of the confirmed recoverable amount "
             "(42 U.S.C. § 1320a-7)."
@@ -716,8 +689,8 @@ def _build_actions_section(provider: dict) -> dict:
     if "dead_npi_billing" in flag_names:
         actions.append(
             "NPI VERIFICATION: Confirm NPI status with NPPES. If "
-            "deactivated, refer to OIG for potential identity theft "
-            "investigation and open a suspected-overpayment review for "
+            "deactivated, investigate reactivation, enrollment continuity, and service dates "
+            "before considering referral or a suspected-overpayment review for "
             "post-deactivation payments, pending confirmation."
         )
 

@@ -150,7 +150,7 @@ export default function SpecialtyBenchmark({ npi }: { npi: string }) {
       <div className="grid grid-cols-3 gap-3 mb-5">
         <PercentileGauge value={percentiles.total_paid} label="Total Paid Rank" />
         <PercentileGauge value={percentiles.total_claims} label="Total Claims Rank" />
-        <PercentileGauge value={percentiles.total_beneficiaries} label="Beneficiaries Rank" />
+        <PercentileGauge value={percentiles.total_beneficiaries} label="Summed Beneficiary Count Rank" />
       </div>
 
       {/* Comparison Table */}
@@ -192,7 +192,7 @@ export default function SpecialtyBenchmark({ npi }: { npi: string }) {
                 money={false}
               />
               <ComparisonRow
-                label="Beneficiaries"
+                label="Summed beneficiary count"
                 providerVal={this_provider!.total_beneficiaries}
                 avg={stats.median_beneficiaries}
                 median={stats.median_beneficiaries}

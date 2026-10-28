@@ -5,6 +5,7 @@ confirmed fraud/cleared labels from the review queue.
 Uses scikit-learn's GradientBoostingClassifier to learn from human-reviewed
 labels and predict fraud probability for unreviewed providers.
 """
+import hashlib
 import json
 import logging
 import pathlib
@@ -58,7 +59,14 @@ def _run_auto_retrain() -> None:
 def schedule_retrain() -> None:
     """Debounced background retrain — call after any label-relevant
     queue_status change. Safe to call repeatedly; the timer resets."""
-    global _retrain_timer
+    global _retrain_timer, _model, _scaler, _predictions, _training_metrics, _load_attempted
+    # A relabel/reopen invalidates old predictions immediately, even if there
+    # are no longer enough labels to train a replacement.
+    with _lock:
+        _model = _scaler = None
+        _predictions = {}
+        _training_metrics = {}
+        _load_attempted = True
     with _retrain_lock:
         if _retrain_timer is not None:
             _retrain_timer.cancel()
@@ -94,6 +102,10 @@ def _ensure_loaded() -> None:
     try:
         with open(_PERSIST_PATH, encoding="utf-8") as f:
             saved = json.load(f)
+        if (saved.get("training_metrics", {}).get("label_policy_version") != 2
+                or saved.get("training_metrics", {}).get("label_signature") != _label_signature()):
+            log.warning("Ignoring legacy model trained under unverified label policy")
+            return
         with _lock:
             if not _training_metrics:  # don't clobber a fresher in-memory train
                 _training_metrics = saved.get("training_metrics") or {}
@@ -206,16 +218,22 @@ def _extract_features(provider: dict) -> list[float]:
     return row
 
 
+def _label_signature() -> str:
+    from core.referral_workflow import get_verified_labels
+    return hashlib.sha256(json.dumps(get_verified_labels(), sort_keys=True).encode()).hexdigest()
+
+
 def train_model() -> dict:
     """
     Train a supervised classifier using labeled data from the review queue.
-    Labels: confirmed_fraud / referred = positive (fraud), cleared = negative.
+    Labels: documented independently substantiated/unsubstantiated referral outcomes.
     Returns training summary with metrics.
     """
     try:
         from sklearn.ensemble import GradientBoostingClassifier
         from sklearn.preprocessing import StandardScaler
         from sklearn.model_selection import cross_val_predict, StratifiedKFold
+        from sklearn.pipeline import make_pipeline
         from sklearn.metrics import (
             accuracy_score, precision_score, recall_score,
             f1_score, roc_auc_score, confusion_matrix,
@@ -229,67 +247,9 @@ def train_model() -> dict:
     from core.review_store import get_review_queue
     from core.store import get_prescanned
 
-    # Gather labeled data. Two tiers of evidence, deliberately NOT treated the
-    # same (audit 2026-10-24, item 3 — filing/reporting status is not a fraud
-    # finding):
-    #   TIER 1 (strongest): an outside agency independently substantiated or
-    #     rejected an MFCU referral (core.referral_workflow outcome). This
-    #     overrides anything else below for that NPI.
-    #   TIER 2 (analyst assessment, weaker): queue_status "confirmed" (a human
-    #     said this IS fraud, with no independent check yet) / "dismissed" (a
-    #     human said it is NOT). "referred" / "tip_filed" / "doj_filed" are
-    #     WORKFLOW status, not an assessment — filing a report proves nothing
-    #     by itself, so they are deliberately absent from ledger_positive and
-    #     stay unlabeled unless/until Tier 1 resolves them.
-    # The retired workflow `status` field is still read as a FALLBACK so labels
-    # recorded before the pipeline migration keep teaching the model; when both
-    # fields are set, queue_status wins.
     all_review = get_review_queue()
-    ledger_positive = {"confirmed"}
-    ledger_negative = {"dismissed"}
-    legacy_positive = {"confirmed_fraud"}
-    legacy_negative = {"dismissed"}
-
-    labeled_npis: dict[str, int] = {}
-    for item in all_review:
-        npi = item.get("npi", "")
-        if not npi:
-            continue
-        qstatus = item.get("queue_status", "") or ""
-        if qstatus == "archived":
-            # Archived = closed WITHOUT judgment — never a label, and the
-            # legacy fallback below must not resurrect one either.
-            continue
-        if qstatus in ledger_positive:
-            labeled_npis[npi] = 1
-        elif qstatus in ledger_negative:
-            labeled_npis[npi] = 0
-        else:
-            # No ledger label (still open/under_review) — fall back to a legacy
-            # workflow-status label if one was recorded pre-migration.
-            status = item.get("status", "")
-            if status in legacy_positive:
-                labeled_npis[npi] = 1
-            elif status in legacy_negative:
-                labeled_npis[npi] = 0
-
-    # TIER 1 override: an independently substantiated/rejected referral
-    # outcome is stronger evidence than the analyst's own assessment.
-    try:
-        from core.referral_workflow import (
-            get_referrals, SUBSTANTIATED_OUTCOMES, REJECTED_OUTCOMES,
-        )
-        for ref in get_referrals():
-            outcome = ref.get("outcome")
-            npi = ref.get("npi")
-            if not npi or not outcome:
-                continue
-            if outcome in SUBSTANTIATED_OUTCOMES:
-                labeled_npis[npi] = 1
-            elif outcome in REJECTED_OUTCOMES:
-                labeled_npis[npi] = 0
-    except Exception:
-        log.warning("Could not apply referral-outcome labels", exc_info=True)
+    from core.referral_workflow import get_verified_labels
+    labeled_npis = get_verified_labels()
 
     total_labeled = len(labeled_npis)
     positive_count = sum(1 for v in labeled_npis.values() if v == 1)
@@ -299,7 +259,7 @@ def train_model() -> dict:
         return {
             "trained": False,
             "error": f"Insufficient labeled samples: {total_labeled} found, minimum 10 required. "
-                     f"Mark more cases Confirmed/Reported (fraud) or Dismissed (not fraud) in the Review Queue.",
+                     f"Record independently substantiated or unsubstantiated referral outcomes with evidence references.",
             "positive_count": positive_count,
             "negative_count": negative_count,
             "total_labeled": total_labeled,
@@ -348,6 +308,9 @@ def train_model() -> dict:
     X = np.array(X_list)
     y = np.array(y_list)
 
+    if min(int(sum(y == 0)), int(sum(y == 1))) < 2:
+        return {"trained": False, "error": "Need at least two providers with usable features in each verified outcome class"}
+
     # Scale features
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
@@ -367,7 +330,7 @@ def train_model() -> dict:
     if n_splits >= 2:
         cv = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=42)
         try:
-            cv_proba = cross_val_predict(model, X_scaled, y, cv=cv, method="predict_proba")
+            cv_proba = cross_val_predict(make_pipeline(StandardScaler(), model), X, y, cv=cv, method="predict_proba")
             cv_preds = (cv_proba[:, 1] >= 0.5).astype(int)
 
             accuracy = round(float(accuracy_score(y, cv_preds)), 4)
@@ -387,6 +350,18 @@ def train_model() -> dict:
         accuracy = precision = recall = f1 = auc = None
         cm = None
 
+    precision_interval = None
+    if cm and len(cm) == 2 and len(cm[0]) == 2:
+        # Wilson interval for the held-out predicted-positive proportion.
+        # Selection bias and correlated providers are not captured by this interval.
+        positives = cm[0][1] + cm[1][1]
+        if positives:
+            phat, z = cm[1][1] / positives, 1.96
+            denominator = 1 + z * z / positives
+            center = (phat + z * z / (2 * positives)) / denominator
+            radius = z * ((phat * (1 - phat) / positives + z * z / (4 * positives * positives)) ** 0.5) / denominator
+            precision_interval = [round(max(0, center - radius), 4), round(min(1, center + radius), 4)]
+
     # Fit final model on all labeled data
     model.fit(X_scaled, y)
 
@@ -403,12 +378,21 @@ def train_model() -> dict:
     new_feature_names = list(FEATURE_COLS)
     new_training_metrics = {
         "trained": True,
+        "label_policy_version": 2,
+        "label_signature": _label_signature(),
+        "label_definition": "Documented independently substantiated/unsubstantiated outcomes",
+        "sample_definition": "Selected referral outcomes with available provider features; not population prevalence or top-50 precision",
+        "probability_interpretation": "Model class score; not a calibrated probability of fraud",
+        "precision_at_50": None,
+        "independent_validation": False,
         "trained_at": time.time(),
         "total_labeled": len(X_list),
         "positive_count": int(sum(y == 1)),
         "negative_count": int(sum(y == 0)),
         "accuracy": accuracy,
         "precision": precision,
+        "precision_95pct_interval": precision_interval,
+        "validation_limitations": "Internal cross-validation on selected referrals; no independent test set, population calibration, or adjustment for provider-network correlation",
         "recall": recall,
         "f1": f1,
         "auc": auc,
@@ -506,41 +490,10 @@ def _label_readiness() -> dict:
     Used by GET /api/ml/supervised/status so the UI can show progress toward
     the minimum training prerequisites before the user clicks Train.
     """
-    from core.review_store import get_review_queue
-    # "referred" dropped (audit 2026-10-24, item 3) — filing a report is a
-    # workflow action, not an assessment; see train_model()'s longer note.
-    positive_statuses = {"confirmed_fraud"}
-    negative_statuses = {"dismissed"}
-    positive = 0
-    negative = 0
-    labeled_npis_seen: set[str] = set()
-    for item in get_review_queue():
-        status = item.get("status", "")
-        npi = item.get("npi")
-        if not npi:
-            continue
-        if status in positive_statuses:
-            positive += 1
-            labeled_npis_seen.add(npi)
-        elif status in negative_statuses:
-            negative += 1
-            labeled_npis_seen.add(npi)
-
-    try:
-        from core.referral_workflow import get_referrals, SUBSTANTIATED_OUTCOMES, REJECTED_OUTCOMES
-        for ref in get_referrals():
-            outcome = ref.get("outcome")
-            npi = ref.get("npi")
-            if not npi or not outcome or npi in labeled_npis_seen:
-                continue
-            if outcome in SUBSTANTIATED_OUTCOMES:
-                positive += 1
-                labeled_npis_seen.add(npi)
-            elif outcome in REJECTED_OUTCOMES:
-                negative += 1
-                labeled_npis_seen.add(npi)
-    except Exception:
-        pass
+    from core.referral_workflow import get_verified_labels
+    labels = get_verified_labels()
+    positive = sum(value == 1 for value in labels.values())
+    negative = sum(value == 0 for value in labels.values())
 
     total = positive + negative
     if total < 10:
@@ -551,7 +504,7 @@ def _label_readiness() -> dict:
             "can_train": False,
             "train_blocker": (
                 f"Need at least 10 labeled providers, have {total}. "
-                "Mark providers as 'confirmed_fraud'/'referred' or 'dismissed' in the Review Queue."
+                "Record documented independent referral outcomes; workflow and analyst statuses are not training labels."
             ),
         }
     if positive < 2 or negative < 2:
@@ -562,7 +515,7 @@ def _label_readiness() -> dict:
             "can_train": False,
             "train_blocker": (
                 f"Need at least 2 samples per class. "
-                f"Currently {positive} fraud / {negative} cleared."
+                f"Currently {positive} substantiated / {negative} unsubstantiated outcomes."
             ),
         }
     return {

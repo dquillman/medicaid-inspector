@@ -211,7 +211,9 @@ def build_doj_filing_guide(*, npi: str, name: str, taxonomies: list[str], state:
         # the number to give.
         ("Amount (the chat's 'Estimated dollar amount')",
          f"${barred_amount:,.0f} {barred_label} (total Medicaid paid over {period}: "
-         f"${total_paid:,.0f}). If the chat pre-fills the total, click the pencil and change it."
+         f"${total_paid:,.0f}). These are payments during a questioned period, NOT an "
+         "established loss. Verify program applicability and dates; do not present the "
+         "payment total as confirmed improper payments."
          if barred_amount else
          f"${total_paid:,.0f} paid by Medicaid over {period} - total exposure, NOT a proven loss"),
         ("How do you know?", "My own independent analysis of public HHS T-MSIS Medicaid "

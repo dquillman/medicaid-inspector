@@ -9,9 +9,10 @@ import type { DojShortlistLead } from '../lib/types'
 import { DOJ_TIERS as TIERS } from '../lib/dojTiers'
 
 export default function DojShortlist() {
+  const [includeOlder, setIncludeOlder] = useState(false)
   const { data, isLoading, error } = useQuery({
-    queryKey: ['doj-shortlist'],
-    queryFn: () => api.dojShortlist(),
+    queryKey: ['doj-shortlist', includeOlder],
+    queryFn: () => api.dojShortlist(includeOlder),
     // Coming back from filing must show the list at once (kept 30 min) and
     // refresh quietly behind it, so the lead just filed drops off.
     staleTime: 30_000,
@@ -35,15 +36,15 @@ export default function DojShortlist() {
       <div>
         <h1 className="text-xl font-bold text-gray-200">DOJ Shortlist</h1>
         <p className="text-sm text-gray-500 mt-1 max-w-3xl">
-          Leads ranked for the DOJ Criminal Tip Rewards program, most provable first. DOJ pays
+          Leads ranked for investigator review. Administrative discrepancies and statistical anomalies require verification. DOJ pays
           ($10,000&ndash;$30,000 per distinct tip, at its discretion) only when a tip leads to criminal
-          charges, so proven facts beat statistical suspicion. Hospice, home health, day care and
+          charges, and eligibility is determined by DOJ. Hospice, home health, day care and
           special services rank first inside each group, because DOJ names them as priorities.
         </p>
         {data && (
           <p className="text-xs text-gray-500 mt-2 max-w-3xl">
             Left off: {data.dropped.too_old.toLocaleString()} last billed before {data.cutoff_month}{' '}
-            (federal charges usually must be filed within {data.limitation_years} years) &middot;{' '}
+            (age prioritization only; this does not determine legal eligibility) &middot;{' '}
             {data.dropped.already_doj.toLocaleString()} already filed with DOJ (any NPI of the company) &middot;{' '}
             {data.dropped.closed.toLocaleString()} dismissed or archived
             {data.dropped.same_company ? <> &middot; {data.dropped.same_company.toLocaleString()} extra NPIs merged into their company&rsquo;s row</> : null}
@@ -52,6 +53,10 @@ export default function DojShortlist() {
         )}
       </div>
 
+      <label className="flex items-center gap-2 text-sm text-gray-300">
+        <input type="checkbox" checked={includeOlder} onChange={e => setIncludeOlder(e.target.checked)} />
+        Include older evidence for timeliness review
+      </label>
       {data && (
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-4xl">
           {TIERS.map(t => (

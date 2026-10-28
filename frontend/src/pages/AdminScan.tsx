@@ -780,21 +780,39 @@ function DataQualityCard() {
   }
 
   const q = quality
-  const hasResults = q && q.status !== 'never_run'
+  const hasResults = q?.status === 'complete'
 
   return (
     <div className="card space-y-3">
       <h2 className="text-base font-semibold text-ink-secondary">Data Quality Validation</h2>
+      {q?.persistence && (q.persistence.pending_count > 0 || q.persistence.error_count > 0) && (
+        <p role="status" className="text-xs text-amber-400">
+          Cloud persistence: {q.persistence.pending_count} pending, {q.persistence.error_count} failed or conflicting objects.
+          {' '}Local changes are not confirmed durable until synchronization succeeds. Keep deployment at one instance.
+        </p>
+      )}
+      {q?.derived_artifact && (!q.derived_artifact.validation.usable || q.derived_artifact.validation.is_stale) && (
+        <p role="status" className="text-xs text-amber-400">
+          Derived evidence {q.derived_artifact.validation.usable ? 'is older than 30 days' : 'is unavailable because its provenance or detector version is incompatible'}.
+          {' '}Rebuild and verify the artifact before relying on these analyses.
+        </p>
+      )}
+      {q?.derived_artifact?.validation.source_freshness === 'unknown' && (
+        <p className="text-xs text-amber-400">Upstream retrieval time is unknown. A recent build does not establish fresh claims data.</p>
+      )}
       <p className="text-xs text-ink-tertiary">
-        Validates NPI format (Luhn check), claim amounts, and date ranges against the active dataset.
-        Runs automatically on first scan batch.
+        Checks a repeatable sample for source-format and coverage limitations.
+        These checks do not measure fraud accuracy. Missing servicing identities and high-value aggregates are reported separately.
       </p>
+      {q?.status === 'error' && (
+        <p role="alert" className="text-xs text-red-400">Source checks could not finish. Results are unavailable; retry after checking the dataset.</p>
+      )}
 
       {hasResults && (
         <div className="space-y-3">
           {/* Quality score bar */}
           <div className="flex items-center gap-3">
-            <span className="text-xs text-ink-secondary w-20 shrink-0">Quality Score</span>
+            <span className="text-xs text-ink-secondary w-20 shrink-0">Sample Pass</span>
             <div className="flex-1 h-3 bg-surface-2 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${
@@ -820,11 +838,11 @@ function DataQualityCard() {
             </div>
             <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-green-400">{q.valid_records?.toLocaleString()}</div>
-              <div className="text-xs text-ink-tertiary uppercase">Valid</div>
+              <div className="text-xs text-ink-tertiary uppercase">Pass Checks</div>
             </div>
             <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-red-400">{q.invalid_records}</div>
-              <div className="text-xs text-ink-tertiary uppercase">Invalid</div>
+              <div className="text-xs text-ink-tertiary uppercase">Exceptions</div>
             </div>
             <div className="bg-surface-2/60 rounded-lg px-3 py-2 text-center">
               <div className="text-lg font-bold text-yellow-400">{q.sample_size?.toLocaleString()}</div>
@@ -835,7 +853,7 @@ function DataQualityCard() {
           {/* Failure breakdown */}
           {q.failures && Object.keys(q.failures).length > 0 && (
             <div className="space-y-1">
-              <p className="text-xs text-ink-secondary font-medium">Validation Failures</p>
+              <p className="text-xs text-ink-secondary font-medium">Source-contract exceptions — review before interpretation</p>
               <div className="grid grid-cols-2 gap-1 text-xs">
                 {Object.entries(q.failures).map(([key, count]) => (
                   <div key={key} className="flex justify-between bg-surface-2/30 rounded px-2 py-1">
@@ -844,6 +862,14 @@ function DataQualityCard() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {(q.servicing_identity_states || q.review_flags) && (
+            <div className="text-xs text-amber-400 space-y-1">
+              <p>Servicing identity unavailable: {(q.servicing_identity_states?.missing ?? 0) + (q.servicing_identity_states?.placeholder ?? 0)} sampled rows. These rows cannot support servicing-provider joins.</p>
+              <p>Alternate code-system shapes: {q.code_system_mismatch_records ?? 0}. HCPCS specialty inference is unavailable for incompatible codes.</p>
+              <p>High-value aggregates for review: {q.review_flags?.high_value_aggregate_exceeds_1m ?? 0}. A high value alone does not fail validation.</p>
             </div>
           )}
 

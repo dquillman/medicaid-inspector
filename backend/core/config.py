@@ -3,7 +3,7 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     PARQUET_URL: str = (
-        "https://storage.googleapis.com/medicaid-inspector-data/"
+        "https://storage.googleapis.com/medicaid-inspector-public-aggregates/"
         "medicaid-provider-spending.parquet"
     )
     # Optional: override the local Parquet file path.

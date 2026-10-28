@@ -24,3 +24,26 @@ backend/*.bat
 backend/test_*.py
 *.md
 .firebase/
+
+# Private investigator packets and sealed coordinator mappings
+backend/private_evaluations/
+backend/private_validations/
+
+# Local stage snapshots, operator case state, credentials and datasets must
+# never enter a container through COPY backend/.
+backend/.tmp/
+backend/backups/
+backend/evidence/
+backend/tests/
+backend/**/*.json
+!backend/oig_exclusions.json
+!backend/npi_deactivations.json
+backend/**/*.parquet
+backend/**/*.csv
+backend/**/*.log
+**/*sa-key*.json
+**/service-account*.json
+**/.env*
+.codex/
+.agents/
+**/*.log

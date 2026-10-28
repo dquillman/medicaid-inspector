@@ -146,11 +146,11 @@ function severityCounts(items: { severity: string }[]): SeverityCounts {
 // ── Tab definitions ─────────────────────────────────────────────────────────
 
 const TABS = [
-  { id: 'unbundling', label: 'Unbundling' },
+  { id: 'unbundling', label: 'Component Code Mix' },
   { id: 'duplicates', label: 'Duplicates' },
-  { id: 'pos', label: 'Place of Service' },
-  { id: 'modifiers', label: 'Modifiers' },
-  { id: 'impossible', label: 'Impossible Days' },
+  { id: 'pos', label: 'Surgical / Office Mix' },
+  { id: 'modifiers', label: 'E&M / Procedure Mix' },
+  { id: 'impossible', label: 'Volume Estimates' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -192,7 +192,7 @@ function KpiCard({
 // ── Tab content components ──────────────────────────────────────────────────
 
 function UnbundlingTab({ patterns }: { patterns: UnbundlingPattern[] }) {
-  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No unbundling patterns detected</div>
+  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No component-code hypotheses returned; unbundling cannot be established here</div>
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -203,9 +203,9 @@ function UnbundlingTab({ patterns }: { patterns: UnbundlingPattern[] }) {
             <th className="py-2 px-3">Components</th>
             <th className="py-2 px-3 text-right">Comp. Claims</th>
             <th className="py-2 px-3 text-right">Bundled Claims</th>
-            <th className="py-2 px-3 text-right">Unbundling Rate</th>
-            <th className="py-2 px-3 text-right">$ at Risk</th>
-            <th className="py-2 px-3">Severity</th>
+            <th className="py-2 px-3 text-right">Component Share</th>
+            <th className="py-2 px-3 text-right">Payments in Flagged Months</th>
+            <th className="py-2 px-3">Review Priority</th>
           </tr>
         </thead>
         <tbody>
@@ -234,7 +234,7 @@ function UnbundlingTab({ patterns }: { patterns: UnbundlingPattern[] }) {
 }
 
 function DuplicatesTab({ patterns }: { patterns: DuplicatePattern[] }) {
-  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No duplicate patterns detected</div>
+  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">Duplicate claims cannot be detected from these aggregate inputs</div>
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -248,7 +248,7 @@ function DuplicatesTab({ patterns }: { patterns: DuplicatePattern[] }) {
             <th className="py-2 px-3 text-right">$ Duplicated</th>
             <th className="py-2 px-3 text-right">Total Paid</th>
             <th className="py-2 px-3">Affected Codes</th>
-            <th className="py-2 px-3">Severity</th>
+            <th className="py-2 px-3">Review Priority</th>
           </tr>
         </thead>
         <tbody>
@@ -274,7 +274,7 @@ function DuplicatesTab({ patterns }: { patterns: DuplicatePattern[] }) {
 }
 
 function PosTab({ patterns }: { patterns: PosViolation[] }) {
-  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No place-of-service violations detected</div>
+  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No surgical/office code-mix hypotheses returned; place of service is unavailable</div>
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -288,7 +288,7 @@ function PosTab({ patterns }: { patterns: PosViolation[] }) {
             <th className="py-2 px-3 text-right">$ Surgical</th>
             <th className="py-2 px-3 text-right">$ Total</th>
             <th className="py-2 px-3">Top Codes</th>
-            <th className="py-2 px-3">Severity</th>
+            <th className="py-2 px-3">Review Priority</th>
           </tr>
         </thead>
         <tbody>
@@ -314,7 +314,7 @@ function PosTab({ patterns }: { patterns: PosViolation[] }) {
 }
 
 function ModifiersTab({ patterns }: { patterns: ModifierAbuse[] }) {
-  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No modifier abuse patterns detected</div>
+  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No E&M/procedure hypotheses returned; actual modifiers are unavailable</div>
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
@@ -328,7 +328,7 @@ function ModifiersTab({ patterns }: { patterns: ModifierAbuse[] }) {
             <th className="py-2 px-3 text-right">Combo Share</th>
             <th className="py-2 px-3 text-right">$ Total</th>
             <th className="py-2 px-3">Patterns</th>
-            <th className="py-2 px-3">Severity</th>
+            <th className="py-2 px-3">Review Priority</th>
           </tr>
         </thead>
         <tbody>
@@ -358,21 +358,21 @@ function ModifiersTab({ patterns }: { patterns: ModifierAbuse[] }) {
 }
 
 function ImpossibleTab({ patterns }: { patterns: ImpossibleDay[] }) {
-  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No impossible day patterns detected</div>
+  if (!patterns.length) return <div className="text-gray-500 py-8 text-center">No high-volume day patterns detected</div>
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-gray-400 border-b border-gray-700">
             <th className="py-2 px-3">NPI</th>
-            <th className="py-2 px-3 text-right">Impossible Months</th>
-            <th className="py-2 px-3 text-right">Max Benes/Day</th>
-            <th className="py-2 px-3 text-right">Max Claims/Day</th>
-            <th className="py-2 px-3 text-right">Max Hours/Day</th>
-            <th className="py-2 px-3 text-right">Impossible Rate</th>
-            <th className="py-2 px-3 text-right">$ at Risk</th>
+            <th className="py-2 px-3 text-right">High-Volume Months</th>
+            <th className="py-2 px-3 text-right">Est. Bene Count/Day</th>
+            <th className="py-2 px-3 text-right">Est. Claims/Day</th>
+            <th className="py-2 px-3 text-right">Est. Hours/Day</th>
+            <th className="py-2 px-3 text-right">High-Volume Share</th>
+            <th className="py-2 px-3 text-right">Payments in Flagged Months</th>
             <th className="py-2 px-3">Worst Months</th>
-            <th className="py-2 px-3">Severity</th>
+            <th className="py-2 px-3">Review Priority</th>
           </tr>
         </thead>
         <tbody>
@@ -437,11 +437,17 @@ export default function ClaimPatterns() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Claim-Level Fraud Patterns</h1>
+        <h1 className="text-2xl font-bold text-white">Aggregate Billing Patterns</h1>
         <p className="text-sm text-gray-400 mt-1">
-          Detects unbundling, duplicate claims, place-of-service violations, modifier abuse, and impossible billing volumes
+          Provider/code/month screening hypotheses. This data cannot establish unbundling, duplicate claims, modifier abuse, or place-of-service violations.
         </p>
       </div>
+
+      <p className="text-xs text-amber-300 border-l-2 border-amber-700 pl-3">
+        Hypotheses reuse aggregate billing inputs and are not independent corroboration.
+        Priority reflects heuristic intensity, not proof or probability of fraud. Daily volumes
+        divide monthly totals by assumed business days; actual service days are unavailable.
+      </p>
 
       {isLoading && (
         <div className="bg-gray-800/80 rounded-xl border border-gray-700 p-5">
@@ -471,15 +477,15 @@ export default function ClaimPatterns() {
       {summary && (
         <>
           <div className="flex items-center gap-3 mb-2">
-            <span className="text-sm text-gray-400">Total patterns detected:</span>
+            <span className="text-sm text-gray-400">Aggregate hypotheses returned:</span>
             <span className="text-lg font-bold text-white">{summary.total.toLocaleString()}</span>
           </div>
           <div className="grid grid-cols-5 gap-4">
-            <KpiCard title="Unbundling" active={tab === 'unbundling'} onClick={() => setTab('unbundling')} {...summary.unbundling} />
+            <KpiCard title="Component Mix" active={tab === 'unbundling'} onClick={() => setTab('unbundling')} {...summary.unbundling} />
             <KpiCard title="Duplicates" active={tab === 'duplicates'} onClick={() => setTab('duplicates')} {...summary.duplicates} />
-            <KpiCard title="Place of Service" active={tab === 'pos'} onClick={() => setTab('pos')} {...summary.pos} />
-            <KpiCard title="Modifier Abuse" active={tab === 'modifiers'} onClick={() => setTab('modifiers')} {...summary.modifiers} />
-            <KpiCard title="Impossible Days" active={tab === 'impossible'} onClick={() => setTab('impossible')} {...summary.impossible} />
+            <KpiCard title="Surgical / Office Mix" active={tab === 'pos'} onClick={() => setTab('pos')} {...summary.pos} />
+            <KpiCard title="E&M / Procedure Mix" active={tab === 'modifiers'} onClick={() => setTab('modifiers')} {...summary.modifiers} />
+            <KpiCard title="Volume Estimate" active={tab === 'impossible'} onClick={() => setTab('impossible')} {...summary.impossible} />
           </div>
         </>
       )}

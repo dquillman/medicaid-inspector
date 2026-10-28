@@ -121,3 +121,9 @@ backend/enrollment_leads.json
 backend/npi_states.json
 # TypeScript incremental build byproduct
 *.tsbuildinfo
+
+# Private cloud verification and IAM evidence; never source-controlled.
+backend/private_validations/
+
+# Private frozen investigator packets and coordinator manifests; never publish
+backend/private_evaluations/

@@ -17,7 +17,7 @@ export default function Methods() {
         <h1 className="text-xl font-display font-bold text-ink-primary tracking-tight">Methodology</h1>
         <p className="text-sm text-ink-tertiary mt-1 leading-relaxed">
           Exactly how Medicaid Inspector scores providers — every signal, its regulatory basis, and
-          its measured precision. Detection your AG's office can read; nothing here is provider-identifying.
+          its evidence limits and available verified-outcome feedback. Nothing here identifies a provider.
         </p>
       </div>
 
@@ -75,7 +75,7 @@ export default function Methods() {
           {/* Signals */}
           <div>
             <h2 className="text-base font-display font-semibold text-ink-primary mb-3">
-              The {data.signal_count} Fraud Signals
+              The {data.signal_count} Screening Signals
             </h2>
             <div className="space-y-3">
               {data.signals.map((s) => (
@@ -84,11 +84,11 @@ export default function Methods() {
                     <h3 className="text-sm font-semibold text-ink-primary">{s.label}</h3>
                     {s.precision != null ? (
                       <span className="shrink-0 text-xs font-mono tabular-nums text-ink-secondary" title={`${s.true_positives} TP / ${s.false_positives} FP over ${s.sample_size} dispositions`}>
-                        precision <span className="text-threat-clear font-semibold">{(s.precision * 100).toFixed(0)}%</span>
+                        verified-label precision <span className="text-threat-clear font-semibold">{(s.precision * 100).toFixed(0)}%</span>
                         <span className="text-ink-tertiary"> (n={s.sample_size})</span>
                       </span>
                     ) : 'precision' in s ? (
-                      <span className="shrink-0 text-[10px] font-mono uppercase tracking-wider text-ink-tertiary">precision: not yet measured</span>
+                      <span className="shrink-0 text-[10px] font-mono uppercase tracking-wider text-ink-tertiary">independent precision: not established</span>
                     ) : null}
                   </div>
                   <p className="text-xs text-ink-tertiary mt-1.5 leading-relaxed">{s.explanation}</p>
@@ -97,7 +97,7 @@ export default function Methods() {
                   )}
                   {s.weight_adjustment != null && s.weight_adjustment < 1 && (
                     <p className="text-[10px] text-threat-medium mt-1.5">
-                      Auto-dampened to {(s.weight_adjustment * 100).toFixed(0)}% weight (low measured precision)
+                      Auto-dampened to {(s.weight_adjustment * 100).toFixed(0)}% weight (verified-label feedback)
                     </p>
                   )}
                 </div>
@@ -140,8 +140,8 @@ export default function Methods() {
 
           {data.feedback_totals && (
             <p className="text-[11px] text-ink-tertiary">
-              Precision figures derive from {data.feedback_totals.dispositions.toLocaleString()} analyst dispositions
-              ({data.feedback_totals.true_positive_signal_hits.toLocaleString()} confirmed / {data.feedback_totals.false_positive_signal_hits.toLocaleString()} cleared signal hits).
+              Label-based precision figures derive from {data.feedback_totals.dispositions.toLocaleString()} documented verified outcome labels
+              ({data.feedback_totals.true_positive_signal_hits.toLocaleString()} positive / {data.feedback_totals.false_positive_signal_hits.toLocaleString()} negative signal hits). These are selected cases, not an independent population evaluation.
               Scores are a relative ranking, not a calibrated fraud probability.
             </p>
           )}

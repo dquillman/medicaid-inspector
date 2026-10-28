@@ -97,3 +97,33 @@ def test_excluded_npi_dropped_from_rebuild_even_if_present_in_legacy_counted(mon
     rebuilt = ft.rebuild_counts_from_events()
     assert rebuilt["rebuilt_tp_counts"] == {}
     assert "1234567890" not in rebuilt["events_covered_npis"]
+
+
+def test_reopen_removes_original_snapshot_after_rescore(monkeypatch):
+    _isolate(monkeypatch)
+    signals = {"fixture-provider": ["old_signal"]}
+    monkeypatch.setattr(ft, "_active_signals", _fake_signals(signals))
+    ft.record_confirmation("fixture-provider")
+    signals["fixture-provider"] = []
+    ft.clear_label("fixture-provider")
+    assert ft._signal_tp_counts == {}
+    assert ft.rebuild_counts_from_events()["rebuilt_tp_counts"] == {}
+
+
+def test_analyst_assessments_never_adjust_weights(monkeypatch):
+    _isolate(monkeypatch)
+    monkeypatch.setattr(ft, "_active_signals", lambda _: ["signal"])
+    for i in range(6):
+        ft.record_dismissal(f"fixture-{i}")
+    assert ft.get_weight_adjustment("signal") == 1.0
+    assert ft.get_feedback_summary()["precision_at_50"] is None
+
+
+def test_documented_outcome_can_be_withdrawn(monkeypatch):
+    _isolate(monkeypatch)
+    monkeypatch.setattr(ft, "_active_signals", lambda _: ["signal"])
+    for i in range(5):
+        ft.record_dismissal(f"fixture-{i}", source="independent_outcome", evidence_reference="agency-record")
+    assert ft.get_weight_adjustment("signal") == 0.5
+    ft.clear_label("fixture-0", source="independent_outcome")
+    assert ft.get_weight_adjustment("signal") == 1.0

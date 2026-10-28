@@ -15,12 +15,12 @@ import services.risk_scorer as rs
 
 def _fake_query_async(peer_row):
     async def _query(sql, params=()):
-        if "mean_rpb" in sql or "peer_n" in sql:
+        if "mean_rpb" in sql:
             return [peer_row]
         if "CLAIM_FROM_MONTH" in sql:
             return []
         if "hcpcs_code" in sql:
-            return []
+            return [{"hcpcs_code": "A", "total_paid": 100, "total_claims": 10}]
         return []
     return _query
 
@@ -34,7 +34,7 @@ def test_live_path_uses_real_cohort_for_claims_per_bene_when_enough_peers(monkey
     monkeypatch.setattr(rs, "query_async", _fake_query_async({
         "mean_rpb": 100.0, "std_rpb": 20.0,
         "mean_cpb": 10.0, "std_cpb": 2.0,
-        "peer_n": 50,
+        "code": "A", "n_rpb": 50, "n_cpb": 50, "mean_spend": 100, "std_spend": 20,
     }))
     monkeypatch.setattr(rs, "compute_address_clusters", lambda: {})
     monkeypatch.setattr(rs, "compute_auth_official_clusters", lambda: {})
@@ -50,14 +50,14 @@ def test_live_path_uses_real_cohort_for_claims_per_bene_when_enough_peers(monkey
         "with a real matching cohort (mean=10, std=2), 60 claims/beneficiary "
         f"is a 25-sigma outlier and must flag: {cpb_signal}"
     )
-    assert "insufficient peer data" not in cpb_signal["reason"].lower()
+    assert "insufficient cohort" not in cpb_signal["reason"].lower()
 
 
 def test_live_path_falls_back_honestly_when_cohort_too_small(monkeypatch):
     monkeypatch.setattr(rs, "query_async", _fake_query_async({
         "mean_rpb": 100.0, "std_rpb": 20.0,
         "mean_cpb": 10.0, "std_cpb": 2.0,
-        "peer_n": 2,  # below the >=3 minimum both paths require
+        "code": "A", "n_rpb": 2, "n_cpb": 2, "mean_spend": 100, "std_spend": 20,  # below the >=3 minimum both paths require
     }))
     monkeypatch.setattr(rs, "compute_address_clusters", lambda: {})
     monkeypatch.setattr(rs, "compute_auth_official_clusters", lambda: {})
@@ -71,4 +71,4 @@ def test_live_path_falls_back_honestly_when_cohort_too_small(monkeypatch):
     # 60 < the absolute 100 fallback threshold, and the cohort is too small
     # to use — must NOT flag, and must say so honestly.
     assert cpb_signal["flagged"] is False
-    assert "insufficient peer data" in cpb_signal["reason"].lower()
+    assert "insufficient cohort" in cpb_signal["reason"].lower()

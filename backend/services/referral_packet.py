@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import html as _html
 import logging
-from datetime import datetime as _dt
+from datetime import datetime as _dt, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +36,19 @@ def _fmt(v: float) -> str:
     if v >= 1e3: return f"${v / 1e3:.0f}K"
     return f"${v:.2f}"
 
+
+
+def _signal_check_status(signal: dict) -> str:
+    """Preserve explicit abstention/failure instead of turning it into clear."""
+    status = str(signal.get("status") or signal.get("check_status") or "").lower()
+    if status in {"unknown", "unavailable", "error", "skipped", "abstained", "not_applicable"}:
+        return status
+    if signal.get("available") is False:
+        return "unavailable"
+    reason = str(signal.get("reason") or "").lower()
+    if any(term in reason for term in ("cannot assess", "cannot verify", "unavailable", "no data", "not available", "skipped", "retired", "parked")):
+        return "unavailable"
+    return "triggered" if signal.get("flagged") else "not_triggered" if reason else "unknown"
 
 # ── Assembly ──────────────────────────────────────────────────────────────────
 
@@ -74,6 +87,8 @@ async def build_referral_packet(npi: str, *, provider: dict) -> dict:
             "key": key,
             "label": meta.get("label") or key.replace("_", " ").title(),
             "flagged": bool(s.get("flagged")),
+            "evidence_class": s.get("evidence_class", "statistical_anomaly"),
+            "check_status": _signal_check_status(s),
             "score": float(s.get("score") or 0),
             "weight": s.get("weight", 0),
             "reason": s.get("reason", ""),          # the computed proof text
@@ -82,11 +97,24 @@ async def build_referral_packet(npi: str, *, provider: dict) -> dict:
         })
 
     # ── Exclusions — one call covers OIG LEIE + SAM.gov + NPI status ──────────
-    exclusions = {"checks": [], "any_excluded": False, "risk_level": "unknown"}
+    check_states = {"exclusions": "unknown", "ownership": "unknown", "narrative": "unknown"}
+    exclusions = {"checks": [], "any_excluded": None, "risk_level": "unknown"}
     try:
         from core.exclusion_aggregator import check_all_exclusions
         exclusions = await check_all_exclusions(npi, nppes.get("name", "") or "")
+        # An unloaded source cannot support a negative exclusion finding.
+        for check in exclusions.get("checks", []):
+            if check.get("status") == "clear" and (check.get("details") or {}).get("list_loaded") is False:
+                check["status"] = "unavailable"
+                check["details"]["message"] = "Source list is not loaded; exclusion status is unknown."
+        checks = exclusions.get("checks") or []
+        incomplete = not checks or any(c.get("status") not in ("clear", "excluded", "warning") for c in checks)
+        check_states["exclusions"] = "partial" if incomplete else "completed"
+        if incomplete and not exclusions.get("any_excluded"):
+            exclusions["any_excluded"] = None
+            exclusions["risk_level"] = "unknown"
     except Exception:
+        check_states["exclusions"] = "error"
         logger.warning("referral: exclusion check failed for %s", npi, exc_info=True)
 
     # ── Ownership network + cluster risk ─────────────────────────────────────
@@ -94,7 +122,9 @@ async def build_referral_packet(npi: str, *, provider: dict) -> dict:
     try:
         from routes.providers import get_ownership_chain
         network = await get_ownership_chain(npi)
+        check_states["ownership"] = "completed" if network is not None else "unavailable"
     except Exception:
+        check_states["ownership"] = "error"
         logger.warning("referral: ownership chain failed for %s", npi, exc_info=True)
 
     # ── Plain-English narrative (reuse the case-narrative generator) ──────────
@@ -102,20 +132,23 @@ async def build_referral_packet(npi: str, *, provider: dict) -> dict:
     try:
         from services.narrative_generator import generate_narrative
         narrative = generate_narrative(npi, provider_override=provider)
+        check_states["narrative"] = "completed" if narrative is not None else "unavailable"
     except Exception:
+        check_states["narrative"] = "error"
         logger.warning("referral: narrative generation failed for %s", npi, exc_info=True)
 
-    # ── Recommendation (mirrors the app's risk bands) ────────────────────────
-    if risk_score >= 50:
-        rec_level = "RECOMMENDED FOR IMMEDIATE REFERRAL TO MFCU / OIG"
-    elif risk_score >= 25:
-        rec_level = "RECOMMENDED FOR FURTHER INVESTIGATION"
-    else:
-        rec_level = "LOW RISK — CONTINUE MONITORING"
+    # Screening score prioritizes review, never submission or legal conclusions.
+    rec_level = ("PRIORITIZED INVESTIGATOR REVIEW" if risk_score >= 25
+                 else "INVESTIGATOR REVIEW — NO ELEVATED STATISTICAL PRIORITY")
+    from services.precomputed_store import get_staleness_info
+    provenance = {"provider_scoring": provider.get("scoring_metadata") or {"status": "unknown — legacy score"},
+                  "derived_artifact": get_staleness_info(),
+                  "denominator": "sum of beneficiary cell counts; not unique people across rows"}
 
     return {
         "npi": npi,
-        "generated_at": _dt.now().strftime("%Y-%m-%d %H:%M UTC"),
+        "generated_at": _dt.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
+        "provenance": provenance,
         "provider": {
             "name": nppes.get("name") or provider.get("provider_name") or f"NPI {npi}",
             "entity_type": "Organization" if nppes.get("entity_type") == "NPI-2" else "Individual Provider",
@@ -140,6 +173,7 @@ async def build_referral_packet(npi: str, *, provider: dict) -> dict:
             "claims_per_beneficiary": float(provider.get("claims_per_beneficiary") or (tc / tb if tb else 0)),
         },
         "exclusions": exclusions,
+        "check_states": check_states,
         "signals": signal_items,
         "timeline": provider.get("timeline") or [],
         "hcpcs": provider.get("hcpcs") or [],
@@ -152,7 +186,9 @@ async def build_referral_packet(npi: str, *, provider: dict) -> dict:
         "citations": all_citations,
         "recommendation": {
             "level": rec_level,
-            "any_excluded": bool(exclusions.get("any_excluded")),
+            "any_excluded": exclusions.get("any_excluded"),
+            "referral_ready": False,
+            "basis": "Statistical leads require independent corroboration, source/period checks, and investigator approval before referral.",
         },
         "review": provider.get("_review_item"),
     }
@@ -241,14 +277,15 @@ def render_referral_html(packet: dict, *, hcpcs_descriptions: dict | None = None
         badge = (
             '<span style="background:#fee2e2;color:#7c2d12;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:bold">TRIGGERED</span>'
             if is_flag else
-            '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:12px">CLEAR</span>'
+            '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:12px">NOT TRIGGERED / NOT ESTABLISHED</span>'
         )
-        body = ""
+        body = (f'<p style="margin:6px 0;font-size:12px">Evidence class: {_esc(s.get("evidence_class", "statistical_anomaly"))}; '
+                f'check status: {_esc(s.get("check_status", "unknown"))}.</p>')
         if is_flag:
             if s.get("methodology"):
                 body += f'<p style="margin:8px 0 0;font-size:12px;color:#374151"><strong>Methodology:</strong> {_esc(s["methodology"])}</p>'
             if s.get("reason"):
-                body += f'<p style="margin:6px 0 0;font-size:13px;color:#b91c1c"><strong>Finding (proof):</strong> {_esc(s["reason"])}</p>'
+                body += f'<p style="margin:6px 0 0;font-size:13px;color:#b91c1c"><strong>Screening observation:</strong> {_esc(s["reason"])}</p>'
             _pts = s["score"] * float(s["weight"] or 0)
             body += (f'<p style="margin:6px 0 0;font-size:12px;color:#6b7280">'
                      f'Signal score {s["score"]:.2f} (0-1) &times; weight {s["weight"]} = {_pts:.1f} points toward the composite.</p>')
@@ -546,10 +583,14 @@ td{{padding:8px 12px;border-bottom:1px solid #e5e7eb;vertical-align:top}}
 {'<li style="color:#991b1b;font-weight:bold">PROVIDER IS ON A FEDERAL EXCLUSION LIST</li>' if rec.get('any_excluded') else ''}
 </ul></div>
 
+<p><strong>Referral readiness:</strong> {_esc(rec.get('basis', 'Independent corroboration and investigator approval required.'))}</p>
+<p><strong>Enrichment checks:</strong> {_esc('; '.join(f'{key}: {value}' for key, value in (packet.get('check_states') or {}).items()) or 'Unknown — legacy packet has no check-state record.')}</p>
 <h2>11. Source &amp; Citation Trail</h2>
+<p style="font-size:11px">Scoring snapshot: {_esc((packet.get('provenance') or {}).get('provider_scoring') or 'Unknown — legacy packet')}. Beneficiary counts sum published cells and are not deduplicated people.</p>
+<p style="font-size:11px">Derived artifact compatibility: {_esc((((packet.get('provenance') or {}).get('derived_artifact') or {}).get('validation') or {}).get('errors', ['unknown']))}. Source freshness: {_esc((((packet.get('provenance') or {}).get('derived_artifact') or {}).get('validation') or {}).get('source_freshness', 'unknown'))}.</p>
 <p style="font-size:12px;color:#374151">Regulatory bases for the triggered signals in this packet:</p>
 {citation_section}
-<p style="font-size:11px;color:#9ca3af;margin-top:12px">Data sources: CMS Medicaid Provider Utilization &amp; Payment Data (Public Use File) | NPPES | HCPCS (NLM Clinical Tables) | OIG LEIE | SAM.gov. This document is a screening tool; all findings must be verified by a qualified investigator before any enforcement action.</p>
+<p style="font-size:11px;color:#9ca3af;margin-top:12px">Data sources: HHS Medicaid Provider Spending by HCPCS (aggregate public data) | NPPES | HCPCS (NLM Clinical Tables) | OIG LEIE | SAM.gov. This document is a screening tool; all findings must be verified by a qualified investigator before any enforcement action.</p>
 
 <div style="margin-top:40px;border-top:2px solid #e5e7eb;padding-top:16px;text-align:center">
 <p style="font-size:11px;color:#9ca3af;letter-spacing:1px">END OF REFERRAL PACKET - {_esc(npi)} - {gen}</p>

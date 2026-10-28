@@ -7,6 +7,7 @@ import time
 import uuid
 import pathlib
 from typing import Optional
+from core.safe_io import atomic_write_json
 
 _NOTIFICATIONS_FILE = pathlib.Path(__file__).parent.parent / "notifications.json"
 
@@ -16,11 +17,12 @@ _notifications: list[dict] = []
 
 def _save_to_disk() -> None:
     try:
-        _NOTIFICATIONS_FILE.write_text(
-            json.dumps({"notifications": _notifications}, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(_NOTIFICATIONS_FILE, {"notifications": _notifications}, indent=2)
+        from core.gcs_sync import upload_file
+        upload_file("notifications.json")
     except Exception as e:
+        from core.gcs_sync import _set_status
+        _set_status("notifications.json", "error", "Notification persistence failed")
         print(f"[notification_store] Could not save: {e}")
 
 

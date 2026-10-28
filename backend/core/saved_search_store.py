@@ -6,6 +6,7 @@ import time
 import uuid
 import pathlib
 from typing import Optional
+from core.safe_io import atomic_write_json
 
 _SAVED_SEARCHES_FILE = pathlib.Path(__file__).parent.parent / "saved_searches.json"
 
@@ -14,11 +15,12 @@ _saved_searches: list[dict] = []
 
 def _save_to_disk() -> None:
     try:
-        _SAVED_SEARCHES_FILE.write_text(
-            json.dumps({"searches": _saved_searches}, indent=2),
-            encoding="utf-8",
-        )
+        atomic_write_json(_SAVED_SEARCHES_FILE, {"searches": _saved_searches}, indent=2)
+        from core.gcs_sync import upload_file
+        upload_file("saved_searches.json")
     except Exception as e:
+        from core.gcs_sync import _set_status
+        _set_status("saved_searches.json", "error", "Saved search persistence failed")
         print(f"[saved_search_store] Could not save: {e}")
 
 

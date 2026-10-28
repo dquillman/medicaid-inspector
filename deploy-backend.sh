@@ -55,7 +55,7 @@ gcloud run deploy "$SERVICE_NAME" \
   --timeout 300 \
   --allow-unauthenticated \
   --port 8080 \
-  --set-env-vars "PYTHONUNBUFFERED=1,APP_VERSION=${APP_VERSION},HAL_URL=${HAL_URL:-https://qcode-9a2dc.web.app/api/hal}" \
+  --set-env-vars "PYTHONUNBUFFERED=1,APP_VERSION=${APP_VERSION},PARQUET_URL=https://storage.googleapis.com/medicaid-inspector-public-aggregates/medicaid-provider-spending.parquet,HAL_URL=${HAL_URL:-https://qcode-9a2dc.web.app/api/hal}" \
   --set-secrets "$SECRETS"
 
 echo "==> Backend deployed!"

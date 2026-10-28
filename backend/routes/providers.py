@@ -77,13 +77,13 @@ _SIGNAL_META: dict[str, dict] = {
     },
     "revenue_per_bene_outlier": {
         "name": "Revenue Per Beneficiary Outlier",
-        "explanation": "Generating significantly more revenue per patient than peers billing the same primary procedure code suggests upcoding, billing for medically unnecessary services, or inflated service volumes.",
+        "explanation": "Generating significantly more revenue per summed beneficiary count than peers billing the same primary procedure code suggests upcoding, billing for medically unnecessary services, or inflated service volumes.",
         "evidence_files": ["hcpcs_breakdown.csv", "monthly_timeline.csv"],
         "citation": "42 CFR § 447.15; OIG Work Plan: Medicaid Payments for Services",
     },
     "claims_per_bene_anomaly": {
         "name": "Claims Per Beneficiary Anomaly",
-        "explanation": "Filing an unusually high number of claims per patient compared to peers suggests unbundling (splitting services that should be billed together), medically unnecessary repeated treatments, or billing for services not provided.",
+        "explanation": "Filing an unusually high number of claims per summed beneficiary count compared to peers suggests unbundling (splitting services that should be billed together), medically unnecessary repeated treatments, or billing for services not provided.",
         "evidence_files": ["monthly_timeline.csv"],
         "citation": "CMS Medicaid Integrity Program; OIG: Improper Payments in Medicaid",
     },
@@ -200,7 +200,7 @@ def _build_signal_proof(provider: dict, hcpcs_list: list, timeline: list, signal
         return (
             f'<div style="background:#fef2f2;border:1px solid #fca5a5;border-radius:6px;'
             f'padding:12px 16px;margin-top:12px">'
-            f'<p style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px">PROOF: {_esc(title)}</p>'
+            f'<p style="font-size:11px;color:#9ca3af;text-transform:uppercase;letter-spacing:1px;margin:0 0 8px">SUPPORTING AGGREGATE DATA: {_esc(title)}</p>'
             f'{body}</div>'
         )
 
@@ -544,6 +544,8 @@ def _build_report_html(provider: dict, review_item: dict | None, hcpcs_descripti
     signal_cards = ""
     for s in signals:
         key     = s.get("signal", "")
+        from services.referral_packet import _signal_check_status
+        check_status = _signal_check_status(s)
         meta    = _SIGNAL_META.get(key, {})
         is_flag = s.get("flagged", False)
         reason  = s.get("reason", "")
@@ -551,7 +553,7 @@ def _build_report_html(provider: dict, review_item: dict | None, hcpcs_descripti
         bg      = "#fff5f5" if is_flag else "#f9fafb"
         badge   = ('<span style="background:#fee2e2;color:#7c2d12;padding:2px 8px;border-radius:4px;font-size:12px;font-weight:bold">TRIGGERED</span>'
                    if is_flag else
-                   '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:12px">CLEAR</span>')
+                   '<span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:4px;font-size:12px">NOT TRIGGERED / NOT ESTABLISHED</span>')
         files_html = ", ".join(f"<code>{f}</code>" for f in meta.get("evidence_files", []))
         evidence   = (f'<div style="background:#eff6ff;border-left:3px solid #3b82f6;padding:8px 12px;margin-top:10px;font-size:13px">'
                       f'<strong>Supporting files:</strong> {files_html}</div>') if files_html else ""
@@ -568,7 +570,7 @@ def _build_report_html(provider: dict, review_item: dict | None, hcpcs_descripti
             f'<span style="font-weight:bold;font-size:15px">{esc(meta.get("name", key))}</span>'
             f'<div style="display:flex;align-items:center;gap:8px">{badge}'
             f'<span style="font-size:13px;color:#6b7280">Score: {s.get("score",0):.2f} · Weight: {s.get("weight",0)}</span></div></div>'
-            f'{finding}{expl}{proof_html}{evidence}{citation}</div>\n'
+            f'<p>Check status: {esc(check_status)}. Evidence class: {esc(s.get("evidence_class", "statistical_anomaly"))}.</p>{finding}{expl}{proof_html}{evidence}{citation}</div>\n'
         )
 
     # Review section
@@ -2045,9 +2047,10 @@ async def provider_signal_evidence(npi: str, signal: str):
         excluded, record = _is_excluded(npi)
         evidence["methodology"] = (
             "Providers on the OIG LEIE (List of Excluded Individuals/Entities) "
-            "are formally barred from all federal health care programs. Any "
-            "Medicaid billing by an excluded provider is per se fraudulent "
-            "under 42 USC 1320a-7b."
+            "are subject to federal program restrictions. A current list match alone "
+            "does not establish fraud or show that restrictions applied to past Medicaid "
+            "payments. Verify identity, exclusion/reinstatement dates, service dates, "
+            "and applicable payment rules before asserting a violation."
         )
         evidence["threshold"] = "Present on OIG LEIE exclusion list"
         evidence["excluded"] = excluded
@@ -2310,8 +2313,11 @@ async def get_billing_network(npi: str):
     """Return the billing/servicing provider network for a given NPI."""
     import asyncio
     from core.oig_store import is_excluded as _is_excluded
+    from core.identity_contract import is_valid_npi, valid_npi_sql
 
     npi = _validate_npi(npi)
+    if not is_valid_npi(npi):
+        raise HTTPException(status_code=422, detail="A valid NPI is required for provider network joins")
 
     src = f"read_parquet('{get_parquet_path()}')"
 
@@ -2324,7 +2330,7 @@ async def get_billing_network(npi: str):
         COUNT(DISTINCT HCPCS_CODE)  AS distinct_hcpcs
     FROM {src}
     WHERE BILLING_PROVIDER_NPI_NUM = '{npi}'
-      AND SERVICING_PROVIDER_NPI_NUM IS NOT NULL
+      AND {valid_npi_sql('SERVICING_PROVIDER_NPI_NUM')}
       AND SERVICING_PROVIDER_NPI_NUM != '{npi}'
     GROUP BY SERVICING_PROVIDER_NPI_NUM
     ORDER BY total_paid DESC
@@ -2339,7 +2345,7 @@ async def get_billing_network(npi: str):
         COUNT(DISTINCT HCPCS_CODE)  AS distinct_hcpcs
     FROM {src}
     WHERE SERVICING_PROVIDER_NPI_NUM = '{npi}'
-      AND BILLING_PROVIDER_NPI_NUM IS NOT NULL
+      AND {valid_npi_sql('BILLING_PROVIDER_NPI_NUM')}
       AND BILLING_PROVIDER_NPI_NUM != '{npi}'
     GROUP BY BILLING_PROVIDER_NPI_NUM
     ORDER BY total_paid DESC
@@ -2349,6 +2355,8 @@ async def get_billing_network(npi: str):
         query_async(servicing_sql),
         query_async(billing_sql),
     )
+    servicing_rows = [r for r in servicing_rows if is_valid_npi(r.get("connected_npi"))]
+    billing_rows = [r for r in billing_rows if is_valid_npi(r.get("connected_npi"))]
 
     cache_by_npi = {p["npi"]: p for p in get_prescanned()}
 
@@ -2375,6 +2383,7 @@ async def get_billing_network(npi: str):
         "servicing_count": len(servicing_rows),
         "billing_count": len(billing_rows),
         "total_connections": len(connections),
+        "identity_scope": "Only checksum-valid provider identities form connections; unavailable identities are omitted, not inferred",
     }
 
 
@@ -3143,11 +3152,11 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
             {"label": "Program", "value": "Medicaid"},
             {"label": "When (period in the public data)",
              "value": f"{first_m} to {last_m}" if first_m != "?" else ""},
-            ({"label": "Amount (paid while barred)",
+            ({"label": "Payments during questioned period",
               "value": (f"${_perse['amount']:,.0f} {_perse['amount_label']} "
                         f"(total Medicaid paid {first_m} to {last_m}: ${total_paid:,.0f})"),
-              "note": "Use this for the portal's 'Estimated dollar amount'. The barred amount is "
-                      "the improper part; the total is context."}
+              "note": "Questioned-period payments are not an established loss or overpayment. "
+                      "Verify program applicability and dates before estimating suspected loss; total paid is context."}
              if _perse and _perse["amount"] else
              {"label": "Amount (Medicaid paid, total exposure)", "value": f"${total_paid:,.0f}",
               "note": "Exposure, not a proven loss. Say so if the portal asks."}),
@@ -3237,7 +3246,7 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
             "  CMS/HHS Medicaid payment data against public enrollment and exclusion records.\n"
             if _perse and not flags else
             f"  Automated analysis of public CMS/HHS Medicaid payment data flagged this provider\n"
-            f"  with a composite risk score of {risk:.0f}/100 across {len(flags)} independent fraud\n"
+            f"  with a composite risk score of {risk:.0f}/100 across {len(flags)} screening signals\n"
             f"  indicator(s). The indicators below are statistical/anomaly findings consistent with\n"
             f"  patterns in OIG enforcement actions; they are leads for investigation, not proof of fraud.\n"
         )

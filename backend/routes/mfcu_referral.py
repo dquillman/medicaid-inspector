@@ -133,6 +133,7 @@ class UpdateReferralBody(BaseModel):
     stage: Optional[str] = None
     outcome: Optional[str] = None
     outcome_notes: Optional[str] = None
+    evidence_reference: Optional[str] = None
     mfcu_contact: Optional[str] = None
     case_number: Optional[str] = None
     jurisdiction: Optional[str] = None
@@ -155,6 +156,7 @@ async def update_referral_endpoint(
             stage=body.stage,
             outcome=body.outcome,
             outcome_notes=body.outcome_notes,
+            evidence_reference=body.evidence_reference,
             mfcu_contact=body.mfcu_contact,
             case_number=body.case_number,
             jurisdiction=body.jurisdiction,

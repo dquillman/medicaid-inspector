@@ -9,7 +9,7 @@ from services.backup import create_backup, list_backups, restore_backup
 router = APIRouter(prefix="/api/admin", tags=["backup"], dependencies=[Depends(require_admin)])
 
 # Allowed backup_id format: backup_YYYYMMDD_HHMMSS — rejects path traversal attempts
-_BACKUP_ID_RE = re.compile(r"^backup_\d{8}_\d{6}$")
+_BACKUP_ID_RE = re.compile(r"^backup_\d{8}_\d{6}(?:_\d{6})?$")
 
 
 @router.post("/backup")

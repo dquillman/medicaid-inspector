@@ -240,6 +240,12 @@ function AnimatedRoutes() {
 }
 
 export default function App() {
+  const [persistenceNotice, setPersistenceNotice] = useState<string | null>(null)
+  useEffect(() => {
+    const receive = (event: Event) => setPersistenceNotice((event as CustomEvent<string>).detail)
+    window.addEventListener('mfi:persistence', receive)
+    return () => window.removeEventListener('mfi:persistence', receive)
+  }, [])
   const [user, setUser] = useState<AuthUser | null>(null)
   const [view, setView] = useState<'landing' | 'login' | 'public' | 'app'>('landing')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
@@ -462,6 +468,13 @@ export default function App() {
         />
 
         {/* Breadcrumb navigation */}
+        {persistenceNotice && (
+          <div role="alert" className="mx-4 mt-3 rounded border border-amber-500/40 bg-amber-950/30 p-3 text-sm text-amber-200">
+            {persistenceNotice === 'failed'
+              ? 'A change may exist locally, but cloud storage did not confirm it. Check Scan & Data and reconcile before retrying or closing.'
+              : 'A change was accepted locally with cloud synchronization pending. Check Scan & Data before closing; cloud durability is not yet confirmed.'}
+          </div>
+        )}
         <Breadcrumbs />
 
         {/* Page content */}

@@ -140,8 +140,28 @@ def _score_provider(row: dict, hcpcs: list, timeline: list, npi: str,
     risk_score = round(min(composite_with_feedback(signals), 100.0), 1)
     flags = [s for s in signals if s["flagged"]]
 
+    from services.risk_scorer import SCORING_SPEC_VERSION, COHORT_SPEC_VERSION, cohort_observation
+    from datetime import datetime, timezone
+    scoring_metadata = {
+        "status": "recorded_at_scoring",
+        "scoring_spec_version": SCORING_SPEC_VERSION,
+        "cohort_spec_version": COHORT_SPEC_VERSION,
+        "scored_at": datetime.now(timezone.utc).isoformat(),
+        "denominator_semantics": "sum of provider/servicing-provider/HCPCS/month beneficiary cell counts; not unique patients",
+        "peer_statistics_used": {
+            "dominant_hcpcs": top_code,
+            "revenue_per_summed_count": {"mean": pm, "stddev": ps},
+            "claims_per_summed_count": {"mean": cpb_m, "stddev": cpb_s},
+            "total_paid": {"mean": spend_mean, "stddev": spend_std},
+        },
+        "cohort_source_snapshot": cohort_observation(top_code, (pm, ps), (cpb_m, cpb_s), (spend_mean, spend_std)),
+        "provider_aggregate_snapshot": "caller-supplied; independent source/version verification unavailable",
+        "limitations": ["Reproducibility requires the same provider aggregates, enrichment and feedback weights.",
+                        "A local stat fingerprint identifies a file snapshot, not verified upstream freshness or a content checksum."],
+    }
     return {
         **row,
+        "scoring_metadata": scoring_metadata,
         "risk_score": risk_score,
         "flags": flags,
         "signal_results": signals,
@@ -313,7 +333,7 @@ async def run_scan_batch(batch_size: int, state_filter: Optional[str], force: bo
         FROM read_parquet('{get_parquet_path()}')
         WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_placeholders})
         GROUP BY npi, hcpcs_code
-        ORDER BY npi, total_paid DESC
+        ORDER BY npi, total_paid DESC, hcpcs_code ASC
         """
         hcpcs_rows = await query_async(hcpcs_sql, npi_params)
         hcpcs_by_npi: dict[str, list[dict]] = {}
@@ -361,9 +381,7 @@ async def run_scan_batch(batch_size: int, state_filter: Optional[str], force: bo
             if code:
                 row["top_hcpcs"] = code
 
-        peer_stats, cpb_stats_map, spend_mean, spend_std = _build_peer_stats(
-            agg_rows, peer_rpb, peer_cpb, all_spend
-        )
+        peer_stats, cpb_stats_map, spend_mean, spend_std = await _canonical_cohorts()
         cluster_sizes = sig["compute_address_clusters"]()
         auth_clusters = sig["compute_auth_official_clusters"]()
 
@@ -466,9 +484,7 @@ async def rescore_cached_providers():
         if spend > 0:
             all_spend.append(float(spend))
 
-    peer_stats, cpb_stats_map, spend_mean, spend_std = _build_peer_stats(
-        providers, peer_rpb, peer_cpb, all_spend
-    )
+    peer_stats, cpb_stats_map, spend_mean, spend_std = await _canonical_cohorts()
     cluster_sizes = sig["compute_address_clusters"]()
     auth_clusters = sig["compute_auth_official_clusters"]()
 
@@ -614,6 +630,8 @@ async def run_smart_scan(state_filter: Optional[str]):
             set_prescan_status(0, "Smart scan: no providers found in dataset")
             return
 
+        canonical_peers, canonical_cpb, canonical_spend_mean, canonical_spend_std = await _canonical_cohorts()
+
         N = len(all_rows)
         log.info("Smart scan Phase 1: %d providers total", N)
         set_prescan_status(2, f"Smart scan — pre-screening {N:,} providers…")
@@ -666,7 +684,7 @@ async def run_smart_scan(state_filter: Optional[str]):
                    SUM(TOTAL_PAID) AS total_paid, SUM(TOTAL_CLAIMS) AS total_claims
             FROM read_parquet('{get_parquet_path()}')
             WHERE BILLING_PROVIDER_NPI_NUM IN ({npi_in})
-            GROUP BY npi, hcpcs_code ORDER BY npi, total_paid DESC
+            GROUP BY npi, hcpcs_code ORDER BY npi, total_paid DESC, hcpcs_code ASC
             """
             hcpcs_rows = await query_async(hcpcs_sql)
             hcpcs_by_npi: dict[str, list[dict]] = {}
@@ -720,11 +738,14 @@ async def run_smart_scan(state_filter: Optional[str]):
             cluster_sizes = sig["compute_address_clusters"]()
             auth_clusters = sig["compute_auth_official_clusters"]()
 
+            peer_stats_map, cpb_stats_map = canonical_peers, canonical_cpb
+            spend_mean, spend_std = canonical_spend_mean, canonical_spend_std
+
             for row in batch:
                 npi = row["npi"]
                 code = top_hcpcs_by_npi.get(npi, "")
-                pm, ps = peer_stats_map.get(code, (rpb_mean, rpb_std))
-                cpb_m, cpb_s = cpb_stats_map.get(code, (cpb_mean, cpb_std))
+                pm, ps = peer_stats_map.get(code, (0.0, 0.0))
+                cpb_m, cpb_s = cpb_stats_map.get(code, (0.0, 0.0))
 
                 result = _score_provider(
                     row, hcpcs_by_npi.get(npi, []), timeline_by_npi.get(npi, []),
@@ -943,8 +964,7 @@ async def run_missing_scan(chunk_size: int = 400):
                 peer_cpb[code].append(float(c["claims_per_beneficiary"]))
             if (c.get("total_paid") or 0) > 0:
                 all_spend.append(float(c["total_paid"]))
-        peer_stats, cpb_stats, spend_mean, spend_std = _build_peer_stats(
-            [], peer_rpb, peer_cpb, all_spend)
+        peer_stats, cpb_stats, spend_mean, spend_std = await _canonical_cohorts()
         cluster_sizes = sig["compute_address_clusters"]()
         auth_clusters = sig["compute_auth_official_clusters"]()
 
@@ -964,7 +984,7 @@ async def run_missing_scan(chunk_size: int = 400):
                 "SELECT BILLING_PROVIDER_NPI_NUM AS npi, HCPCS_CODE AS hcpcs_code, "
                 "SUM(TOTAL_PAID) AS total_paid, SUM(TOTAL_CLAIMS) AS total_claims "
                 f"FROM {src} WHERE BILLING_PROVIDER_NPI_NUM IN ({ph}) "
-                "GROUP BY npi, hcpcs_code ORDER BY npi, total_paid DESC", params)
+                "GROUP BY npi, hcpcs_code ORDER BY npi, total_paid DESC, hcpcs_code ASC", params)
             timeline_rows = await query_async(
                 "SELECT BILLING_PROVIDER_NPI_NUM AS npi, CLAIM_FROM_MONTH AS month, "
                 "SUM(TOTAL_PAID) AS total_paid, SUM(TOTAL_CLAIMS) AS total_claims, "
@@ -1043,3 +1063,8 @@ def start_missing_scan() -> str:
     _scan_running = True
     from core.task_queue import enqueue_task
     return enqueue_task("missing_scan", run_missing_scan)
+
+
+async def _canonical_cohorts():
+    from services.risk_scorer import canonical_cohort_stats
+    return await canonical_cohort_stats()

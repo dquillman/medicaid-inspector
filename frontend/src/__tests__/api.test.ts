@@ -84,4 +84,22 @@ describe('API helper', () => {
     const body = JSON.parse(lastCall[1].body)
     expect(body.batch_size).toBe(200)
   })
+
+  it('announces pending persistence without losing the accepted result', async () => {
+    const events = vi.spyOn(window, 'dispatchEvent')
+    mockFetch.mockResolvedValueOnce({ ...jsonResponse({ saved: true }, 202),
+      headers: new Headers({ 'X-MFI-Persistence': 'pending' }) })
+    const { mutate } = await import('../lib/api')
+    await expect(mutate('POST', '/review/fixture', {})).resolves.toEqual({ saved: true })
+    expect(events).toHaveBeenCalledWith(expect.objectContaining({ type: 'mfi:persistence', detail: 'pending' }))
+  })
+
+  it('surfaces failed cloud persistence without claiming a rollback', async () => {
+    const events = vi.spyOn(window, 'dispatchEvent')
+    mockFetch.mockResolvedValueOnce({ ...jsonResponse({ detail: 'Changes may exist locally; reconcile before retrying' }, 503),
+      headers: new Headers({ 'X-MFI-Persistence': 'failed' }) })
+    const { mutate } = await import('../lib/api')
+    await expect(mutate('POST', '/review/fixture', {})).rejects.toThrow('Changes may exist locally')
+    expect(events).toHaveBeenCalledWith(expect.objectContaining({ type: 'mfi:persistence', detail: 'failed' }))
+  })
 })

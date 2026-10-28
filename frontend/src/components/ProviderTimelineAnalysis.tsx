@@ -175,7 +175,7 @@ export default function ProviderTimelineAnalysis({ npi }: { npi: string }) {
                 switch (name) {
                   case 'total_paid': return [fmt(v), 'Total Paid']
                   case 'claim_count': return [v.toLocaleString(), 'Claims']
-                  case 'unique_beneficiaries': return [v.toLocaleString(), 'Beneficiaries']
+                  case 'unique_beneficiaries': return [v.toLocaleString(), 'Summed beneficiary count']
                   case 'unique_hcpcs_count': return [v.toLocaleString(), 'Unique HCPCS']
                   default: return [v, name]
                 }
@@ -186,7 +186,7 @@ export default function ProviderTimelineAnalysis({ npi }: { npi: string }) {
                 switch (v) {
                   case 'total_paid': return 'Total Paid'
                   case 'claim_count': return 'Claims'
-                  case 'unique_beneficiaries': return 'Beneficiaries'
+                  case 'unique_beneficiaries': return 'Summed beneficiary count'
                   default: return v
                 }
               }}

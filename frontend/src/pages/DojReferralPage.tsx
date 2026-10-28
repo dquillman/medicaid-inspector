@@ -65,6 +65,12 @@ export default function DojReferralPage() {
         </Link>
       </div>
 
+      <p className="text-xs text-amber-200 border-l-2 border-amber-700 pl-3">
+        Review the evidence before filing. Aggregate anomalies and administrative status matches
+        do not establish fraud. Verify identity, Medicaid applicability, effective dates, and
+        alternative explanations; payment totals are not confirmed losses. Unknown checks remain unresolved.
+      </p>
+
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div className="lg:col-span-2 space-y-5">
           {npi && (

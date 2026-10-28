@@ -233,7 +233,7 @@ def test_tip_for_a_per_se_lead_below_the_scan_cutoff(client, auth_headers, monke
     # The first dollar figure the DOJ chat sees is the barred amount.
     assert body["short_narrative"].index("$127,400") < body["short_narrative"].index("$1,256,153")
     rows = {f["label"]: f["value"] for f in body["form_fields"]}
-    assert rows["Amount (paid while barred)"].startswith("$127,400 paid after Medicare revoked")
+    assert rows["Payments during questioned period"].startswith("$127,400 paid after Medicare revoked")
     assert "composite risk score of 0/100" not in body["text"]
 
 

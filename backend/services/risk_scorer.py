@@ -1,39 +1,13 @@
-"""
-Composite risk scorer (live, single-NPI path).
-Fetches all required data for a provider from DuckDB, runs 13 detectors, and
-returns a composite score (0–100) + list of active flags.
-
-NOTE (2026-07-26): this path runs 13 detectors; the bulk prescan path
-(services/scan_engine._score_provider) runs 15. total_spend_outlier and
-billing_consistency are wired into the scan path only, so a provider scored
-live can land on a different composite than the same provider in the prescan
-cache. Pre-existing drift, documented here rather than silently "fixed" —
-reconciling the two lists changes cached scores and needs a full rescore.
-"""
+"""Live scoring using the same detector runner and full-dataset cohorts as scans."""
 from __future__ import annotations
 import asyncio
-import math
+import time
+import hashlib
+from datetime import datetime, timezone
+from urllib.parse import urlsplit
+from pathlib import Path
 from data.duckdb_client import query_async, get_parquet_path
-from services.anomaly_detector import (
-    billing_concentration,
-    revenue_per_bene_outlier,
-    claims_per_bene_anomaly,
-    billing_ramp_rate,
-    bust_out_pattern,
-    ghost_billing,
-    bene_concentration,
-    upcoding_pattern,
-    address_cluster_risk,
-    oig_excluded,
-    compute_address_clusters,
-    specialty_mismatch,
-    compute_auth_official_clusters,
-    dead_npi_billing,
-    new_provider_explosion,
-    SignalResult,
-)
-# diagnosis_procedure_mismatch is RETIRED (2026-07-26) — deliberately not
-# imported. See anomaly_detector.diagnosis_procedure_mismatch for the reasoning.
+from services.anomaly_detector import compute_address_clusters, compute_auth_official_clusters
 
 
 async def score_provider(npi: str, provider_agg: dict) -> dict:
@@ -45,59 +19,25 @@ async def score_provider(npi: str, provider_agg: dict) -> dict:
     # Fetch supporting data in parallel — use parameterized queries
     hcpcs_sql, hcpcs_params = _hcpcs_sql(npi)
     timeline_sql, timeline_params = _timeline_sql(npi)
-    peer_sql, peer_params = _peer_stats_sql(npi)
-    hcpcs_task = query_async(hcpcs_sql, hcpcs_params)
-    timeline_task = query_async(timeline_sql, timeline_params)
-    peer_task = query_async(peer_sql, peer_params)
-
-    hcpcs_rows, timeline_rows, peer_rows = await asyncio.gather(
-        hcpcs_task, timeline_task, peer_task
+    hcpcs_rows, timeline_rows, cohort = await asyncio.gather(
+        query_async(hcpcs_sql, hcpcs_params),
+        query_async(timeline_sql, timeline_params),
+        canonical_cohort_stats(),
     )
-
-    peer = peer_rows[0] if peer_rows else {}
-    peer_n = int(peer.get("peer_n") or 0)
-    # Require the same minimum cohort size as the batch path
-    # (services.scan_engine._build_peer_stats: `if len(vals) >= 3`) — below
-    # that, both ratios fall back to their own insufficient-data branch
-    # instead of a statistically meaningless 1-or-2-peer stddev.
-    has_cohort = peer_n >= 3
-    peer_mean = float(peer.get("mean_rpb") or 0) if has_cohort else 0.0
-    peer_std = float(peer.get("std_rpb") or 0) if has_cohort else 0.0
-    cpb_mean = float(peer.get("mean_cpb") or 0) if has_cohort else 0.0
-    cpb_std = float(peer.get("std_cpb") or 0) if has_cohort else 0.0
+    peer_stats, cpb_stats, spend_mean, spend_std = cohort
 
     # Pre-compute cluster sizes from prescan cache
     cluster_sizes = compute_address_clusters()
     auth_clusters = compute_auth_official_clusters()
 
-    signals: list[SignalResult] = [
-        billing_concentration(provider_agg, hcpcs_rows),
-        revenue_per_bene_outlier(provider_agg, peer_mean, peer_std),
-        claims_per_bene_anomaly(provider_agg, cpb_mean, cpb_std),
-        billing_ramp_rate(timeline_rows),
-        bust_out_pattern(timeline_rows),
-        ghost_billing(provider_agg, timeline_rows),
-        bene_concentration(provider_agg),
-        upcoding_pattern(provider_agg, hcpcs_rows),
-        address_cluster_risk(provider_agg, cluster_sizes.get(npi, 0)),
-        oig_excluded(npi, provider_agg),
-        specialty_mismatch(provider_agg, hcpcs_rows),
-        dead_npi_billing(provider_agg),
-        new_provider_explosion(provider_agg),
-    ]
-
-    # Same feedback-adjusted composite as the scan path — one implementation
-    # so the two scoring routes cannot drift apart.
-    from services.feedback_tracker import composite_with_feedback
-    composite = composite_with_feedback(signals)
-    risk_score = min(round(composite, 1), 100.0)
-    flags = [s for s in signals if s["flagged"]]
-
-    return {
-        "risk_score": risk_score,
-        "flags": flags,
-        "signal_results": signals,
-    }
+    from services.scan_engine import _score_provider, _import_signals
+    top_code = hcpcs_rows[0]["hcpcs_code"] if hcpcs_rows else ""
+    result = _score_provider(
+        provider_agg, hcpcs_rows, timeline_rows, npi, top_code,
+        peer_stats, cpb_stats, spend_mean, spend_std,
+        cluster_sizes, auth_clusters, _import_signals(),
+    )
+    return {key: result.get(key) for key in ("risk_score", "flags", "signal_results", "scoring_metadata")}
 
 
 async def batch_score(npis: list[str], provider_aggs: list[dict]) -> list[dict]:
@@ -135,8 +75,7 @@ def _hcpcs_sql(npi: str) -> tuple[str, tuple]:
     FROM {src}
     WHERE BILLING_PROVIDER_NPI_NUM = ?
     GROUP BY HCPCS_CODE
-    ORDER BY total_paid DESC
-    LIMIT 50
+    ORDER BY total_paid DESC, hcpcs_code ASC
     """
     return sql, (npi,)
 
@@ -159,50 +98,118 @@ def _timeline_sql(npi: str) -> tuple[str, tuple]:
     return sql, (npi,)
 
 
-def _peer_stats_sql(npi: str) -> tuple[str, tuple]:
-    """
-    Compute mean/std of revenue_per_beneficiary AND claims_per_beneficiary for
-    providers sharing the same top HCPCS code as this NPI.
+SCORING_SPEC_VERSION = "shared-15-detectors-aggregate-denominator-v2-code-system-guard"
+COHORT_SPEC_VERSION = "dominant-code-whole-provider-v1"
+COHORT_CACHE_TTL_SECONDS = 300
+_cohort_cache = None
+_last_cohort_result = None
+_cohort_observation = {"status": "unknown", "reason": "No canonical source snapshot recorded"}
 
-    Audit 2026-10-24, item 5: claims_per_bene_anomaly used to be called with
-    NO peer stats on this (live) path — it always fell back to the absolute
-    >100-claims/beneficiary threshold, while the batch path (scan_engine.py)
-    compared against this SAME peer cohort whenever >=3 peers existed. The
-    same provider could be flagged by one path's threshold and not the
-    other's cohort comparison, or vice versa, for no reason but which code
-    path scored it. Both ratios now come from one query over the same peer
-    group, so both signals compare against the same cohort on both paths.
 
-    Uses parameterized query to prevent SQL injection.
+def _cohort_source_identity(source: str):
+    """Local replacement/edits invalidate immediately; unversioned URLs never cache.
+
+    This identifies the input snapshot, not upstream freshness. Remote URLs
+    without immutable generations cannot safely establish a source version.
     """
-    _validate_npi(npi)
-    src = f"read_parquet('{get_parquet_path()}')"
-    sql = f"""
-    WITH this_top AS (
-        SELECT HCPCS_CODE
-        FROM {src}
-        WHERE BILLING_PROVIDER_NPI_NUM = ?
-        GROUP BY HCPCS_CODE
-        ORDER BY SUM(TOTAL_PAID) DESC
-        LIMIT 1
-    ),
-    peers AS (
-        SELECT
-            BILLING_PROVIDER_NPI_NUM AS npi,
-            CAST(SUM(TOTAL_PAID) AS DOUBLE) /
-                NULLIF(SUM(TOTAL_UNIQUE_BENEFICIARIES), 0) AS rpb,
-            CAST(SUM(TOTAL_CLAIMS) AS DOUBLE) /
-                NULLIF(SUM(TOTAL_UNIQUE_BENEFICIARIES), 0) AS cpb
-        FROM {src}
-        WHERE HCPCS_CODE = (SELECT HCPCS_CODE FROM this_top)
-        GROUP BY BILLING_PROVIDER_NPI_NUM
-    )
-    SELECT
-        AVG(rpb) AS mean_rpb,
-        STDDEV(rpb) AS std_rpb,
-        AVG(cpb) AS mean_cpb,
-        STDDEV(cpb) AS std_cpb,
-        COUNT(*) AS peer_n
-    FROM peers
+    if "://" in source:
+        return None
+    try:
+        stat = Path(source).stat()
+    except OSError:
+        return None
+    return (str(Path(source).resolve()), stat.st_size, stat.st_mtime_ns,
+            stat.st_ctime_ns, stat.st_ino, COHORT_SPEC_VERSION)
+
+
+def _public_source_observation(source, identity):
+    name = Path(urlsplit(source).path).name if "://" in source else Path(source).name
+    return {
+        "name": name,
+        "identity_kind": "local_file_stat_fingerprint" if identity is not None else "unversioned_remote_or_unavailable",
+        "identity": hashlib.sha256(repr(identity).encode()).hexdigest() if identity is not None else None,
+        "content_checksum": None,
+        "upstream_freshness": "unknown",
+    }
+
+
+def cohort_observation(top_code=None, rpb=None, cpb=None, spend=None):
+    """Evidence about the last cohort query; absent legacy metadata stays unknown."""
+    from copy import deepcopy
+    if top_code is not None and (
+            _last_cohort_result is None
+            or _last_cohort_result[0].get(top_code, (0.0, 0.0)) != rpb
+            or _last_cohort_result[1].get(top_code, (0.0, 0.0)) != cpb
+            or _last_cohort_result[2:] != spend):
+        return {"status": "unknown", "reason": "Supplied cohort statistics do not match the recorded canonical query"}
+    return deepcopy(_cohort_observation)
+
+
+def _copy_cohort(cohort):
+    return dict(cohort[0]), dict(cohort[1]), cohort[2], cohort[3]
+
+
+async def canonical_cohort_stats():
+    """Whole-provider ratios grouped by dominant code across the entire source.
+
+    Never depends on scan order, cache contents, or selected batch. Missing or
+    sparse cohorts remain unavailable instead of using unrelated specialties.
     """
-    return sql, (npi,)
+    global _cohort_cache, _cohort_observation, _last_cohort_result
+    source = get_parquet_path()
+    identity = _cohort_source_identity(source)
+    now = time.monotonic()
+    if (identity is not None and _cohort_cache is not None
+            and _cohort_cache[0] == identity
+            and now - _cohort_cache[1] < COHORT_CACHE_TTL_SECONDS):
+        _cohort_observation = dict(_cohort_cache[3])
+        _last_cohort_result = _copy_cohort(_cohort_cache[2])
+        return _copy_cohort(_cohort_cache[2])
+    src = f"read_parquet('{source}')"
+    rows = await query_async(f"""
+        WITH code_totals AS (
+            SELECT BILLING_PROVIDER_NPI_NUM AS npi, HCPCS_CODE AS code,
+                   SUM(TOTAL_PAID) AS paid
+            FROM {src} GROUP BY 1, 2
+        ), dominant AS (
+            SELECT npi, code, ROW_NUMBER() OVER (
+                PARTITION BY npi ORDER BY paid DESC, code ASC) AS rank
+            FROM code_totals
+        ), providers AS (
+            SELECT BILLING_PROVIDER_NPI_NUM AS npi,
+                   SUM(TOTAL_PAID) AS spend,
+                   SUM(TOTAL_PAID)::DOUBLE / NULLIF(SUM(TOTAL_UNIQUE_BENEFICIARIES), 0) AS rpb,
+                   SUM(TOTAL_CLAIMS)::DOUBLE / NULLIF(SUM(TOTAL_UNIQUE_BENEFICIARIES), 0) AS cpb
+            FROM {src} GROUP BY 1
+        )
+        SELECT d.code,
+            AVG(p.rpb) FILTER (WHERE p.rpb > 0) AS mean_rpb,
+            STDDEV_SAMP(p.rpb) FILTER (WHERE p.rpb > 0) AS std_rpb,
+            COUNT(*) FILTER (WHERE p.rpb > 0) AS n_rpb,
+            AVG(p.cpb) FILTER (WHERE p.cpb > 0) AS mean_cpb,
+            STDDEV_SAMP(p.cpb) FILTER (WHERE p.cpb > 0) AS std_cpb,
+            COUNT(*) FILTER (WHERE p.cpb > 0) AS n_cpb,
+            (SELECT AVG(spend) FROM providers WHERE spend > 0) AS mean_spend,
+            (SELECT STDDEV_SAMP(spend) FROM providers WHERE spend > 0) AS std_spend
+        FROM providers p JOIN dominant d ON p.npi = d.npi AND d.rank = 1
+        GROUP BY d.code
+    """)
+    rpb = {r["code"]: (float(r["mean_rpb"] or 0), float(r["std_rpb"] or 0))
+           for r in rows if r["n_rpb"] >= 3}
+    cpb = {r["code"]: (float(r["mean_cpb"] or 0), float(r["std_cpb"] or 0))
+           for r in rows if r["n_cpb"] >= 3}
+    first = rows[0] if rows else {}
+    result = (rpb, cpb, float(first.get("mean_spend") or 0), float(first.get("std_spend") or 0))
+    unchanged = identity is not None and _cohort_source_identity(source) == identity
+    _cohort_observation = {
+        "status": "local_snapshot_recorded" if unchanged else "source_version_unknown",
+        "calculated_at": datetime.now(timezone.utc).isoformat(),
+        "source": _public_source_observation(source, identity if unchanged else None),
+        "scope": "whole source; grouped by dominant HCPCS; all billing periods present in source",
+        "coverage_verified": False,
+    }
+    _last_cohort_result = _copy_cohort(result)
+    # Do not cache a query whose source was replaced while it ran.
+    if unchanged:
+        _cohort_cache = (identity, time.monotonic(), _copy_cohort(result), dict(_cohort_observation))
+    return result

@@ -2,7 +2,7 @@
 Atomic JSON writes with file locking.
 Prevents data corruption from concurrent writes or process crashes mid-write.
 
-Uses threading locks per file path (process-safe) and atomic write via
+Uses threading locks per file path (in-process only) and atomic write via
 tempfile + os.replace (filesystem-safe).
 """
 import json
@@ -53,6 +53,8 @@ def atomic_write_json(path: pathlib.Path | str, data: Any, indent: int | None = 
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(data, f, default=str, indent=indent)
+                f.flush()
+                os.fsync(f.fileno())
             # Atomic replace
             os.replace(tmp_path, str(path))
         except BaseException:

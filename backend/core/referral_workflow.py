@@ -40,10 +40,10 @@ VALID_OUTCOMES = [
 # actually investigated and agreed. Everything else (filing the referral,
 # "pending", the analyst's own "confirmed" assessment) is weaker evidence and
 # must not be presented as a verified fraud label (audit 2026-10-24, item 3).
-SUBSTANTIATED_OUTCOMES = {"substantiated", "settlement", "criminal_charges", "civil_action"}
+SUBSTANTIATED_OUTCOMES = {"substantiated"}
 # An agency reviewed the case and found it did NOT hold up — genuine negative
 # signal, stronger than an internal "dismissed".
-REJECTED_OUTCOMES = {"unsubstantiated", "declined"}
+REJECTED_OUTCOMES = {"unsubstantiated"}
 
 
 # ── disk persistence ──────────────────────────────────────────────────────────
@@ -152,6 +152,7 @@ def update_referral(
     jurisdiction: Optional[str] = None,
     notes: Optional[str] = None,
     updated_by: str = "system",
+    evidence_reference: Optional[str] = None,
 ) -> Optional[dict]:
     """Update a referral's stage, outcome, or metadata."""
     with _lock:
@@ -163,7 +164,12 @@ def update_referral(
         if ref is None:
             return None
 
+        effective_reference = (evidence_reference if evidence_reference is not None else ref.get("evidence_reference", "")).strip()
+        if outcome in SUBSTANTIATED_OUTCOMES | REJECTED_OUTCOMES and not effective_reference:
+            raise ValueError("Documented outcome requires an evidence reference (agency document, URL, or case record)")
         now = time.time()
+        if evidence_reference is not None:
+            ref["evidence_reference"] = effective_reference
 
         if stage is not None:
             if stage not in REFERRAL_STAGES:
@@ -194,12 +200,7 @@ def update_referral(
             # feedback loop as real ground truth. Best-effort: an outcome
             # update must never fail because feedback recording failed.
             try:
-                from services.feedback_tracker import record_confirmation, record_dismissal
-                if outcome in SUBSTANTIATED_OUTCOMES:
-                    record_confirmation(ref["npi"])
-                elif outcome in REJECTED_OUTCOMES:
-                    record_dismissal(ref["npi"])
-                # "pending" records nothing — no outcome yet.
+                _refresh_outcome_feedback(ref["npi"])
             except Exception:
                 import logging as _l
                 _l.getLogger(__name__).warning(
@@ -231,6 +232,7 @@ def delete_referral(referral_id: int) -> Optional[dict]:
             if r["id"] == referral_id:
                 removed = _referrals.pop(i)
                 _save_to_disk()
+                _refresh_outcome_feedback(removed["npi"])
                 return removed
     return None
 
@@ -288,3 +290,38 @@ def get_referral_stats() -> dict:
         "by_stage": dict(by_stage),
         "by_outcome": dict(by_outcome),
     }
+
+
+def get_verified_labels() -> dict[str, int]:
+    """Documented independent findings only; contradictory findings stay unknown.
+
+    Charges, settlements, declining a referral, and analyst dispositions are
+    not adjudications of the underlying allegation. Legacy rows without a
+    source reference remain intact but do not enter validation or training.
+    """
+    candidates: dict[str, set[int]] = {}
+    for ref in get_referrals():
+        if not str(ref.get("evidence_reference") or "").strip():
+            continue
+        outcome = ref.get("outcome")
+        label = 1 if outcome in SUBSTANTIATED_OUTCOMES else 0 if outcome in REJECTED_OUTCOMES else None
+        if ref.get("npi") and label is not None:
+            candidates.setdefault(ref["npi"], set()).add(label)
+    return {npi: next(iter(labels)) for npi, labels in candidates.items() if len(labels) == 1}
+
+
+def _refresh_outcome_feedback(npi: str) -> None:
+    """Reconcile feedback against all remaining documented referral findings."""
+    from services.feedback_tracker import record_confirmation, record_dismissal, clear_label
+    label = get_verified_labels().get(npi)
+    if label is None:
+        clear_label(npi, source="independent_outcome")
+    else:
+        accepted = SUBSTANTIATED_OUTCOMES if label == 1 else REJECTED_OUTCOMES
+        reference = next(str(row["evidence_reference"]) for row in get_referrals()
+                         if row.get("npi") == npi and row.get("outcome") in accepted
+                         and str(row.get("evidence_reference") or "").strip())
+        record = record_confirmation if label == 1 else record_dismissal
+        record(npi, source="independent_outcome", evidence_reference=reference)
+    from services.supervised_scorer import schedule_retrain
+    schedule_retrain()

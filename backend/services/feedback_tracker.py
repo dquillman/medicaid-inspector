@@ -89,7 +89,7 @@ def _save() -> None:
             "fp_counts": _signal_fp_counts,
             "tp_counts": _signal_tp_counts,
             "dismissals": _dismissals,
-            "weight_adjustments": _weight_adjustments,
+            "weight_adjustments": {sig: get_weight_adjustment(sig) for sig in all_signals},
             "counted": _counted,
             "npi_signal_snapshot": _npi_signal_snapshot,
             "events": _events,
@@ -99,14 +99,14 @@ def _save() -> None:
         log.warning("Could not save feedback data: %s", e)
 
 
-def record_dismissal(npi: str) -> dict:
+def record_dismissal(npi: str, *, source: str = "analyst", evidence_reference: str = "") -> dict:
     """Record a dismissed case's fired signals as false positives (idempotent)."""
-    return _apply(npi, "fp")
+    return _apply(npi, "fp", source=source, evidence_reference=evidence_reference)
 
 
-def record_confirmation(npi: str) -> dict:
+def record_confirmation(npi: str, *, source: str = "analyst", evidence_reference: str = "") -> dict:
     """Record a confirmed/reported case's fired signals as true positives (idempotent)."""
-    return _apply(npi, "tp")
+    return _apply(npi, "tp", source=source, evidence_reference=evidence_reference)
 
 
 def _recalculate_weights() -> None:
@@ -139,9 +139,34 @@ def _recalculate_weights() -> None:
 
 def get_weight_adjustment(signal_name: str) -> float:
     """Get the weight multiplier for a signal (1.0 = no adjustment)."""
-    if not _weight_adjustments:
-        _load()
-    return _weight_adjustments.get(signal_name, 1.0)
+    # Analyst decisions and historical counters are not validated outcomes.
+    # Only documented independent outcome events may adjust ranking weights.
+    events = _verified_event_counts()
+    fp, tp = events[0].get(signal_name, 0), events[1].get(signal_name, 0)
+    return round(0.5 + 0.5 * tp / (fp + tp), 3) if fp + tp >= 5 else 1.0
+
+
+def _verified_event_counts() -> tuple[dict, dict]:
+    latest = {}
+    for event in _events:
+        if event.get("source") == "independent_outcome":
+            latest[event["npi"]] = event
+    counts = ({}, {})
+    for npi, event in latest.items():
+        if npi in _EXCLUDED_NPIS or not event.get("evidence_reference"):
+            continue
+        direction = event.get("direction")
+        if direction not in ("fp", "tp"):
+            continue
+        target = counts[0 if direction == "fp" else 1]
+        for signal in set(event.get("signals", [])):
+            target[signal] = target.get(signal, 0) + 1
+    return counts
+
+
+def clear_label(npi: str, *, source: str = "analyst", evidence_reference: str = "") -> dict:
+    return _apply(npi, "unlabeled", source=source, evidence_reference=evidence_reference)
+
 
 def _active_signals(npi: str) -> list[str]:
     """The signals that fired for this NPI, from the scan cache or the case."""
@@ -153,7 +178,7 @@ def _active_signals(npi: str) -> list[str]:
     return [x.get("signal", "") for x in sr if x.get("flagged") and x.get("signal")]
 
 
-def _apply(npi: str, direction: str) -> dict:
+def _apply(npi: str, direction: str, *, source: str = "analyst", evidence_reference: str = "") -> dict:
     """Count this NPI's fired signals as FP ('fp') or TP ('tp'), EXACTLY ONCE.
 
     Idempotent and reversible:
@@ -162,22 +187,25 @@ def _apply(npi: str, direction: str) -> dict:
                                  corrected label moves the evidence instead of
                                  double-counting it.
     """
-    assert direction in ("fp", "tp")
+    assert direction in ("fp", "tp", "unlabeled")
+    if source == "independent_outcome" and direction != "unlabeled" and not evidence_reference.strip():
+        raise ValueError("Independent outcome labels require an evidence reference")
     if npi in _EXCLUDED_NPIS:
         return {"recorded": False, "reason": f"{npi} is an excluded synthetic/test NPI"}
     prior = _counted.get(npi)
-    if prior == direction:
+    prior_event = next((e for e in reversed(_events) if e.get("npi") == npi), {})
+    if prior == direction and prior_event.get("source", "analyst") == source and prior_event.get("evidence_reference", "") == evidence_reference:
         return {"recorded": False, "reason": f"{npi} already counted as {direction}"}
 
-    signals = _active_signals(npi)
-    if not signals:
+    signals = sorted(set(_active_signals(npi))) if direction != "unlabeled" else []
+    if not signals and direction != "unlabeled":
         return {"recorded": False, "reason": "No active signals found for this NPI"}
 
     if prior:  # reverse the earlier, now-superseded label — using the ORIGINAL
         # signal snapshot from when that label was made, not today's signals
-        # (which may have drifted after a rescore). Falls back to today's
-        # signals only for legacy entries labeled before snapshots existed.
-        undo_signals = _npi_signal_snapshot.get(npi, signals)
+        # (which may have drifted after a rescore). Legacy contributions without
+        # snapshots remain auditable; never guess which counters to decrement.
+        undo_signals = _npi_signal_snapshot.get(npi, [])
         undo = _signal_fp_counts if prior == "fp" else _signal_tp_counts
         for sig in undo_signals:
             if undo.get(sig):
@@ -188,10 +216,15 @@ def _apply(npi: str, direction: str) -> dict:
     target = _signal_fp_counts if direction == "fp" else _signal_tp_counts
     for sig in signals:
         target[sig] = target.get(sig, 0) + 1
-    _counted[npi] = direction
-    _npi_signal_snapshot[npi] = signals
-    _events.append({"npi": npi, "direction": direction, "signals": signals,
-                     "timestamp": time.time(), "corrected_from": prior})
+    if direction == "unlabeled":
+        _counted.pop(npi, None)
+        _npi_signal_snapshot.pop(npi, None)
+    else:
+        _counted[npi] = direction
+        _npi_signal_snapshot[npi] = list(signals)
+    _events.append({"npi": npi, "direction": direction, "signals": list(signals),
+                     "timestamp": time.time(), "corrected_from": prior,
+                     "schema_version": 2, "source": source, "evidence_reference": evidence_reference})
 
     if direction == "fp":
         _dismissals.append({"npi": npi, "signals": signals, "timestamp": time.time()})
@@ -238,6 +271,8 @@ def rebuild_counts_from_events() -> dict:
             continue
         last_event_by_npi[ev["npi"]] = ev  # later events in the log supersede earlier ones
     for ev in last_event_by_npi.values():
+        if ev["direction"] == "unlabeled":
+            continue
         target = fp if ev["direction"] == "fp" else tp
         for sig in ev["signals"]:
             target[sig] = target.get(sig, 0) + 1
@@ -267,18 +302,23 @@ def get_feedback_summary() -> dict:
             "false_positives": fp,
             "true_positives": tp,
             "total": total,
-            "precision": round(tp / total, 3) if total > 0 else None,
-            "weight_adjustment": _weight_adjustments.get(sig, 1.0),
+            "precision": None,
+            "analyst_agreement_rate": round(tp / total, 3) if total > 0 else None,
+            "weight_adjustment": get_weight_adjustment(sig),
         })
 
     signal_stats.sort(key=lambda x: x["false_positives"], reverse=True)
 
     return {
+        "label_definition": "Analyst assessments; these are not verified fraud outcomes",
+        "sample_definition": "Selected reviewed providers, not a frozen top-50 evaluation",
+        "precision_at_50": None,
+        "independent_outcome_signal_counts": {"fp": _verified_event_counts()[0], "tp": _verified_event_counts()[1]},
         "total_dismissals": len(_dismissals),
         "total_fp_signals": sum(_signal_fp_counts.values()),
         "total_tp_signals": sum(_signal_tp_counts.values()),
         "signal_stats": signal_stats,
-        "weight_adjustments": _weight_adjustments,
+        "weight_adjustments": {sig: get_weight_adjustment(sig) for sig in all_signals},
     }
 
 

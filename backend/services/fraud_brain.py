@@ -6,14 +6,14 @@ Fuses every per-provider evidence source the app produces into one composite
 
   - the 18 rule-based fraud signals (risk_score + flag breadth)
   - Isolation Forest ML anomaly score (persisted ml_scores.json)
-  - the precomputed claim-level analyses (unbundling, duplicates, place-of-
+  - the precomputed aggregate pattern hypotheses (unbundling, duplicates, place-of-
     service, modifier abuse, impossible volume)
   - pharmacy / DME high-risk findings
   - doctor-shopping beneficiary findings
   - diagnosis-procedure mismatch flags
   - OIG LEIE exclusion (billing while excluded is the closest thing to a
     smoking gun this data has)
-  - dollars at risk (total Medicaid paid, percentile-scaled)
+  - total Medicaid paid (scale indicator, not established loss)
 
 Every input works from the slim cache + persisted/precomputed artifacts, so
 the ranking is identical on Cloud Run and the workstation. Results are cached
@@ -43,16 +43,9 @@ CACHE_TTL_SEC = 15 * 60
 RECENCY_FRESH_MONTHS = 6    # within 6 months of the dataset's newest claim
 RECENCY_AGING_MONTHS = 24   # within 24 months; older than that = stale
 
-# Beyond this CALENDAR age, a stale case is likely past the recovery window too:
-# the False Claims Act statute of limitations is 6 years from the violation
-# (stretchable to a 10-year hard cap only under the govt-didn't-know tolling
-# exception, which needs a specific legal determination — not a default). So a
-# provider whose last claim is >6 years old is neither an active scheme nor a
-# clean recovery: it gets its own "expired" tier so it visually separates from
-# the recoverable stale cases instead of crowding them under one badge. This is
-# CALENDAR-based (real statute clock), unlike the dataset-relative tiers above;
-# it always implies stale, so it slots in as the deepest tier.
-FCA_RECOVERY_WINDOW_MONTHS = 72  # 6 years
+# Calendar-age threshold for an additional timeliness-review annotation.
+# It is not a legal deadline and never removes a provider from the ranking.
+FCA_RECOVERY_WINDOW_MONTHS = 72  # compatibility name; prioritization only
 
 
 def _ym_index(ym: str | None) -> int | None:
@@ -95,25 +88,16 @@ def dataset_newest_month_index() -> int | None:
 
 
 def recency_badge(last_month: str | None, newest_idx: int | None = None) -> str | None:
-    """'fresh' / 'aging' / 'stale' / 'expired' for a last-claim month. None if
-    unknown. 'expired' is CALENDAR-based (last claim > the FCA recovery window,
-    ~6 years) and takes precedence — it's the deepest tier, separating likely-
-    unrecoverable providers from recoverable 'stale' ones. The other three are
-    dataset-relative (vs the newest claim month); pass newest_idx to avoid
-    recomputing it per-row in a batch.
-
-    This is a prioritization filter, not a legal eligibility determination —
-    'expired' leads still show on the board with the badge, they just rank
-    lower. See services/doj_shortlist.py's LIMITATION_YEARS (5yr, the
-    CRIMINAL statute of limitations) for the other, deliberately different,
-    age cutoff in this codebase (audit 2026-10-24, item 11)."""
+    """Data-age annotation only. 'older' requires timeliness review, not a
+    legal eligibility determination. Dataset-relative tiers describe freshness.
+    """
     idx = _ym_index(last_month)
     if idx is None:
         return None
-    # Past the recovery window entirely? (calendar age, real statute clock)
+    # Calendar-age prioritization threshold; never a legal deadline.
     age = months_since(last_month)
     if age is not None and age > FCA_RECOVERY_WINDOW_MONTHS:
-        return "expired"
+        return "older"
     if newest_idx is None:
         newest_idx = dataset_newest_month_index()
     if newest_idx is None:
@@ -126,10 +110,7 @@ def recency_badge(last_month: str | None, newest_idx: int | None = None) -> str 
 # Component weights — must sum to 1.0 (boosts apply on top, capped at 100)
 W_RULE_SIGNALS = 0.35   # composite risk_score from the 18 signals
 W_ML_ANOMALY   = 0.25   # Isolation Forest score
-W_CORROBORATION = 0.20  # genuinely independent analyses (pharmacy/DME/doctor-shopping/
-                        # Medicare-proxy diagnosis mismatch) that also flagged the NPI —
-                        # NOT the aggregate code-mix heuristics, which score zero here
-                        # (see _CORRELATED_NOT_INDEPENDENT, audit 2026-10-24)
+W_CORROBORATION = 0.20  # reserved; present aggregate analyses add zero points
 W_DOLLARS      = 0.10   # total_paid percentile
 W_FLAG_BREADTH = 0.10   # how many distinct signals fired
 
@@ -214,12 +195,14 @@ _ANALYSIS_SOURCES = {
     "diagnosis_flags": ("Diagnosis-procedure mismatch (Medicare proxy)", 20),
 }
 
-# These reuse the exact aggregate billing columns the rule-based signals
+# These analyses reuse aggregate billing inputs, rather than establishing
+# independent claim-level facts. Source diversity requires explicit validation.
+# They reuse the aggregate billing columns the rule-based signals
 # already score — summing them into "corroboration" as if they were
 # independent claim-level proof double-counts one data source. They remain
 # visible in the evidence list (still a useful lead for an investigator) but
 # contribute zero points to the composite score.
-_CORRELATED_NOT_INDEPENDENT = {"unbundling", "pos", "modifiers"}
+_CORRELATED_NOT_INDEPENDENT = set(_ANALYSIS_SOURCES)
 
 # Human labels for the ML feature columns, so the anomaly evidence can name
 # WHICH features made a provider an outlier instead of emitting a black-box
@@ -447,10 +430,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
     #   - REPORTED cases (queue_status referred / tip_filed / doj_filed): the work
     #     is done — filed with OIG, MFCU or DOJ. A membership gate, not a
     #     score input: nothing here changes any remaining provider's score.
-    #   - STALE providers (last claim >24mo behind the newest data): not an
-    #     active scheme.
-    #   - EXPIRED providers (last claim past the ~6yr FCA recovery window):
-    #     neither active nor recoverable.
+    # Data age never removes a provider: historical evidence requires review.
     # Excluded counts are reported in the result so the board can say what was
     # gated. Providers with no parseable claim months are kept (can't prove
     # staleness). Dismissed cases still rank (they're hidden by the queue gate
@@ -520,22 +500,15 @@ def compute_top_frauds(limit: int = 10) -> dict:
         if oig:
             continue
 
-        # Membership gates (see the note above): confirmed / reported / expired
-        # / stale providers are NOT ranked at all.
+        # Completed workflow cases are excluded; data age is annotation only.
         if npi in _confirmed:
             excluded_counts["confirmed"] += 1
             continue
         if npi in _reported:
             excluded_counts["reported"] += 1
             continue
-        _age = months_since(p.get("last_month"))
-        if _age is not None and _age > FCA_RECOVERY_WINDOW_MONTHS:
-            excluded_counts["expired"] += 1
-            continue
-        _lm_idx = _ym_index(p.get("last_month"))
-        if _lm_idx is not None and newest_idx is not None and (newest_idx - _lm_idx) > RECENCY_AGING_MONTHS:
-            excluded_counts["stale"] += 1
-            continue
+        # Historical and unknown-period leads remain discoverable. Age is
+        # annotated below; it cannot establish legal eligibility or inactivity.
 
         deact_date = get_deactivation(npi)
 
@@ -555,6 +528,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
         if risk > 0:
             evidence.append({
                 "source": "Rule-based signals",
+                "evidence_class": "statistical_anomaly",
                 "detail": f"Composite risk score {risk:.0f}/100 from {flag_count} fired signal(s)",
                 "points": round(components["rule_signals"], 1),
             })
@@ -576,6 +550,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
                         detail += f" — most unusual on {driver}"
                     evidence.append({
                         "source": "ML anomaly detection",
+                        "evidence_class": "statistical_anomaly",
                         "detail": detail,
                         "points": round(ml_component, 1),
                     })
@@ -599,14 +574,18 @@ def compute_top_frauds(limit: int = 10) -> dict:
                 # Aggregate code-mix heuristic, not independent of the
                 # rule-based signals above — shown as a lead, scored as zero.
                 evidence.append({
-                    "source": "Aggregate heuristic (not independent corroboration)",
+                    "source": "Aggregate hypothesis (not independent corroboration)",
+                    "evidence_class": "aggregate_hypothesis",
+                    "independent": False,
                     "detail": label,
                     "points": 0.0,
                 })
                 continue
             corr_raw += pts
             evidence.append({
-                "source": "Independent analysis",
+                "source": "Statistical analysis",
+                "evidence_class": "statistical_anomaly",
+                "independent": False,
                 "detail": label,
                 "points": round(min(pts, 100) * W_CORROBORATION, 1),
             })
@@ -660,7 +639,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
             if prob >= 0.5:
                 evidence.append({
                     "source": "Supervised ML (trained on your labels)",
-                    "detail": f"{prob:.0%} fraud probability from the review-queue-trained model",
+                    "detail": f"{prob:.0%} uncalibrated model score; not a fraud probability",
                     "points": round(components["supervised_ml"], 1),
                 })
 
@@ -804,7 +783,7 @@ def compute_top_frauds(limit: int = 10) -> dict:
         # nag forever and get ignored.
         "perse_waiting": _perse_waiting_summary(),
         # Membership gates (not score inputs): providers excluded from the
-        # ranking entirely — reported (work done), stale (not active), expired
+        # ranking entirely — reported (work done); age is annotation only.
         # (past the recovery window). They receive no brain rank.
         "excluded": excluded_counts,
         "ml_model_used": ml_trained,

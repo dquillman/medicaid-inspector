@@ -13,10 +13,10 @@ function num(v: number | null | undefined) {
 type Tab = 'shopping' | 'utilization' | 'geographic' | 'excessive'
 
 const TABS: { key: Tab; label: string; desc: string; countKey: string }[] = [
-  { key: 'shopping', label: 'Doctor Shopping', desc: 'Providers whose patients likely visit many other providers for the same services', countKey: 'doctor_shopping' },
-  { key: 'utilization', label: 'High Utilization', desc: 'Providers with claims/revenue per beneficiary far exceeding peers', countKey: 'high_utilization' },
-  { key: 'geographic', label: 'Geographic Anomalies', desc: 'Providers billing from multiple states — possible geographic impossibility', countKey: 'geographic_anomalies' },
-  { key: 'excessive', label: 'Excessive Services', desc: 'Providers with service counts per beneficiary exceeding 90th percentile', countKey: 'excessive_services' },
+  { key: 'shopping', label: 'Shared Code Competition', desc: 'Providers sharing service codes; no patient identities or cross-provider patient overlap are available', countKey: 'doctor_shopping' },
+  { key: 'utilization', label: 'High Utilization', desc: 'Claims/revenue per summed beneficiary count compared with peers', countKey: 'high_utilization' },
+  { key: 'geographic', label: 'Geographic Anomalies', desc: 'Provider location patterns requiring verification; patient travel is unknown', countKey: 'geographic_anomalies' },
+  { key: 'excessive', label: 'Excessive Services', desc: 'Service counts per summed beneficiary count above the 90th percentile', countKey: 'excessive_services' },
 ]
 
 function KpiCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
@@ -68,12 +68,12 @@ function DoctorShoppingTable({ data }: { data: any }) {
         <thead>
           <tr className="border-b border-gray-700">
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-400">NPI</th>
-            <SortHeader label="Shopping Score" field="shopping_score" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="Competition Score" field="shopping_score" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="Shared Codes" field="shared_code_count" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="Max Competing" field="max_competing_providers" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="Claims/Bene" field="claims_per_bene" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="Claims/Bene Count" field="claims_per_bene" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="Total Paid" field="total_paid" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="Benes" field="total_benes" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="Summed Bene Count" field="total_benes" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
           </tr>
         </thead>
         <tbody>
@@ -92,7 +92,7 @@ function DoctorShoppingTable({ data }: { data: any }) {
             </tr>
           ))}
           {rows.length === 0 && (
-            <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-500">No doctor shopping patterns detected</td></tr>
+            <tr><td colSpan={7} className="px-3 py-8 text-center text-gray-500">No shared-code competition hypotheses returned</td></tr>
           )}
         </tbody>
       </table>
@@ -110,12 +110,12 @@ function HighUtilizationTable({ data }: { data: any }) {
         <thead>
           <tr className="border-b border-gray-700">
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-400">NPI</th>
-            <SortHeader label="Claims/Bene" field="claims_per_bene" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="Claims/Bene Count" field="claims_per_bene" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="CPB Z-Score" field="cpb_z_score" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="Rev/Bene" field="rev_per_bene" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="Rev/Bene Count" field="rev_per_bene" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="RPB Z-Score" field="rpb_z_score" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="Total Paid" field="total_paid" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="Benes" field="total_benes" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="Summed Bene Count" field="total_benes" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-400">Peer P90</th>
           </tr>
         </thead>
@@ -172,7 +172,7 @@ function GeographicTable({ data }: { data: any }) {
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-400">State List</th>
             <SortHeader label="Servicing NPIs" field="servicing_npi_count" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="Total Paid" field="total_paid" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="Benes" field="total_benes" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="Summed Bene Count" field="total_benes" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
           </tr>
         </thead>
         <tbody>
@@ -220,7 +220,7 @@ function ExcessiveServicesTable({ data }: { data: any }) {
             <SortHeader label="x Median" field="multiple_of_median" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="Total Services" field="total_services" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <SortHeader label="Total Paid" field="total_paid" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
-            <SortHeader label="Benes" field="total_benes" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
+            <SortHeader label="Summed Bene Count" field="total_benes" sortBy={sortBy} sortDir={sortDir} onSort={onSort} />
             <th className="px-3 py-2 text-left text-xs font-medium text-gray-400">Peer Median</th>
           </tr>
         </thead>
@@ -267,7 +267,7 @@ export default function BeneficiaryFraud() {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center h-64 text-gray-400">
-        Loading beneficiary fraud analysis...
+        Loading aggregate utilization analysis...
       </div>
     )
   }
@@ -284,12 +284,16 @@ export default function BeneficiaryFraud() {
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Beneficiary Fraud Detection</h1>
+        <h1 className="text-2xl font-bold text-white">Aggregate Utilization Screening</h1>
         <p className="text-gray-400 text-sm mt-1">
-          Identify provider patterns that indicate beneficiary-level fraud: doctor shopping, excessive utilization, and geographic anomalies
+          Provider-level aggregate hypotheses for review. No beneficiary identities or records are available, so patient overlap, doctor shopping, and individual harm cannot be established.
         </p>
       </div>
 
+      <p className="text-xs text-amber-300 border-l-2 border-amber-700 pl-3">
+        Beneficiary counts are summed across source cells and can repeat people. Ratios are
+        aggregate intensity measures, not per-patient utilization. These patterns do not establish fraud.
+      </p>
       {/* KPI Cards */}
       <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-3">
         <KpiCard
@@ -297,7 +301,7 @@ export default function BeneficiaryFraud() {
           value={num(summary?.total_providers_analyzed)}
         />
         <KpiCard
-          label="Doctor Shopping"
+          label="Shared Code Competition"
           value={counts.doctor_shopping ?? 0}
           sub="provider-level flags"
         />

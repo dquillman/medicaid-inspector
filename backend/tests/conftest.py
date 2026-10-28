@@ -28,6 +28,8 @@ import pytest
 
 # ── 0. env must be set before anything imports the app ───────────────────────
 _BACKEND_DIR = pathlib.Path(__file__).resolve().parent.parent
+if os.environ.get("MFI_ISOLATED_SOURCE_ROOT") != str(_BACKEND_DIR.resolve()):
+    raise pytest.UsageError("Run python backend/scripts/run_isolated_tests.py; direct pytest may read operator state")
 if str(_BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(_BACKEND_DIR))
 
@@ -42,6 +44,10 @@ TEST_ADMIN_PASSWORD = "testpass123"
 os.environ["ADMIN_PASSWORD"] = BOOTSTRAP_PASSWORD    # deterministic bootstrap login
 os.environ["GCS_BUCKET"] = ""                        # no bucket => sync no-ops
 os.environ["EVIDENCE_ALLOW_LOCAL_ONLY"] = "1"        # evidence tests need no GCS
+os.environ["MFI_DISABLE_BACKGROUND_JOBS"] = "1"
+os.environ["NARRATIVE_LLM_ENABLED"] = "false"
+os.environ["HAL_TOKEN"] = ""
+os.environ["HAL_QCODE_DIR"] = ""
 os.environ.pop("K_SERVICE", None)                    # don't look like Cloud Run
 os.environ.pop("TRUSTED_PROXY", None)
 
@@ -130,8 +136,42 @@ def _neuter_gcs() -> None:
     gcs_sync.download_bytes = lambda *a, **k: None
 
 
-_redirect_state_paths()
 _neuter_gcs()
+_redirect_state_paths()
+
+# The source-only runner has no dataset. Refuse remote fallback, including
+# DuckDB's native HTTP transport (which Python socket mocks cannot intercept).
+if os.environ.get("MFI_OFFLINE_TESTS") == "1":
+    import socket
+
+    def _blocked_network(*args, **kwargs):
+        raise OSError("Network disabled in isolated MFI tests")
+
+    _socket_connect = socket.socket.connect
+    _socket_connect_ex = socket.socket.connect_ex
+
+    def _local_connect(sock, address):
+        if isinstance(address, tuple) and address[0] in {"127.0.0.1", "::1"}:
+            return _socket_connect(sock, address)
+        return _blocked_network()
+
+    def _local_connect_ex(sock, address):
+        if isinstance(address, tuple) and address[0] in {"127.0.0.1", "::1"}:
+            return _socket_connect_ex(sock, address)
+        return _blocked_network()
+
+    socket.socket.connect = _local_connect
+    socket.socket.connect_ex = _local_connect_ex
+    import duckdb
+    from data import duckdb_client as _offline_duckdb
+    _offline_connection = duckdb.connect(":memory:")
+    _offline_duckdb.get_connection = lambda: _offline_connection
+    _offline_duckdb.get_parquet_path = lambda: str(_TMP_STATE / "unavailable.parquet")
+
+    async def _no_remote_query(*args, **kwargs):
+        raise RuntimeError("No claims dataset in offline tests; stub the query explicitly")
+
+    _offline_duckdb.query_async = _no_remote_query
 
 
 # ── 2. deterministic sample data ─────────────────────────────────────────────

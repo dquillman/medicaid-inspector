@@ -10,7 +10,7 @@ composite is capped at 100 by min(composite, 100) in the scorer):
   billing_concentration           5  — single-code dominance (WEAK/corroborating: normal for whole legit
                                        specialties like dialysis/hospice/home-health; fires at >90% now, not 80%)
   revenue_per_bene_outlier       20  — revenue z-score vs. same-code peers (OIG statistical method)
-  claims_per_bene_anomaly        15  — claims/beneficiary z-score vs. SAME-top-code peers (cohort-normalized)
+  claims_per_bene_anomaly        15  — claims/summed beneficiary count z-score vs. SAME-top-code peers (cohort-normalized)
   billing_ramp_rate              15  — explosive growth + large absolute dollars (OIG new-provider screen)
   bust_out_pattern               15  — peak-then-exit pattern (documented in OIG enforcement actions)
   ghost_billing                   5  — QUARANTINED (2026-10-24): never flags, no documented
@@ -20,7 +20,7 @@ composite is capped at 100 by min(composite, 100) in the scorer):
   bene_concentration              8  — extremely high claims-per-bene ratio / phantom billing
   upcoding_pattern               10  — concentration on highest-value codes vs. peers
   address_cluster_risk            5  — 3+ providers sharing same physical address
-  oig_excluded                  100  — provider on OIG LEIE exclusion list (per-se fraud → maxes the score)
+  oig_excluded                  100  — OIG LEIE match requiring identity, date and payment-rule review
   specialty_mismatch              8  — billing outside NPPES taxonomy specialty (cross-specialty fraud)
   corporate_shell_risk            7  — one authorized official controlling 3+ billing NPIs
   geographic_impossibility        6  — NPPES state vs. billing state mismatch (cross-state fraud)
@@ -30,11 +30,11 @@ composite is capped at 100 by min(composite, 100) in the scorer):
   new_provider_explosion          7  — newly enumerated NPI with disproportionately high billing
 
 Total possible weight: ~266. The min(composite, 100) cap in the scorer handles overflow.
-oig_excluded=100 is the one authoritative per-se-fraud signal (LEIE is a curated
-exclusion list) so a verified excluded provider maxes the score. dead_npi_billing
+oig_excluded retains a high screening weight for administrative-list matches;
+that weight is not a legal finding or calibrated probability. dead_npi_billing
 was tried at high weight but the NPPES deactivation join proved too noisy (big legit
-institutions) — kept modest. Only flag PROVABLE fraud to the top when the source is
-reliable.
+institutions) — kept modest. Administrative matches require corroboration and
+program/period verification before any allegation of improper payment.
 
 References:
   OIG Medicaid Fraud Control Units Annual Report FY2024
@@ -121,9 +121,9 @@ def revenue_per_bene_outlier(
     flagged = z > 3.0
     score = min(max(z - 3.0, 0) / 3.0, 1.0) if z > 0 else 0.0
     reason = (
-        f"Revenue/beneficiary ${rpb:,.0f} is {z:.1f}σ above peers (mean ${peer_mean:,.0f})"
+        f"Revenue/summed beneficiary count ${rpb:,.0f} is {z:.1f}σ above peers (mean ${peer_mean:,.0f})"
         if flagged
-        else f"Revenue/beneficiary ${rpb:,.0f} within normal range (z={z:.2f})"
+        else f"Revenue/summed beneficiary count ${rpb:,.0f} within normal range (z={z:.2f})"
     )
     return _result("revenue_per_bene_outlier", score, 20, reason, flagged)
 
@@ -134,23 +134,11 @@ def claims_per_bene_anomaly(
     peer_mean: float = 0.0,
     peer_std: float = 0.0,
 ) -> SignalResult:
-    """
-    Total claims per unique beneficiary, z-scored against SAME-top-code peers
-    (cohort-normalized; the scorer passes cpb_stats[top_code]), flagged at >3σ.
+    """Claims divided by summed provider/code/month beneficiary counts.
 
-    OIG basis: OIG enforcement cases document extreme examples — 312 claims
-    per beneficiary in a single year (nearly one per day), or 48 claims/month
-    when peers average 4. Legitimate rates vary hugely by service type — a home
-    health or dialysis provider naturally bills many claims per beneficiary — so
-    the comparison is made WITHIN the provider's own top-code cohort (other
-    providers whose dominant code matches), not against all providers. That is
-    what keeps high-frequency specialties from being flagged just for their
-    specialty. (Falls back to an absolute >100 threshold only when the cohort
-    has <3 providers.)
-
-    Fallback threshold of 100 claims/beneficiary is used when fewer than 3
-    providers have been scanned (OIG documented real fraud cases exceeding
-    this absolute level regardless of peer group).
+    Compare only against the same dominant-code cohort. These denominators
+    are not unique patients. With no usable cohort variation, return an
+    unflagged insufficient-data result rather than an absolute accusation.
     """
     cpb = provider.get("claims_per_beneficiary") or 0.0
 
@@ -159,18 +147,14 @@ def claims_per_bene_anomaly(
         flagged = z > 3.0
         score = min(max(z - 3.0, 0) / 3.0, 1.0) if z > 0 else 0.0
         reason = (
-            f"{cpb:.1f} claims/beneficiary is {z:.1f}σ above peer mean ({peer_mean:.1f})"
+            f"{cpb:.1f} claims/summed beneficiary count is {z:.1f}σ above peer mean ({peer_mean:.1f})"
             if flagged
-            else f"{cpb:.1f} claims/beneficiary within normal range (z={z:.2f}, mean={peer_mean:.1f})"
+            else f"{cpb:.1f} claims/summed beneficiary count within normal range (z={z:.2f}, mean={peer_mean:.1f})"
         )
     else:
-        flagged = cpb > 100.0
-        score = min(max(cpb - 100.0, 0) / 100.0, 1.0) if cpb > 50.0 else 0.0
-        reason = (
-            f"{cpb:.1f} claims/beneficiary exceeds absolute limit of 100 (no peer data yet)"
-            if flagged
-            else f"{cpb:.1f} claims/beneficiary (insufficient peer data for z-score)"
-        )
+        flagged = False
+        score = 0.0
+        reason = f"{cpb:.1f} claims/summed beneficiary count (insufficient cohort variation for comparison)"
 
     # Weight 22 (was 15): the STRONGEST discriminator measured against known fraud
     # — fires 9.8% on OIG-excluded vs 1.1% on everyone (8.6x lift). Weighted to
@@ -403,14 +387,9 @@ def bene_concentration(provider: dict) -> SignalResult:
         or 0
     )
 
-    if total_bene == 0:
-        if total_claims > 0:
-            return _result(
-                "bene_concentration", 1.0, 8,
-                f"{total_claims} claims with 0 beneficiaries — possible phantom billing",
-                True,
-            )
-        return _result("bene_concentration", 0.0, 3, "No claims data", False)
+    if total_bene <= 0:
+        return _result("bene_concentration", 0.0, 3,
+                       "Beneficiary denominator unavailable or zero; concentration cannot be assessed", False)
 
     ratio = total_claims / total_bene
 
@@ -424,22 +403,22 @@ def bene_concentration(provider: dict) -> SignalResult:
     if phantom and high_ratio:
         score = min(ratio / 30.0, 1.0)
         reason = (
-            f"{total_claims} claims across only {total_bene} beneficiaries "
-            f"({ratio:.1f} claims/bene) — phantom billing pattern"
+            f"{total_claims} claims across only {total_bene} summed beneficiary observations "
+            f"({ratio:.1f} claims/count) — aggregate concentration hypothesis"
         )
     elif phantom:
         score = min(total_claims / 500.0, 1.0)
         reason = (
-            f"Only {total_bene} beneficiaries but {total_claims} total claims — "
-            f"possible phantom billing"
+            f"Only {total_bene} summed beneficiary observations but {total_claims} total claims — "
+            f"aggregate concentration hypothesis"
         )
     elif high_ratio:
         # Scale: 15 = threshold, 30 = max score
         score = min(max(ratio - 15, 0) / 15.0, 1.0)
-        reason = f"{ratio:.1f} claims/beneficiary (threshold: 15) — high concentration"
+        reason = f"{ratio:.1f} claims/summed beneficiary count (threshold: 15) — high concentration"
     else:
         score = 0.0
-        reason = f"{ratio:.1f} claims/beneficiary — within normal range"
+        reason = f"{ratio:.1f} claims/summed beneficiary count — within normal range"
 
     # Weight 3 (was 8): 14.6% on known fraud vs 14.8% on everyone — ~1.0x lift,
     # non-discriminative against the OIG-excluded ground truth.
@@ -831,17 +810,12 @@ def geographic_impossibility(row: dict) -> SignalResult:
 
 # ── 12. OIG exclusion boost ────────────────────────────────────────────
 def oig_excluded(npi: str, row: dict | None = None) -> SignalResult:
-    """
-    Flag a provider on the OIG LEIE exclusion list, distinguishing ACTIVE
-    billing-while-excluded from historical exclusions.
+    """Screen an OIG LEIE match against the aggregate billing period.
 
-    OIG basis: any Medicaid billing by an excluded provider AFTER the exclusion
-    date is per se fraudulent under 42 USC 1320a-7b — that maxes the score. But
-    95% of raw LEIE matches in this dataset billed and were excluded LATER (the
-    exclusion postdates their billing): those are still strong RECOVERY leads
-    (clawing back payments to a since-excluded provider) but not active fraud, so
-    they get a reduced score rather than topping the list as per-se fraud.
-    EXCLDATE is YYYYMMDD; the provider's last_month is YYYY-MM.
+    Monthly totals cannot establish exact service dates or improper payment.
+    Exclusion after billing does not itself invalidate prior payments. Verify
+    identity, exclusion/reinstatement dates, and applicable Medicaid rules.
+    Existing screening weights are unchanged; they do not establish fraud.
     """
     from core.oig_store import is_excluded as _is_excluded
 
@@ -860,19 +834,20 @@ def oig_excluded(npi: str, row: dict | None = None) -> SignalResult:
     lm = _ym((row or {}).get("last_month")) if row else None
 
     if ed and lm and lm < ed:
-        # All billing predates the exclusion — historical; a recovery lead, not
-        # active per-se fraud. Reduced score so it ranks below active cases.
+        # Historical match only; prior payments are not thereby improper.
         return _result(
             "oig_excluded", 0.6, 100,
             f"Provider {npi} ({name}) was OIG-excluded {excl_date}, AFTER this "
-            f"billing period — prior Medicaid payments are a recovery lead",
+            f"billing period — this match does not establish that prior Medicaid payments were improper",
             True,
         )
 
+    timing = ("billing reaches the exclusion month or later; exact service-date overlap is unverified"
+              if ed and lm else "billing/exclusion timing is unknown")
     return _result(
         "oig_excluded", 1.0, 100,
         f"Provider {npi} ({name}) on the OIG LEIE exclusion list (excluded "
-        f"{excl_date or 'unknown'}) with billing on/after exclusion — per-se fraud",
+        f"{excl_date or 'unknown'}); {timing}. Verify identity, reinstatement and applicable payment rules; not proof of fraud",
         True,
     )
 
@@ -1219,6 +1194,15 @@ def specialty_mismatch(row: dict, hcpcs: list[dict]) -> SignalResult:
     """
     if not hcpcs:
         return _result("specialty_mismatch", 0.0, 8, "No HCPCS data", False)
+
+    # Alternate code systems cannot be interpreted through HCPCS specialty
+    # prefixes. Keep the original aggregates, but withhold this inference.
+    import re
+    if any(not re.fullmatch(r"[A-Za-z0-9]{5}", str(item.get("hcpcs_code") or ""))
+           for item in hcpcs):
+        return _result("specialty_mismatch", 0.0, 8,
+                       "Specialty comparison unavailable: source codes include an incompatible or unknown code system",
+                       False)
 
     # ── Resolve the provider's taxonomy description ──────────────────────
     # It may be nested under row["nppes"]["taxonomy"]["description"] or

@@ -24,7 +24,7 @@ import httpx
 _BACKEND = pathlib.Path(__file__).parent.parent
 _TARGET = _BACKEND / "data" / "medicaid-provider-spending.parquet"
 _TMP = _BACKEND / "data" / "medicaid-provider-spending.parquet.tmp"
-_URL = "https://storage.googleapis.com/medicaid-inspector-data/medicaid-provider-spending.parquet"
+_URL = "https://storage.googleapis.com/medicaid-inspector-public-aggregates/medicaid-provider-spending.parquet"
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(message)s")
 

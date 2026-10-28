@@ -39,7 +39,7 @@ from collections import defaultdict
 # precomputed_analyses.json, and services/precomputed_store.py warns when a
 # loaded file's version doesn't match (audit 2026-10-24, item 9: stale
 # evidence must be visible, not silently served as current).
-SPEC_VERSION = "2026-10-24.1"
+SPEC_VERSION = "2026-10-26.1"
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -150,7 +150,7 @@ def _is_procedure(code: str) -> bool:
 
 def _compute_all_from_cache(limit: int = 100) -> dict[str, list[dict]]:
     """
-    Compute all 5 claim-level analyses from the in-memory prescan provider cache.
+    Compute aggregate screening analyses from the in-memory prescan provider cache.
     This is ~1000x faster than querying the Parquet file.
 
     When the slim cache is loaded (no per-HCPCS / per-timeline arrays),
@@ -176,7 +176,10 @@ def _compute_all_from_cache(limit: int = 100) -> dict[str, list[dict]]:
             from services.precomputed_store import get_precomputed
             pre = get_precomputed("claim_patterns")
             if pre:
-                return {k: (v[:limit] if isinstance(v, list) else v) for k, v in pre.items()}
+                return {k: ([{**row, "evidence_class": "aggregate_hypothesis", "independent": False,
+                              "verified": False, "data_grain": "provider_hcpcs_month"}
+                             for row in v[:limit]] if isinstance(v, list) else v)
+                        for k, v in pre.items()}
             return {**_empty, "note": SLIM_REMOTE_NOTE}
         providers = enrich_top_providers(include_timeline=True)
         if not providers:
@@ -262,7 +265,8 @@ def _compute_all_from_cache(limit: int = 100) -> dict[str, list[dict]]:
                 "total_paid": total_paid,
                 "surgical_ratio": round(surg_ratio, 3),
                 "office_ratio": round(office_em_claims / total_claims, 3) if total_claims else 0,
-                "violation_type": "surgical_in_office",
+                "violation_type": "unknown",
+                "pattern_type": "surgery_and_office_code_mix",
                 "severity": "CRITICAL" if surg_ratio >= 0.5 else ("HIGH" if surg_ratio >= 0.3 else "MEDIUM"),
             })
 
@@ -278,7 +282,7 @@ def _compute_all_from_cache(limit: int = 100) -> dict[str, list[dict]]:
             combo_share = (em_paid + proc_paid) / total_paid if total_paid > 0 else 0
             patterns = []
             if proc_to_em > 0.4:
-                patterns.append("mod-25 (E&M + procedure combo)")
+                patterns.append("E&M and procedure code mix; modifier use is unknown")
             if em_rate > 0.7:
                 patterns.append("high E&M concentration")
             mod_results.append({
@@ -345,6 +349,12 @@ def _compute_all_from_cache(limit: int = 100) -> dict[str, list[dict]]:
     elapsed = _time.time() - t0
     logger.info("Claim pattern analysis from cache: %.2fs (%d providers)", elapsed, len(providers))
 
+    for rows in (unbundling_results, pos_results, mod_results, imp_results):
+        for row in rows:
+            row.update(evidence_class="aggregate_hypothesis", independent=False,
+                       verified=False, data_grain="provider_hcpcs_month",
+                       limitation="Aggregate pattern only; underlying claim details are unavailable.")
+
     return {
         "unbundling": unbundling_results[:limit],
         "duplicates": dup_results[:limit],
@@ -405,7 +415,7 @@ async def detect_impossible_days(limit: int = 100) -> list[dict]:
 
 
 async def get_provider_claim_patterns(npi: str) -> dict:
-    """Return all claim-level patterns for a specific provider."""
+    """Return aggregate hypotheses; never verified claim-level violations."""
     from core.store import get_provider_by_npi
 
     prov = get_provider_by_npi(npi)
@@ -472,6 +482,9 @@ async def get_provider_claim_patterns(npi: str) -> dict:
             })
     impossible_days.sort(key=lambda x: x["benes_per_day"], reverse=True)
 
+    for row in unbundling + impossible_days:
+        row.update(evidence_class="aggregate_hypothesis", independent=False, verified=False,
+                   data_grain="provider_hcpcs_month")
     return {"npi": npi, "unbundling": unbundling, "duplicates": [], "impossible_days": impossible_days}
 
 

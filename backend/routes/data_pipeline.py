@@ -206,8 +206,11 @@ async def dataset_switch(body: DatasetSwitchBody):
 @router.get("/data-quality")
 async def data_quality():
     """Return the latest data validation summary."""
-    from services.data_validator import get_validation_result
-    return get_validation_result()
+    from services.data_validator import get_validation_result, get_schema_check_result
+    from services.precomputed_store import get_staleness_info
+    from core.gcs_sync import get_sync_status
+    return {**get_validation_result(), "schema": get_schema_check_result(),
+            "derived_artifact": get_staleness_info(), "persistence": get_sync_status()}
 
 
 @router.post("/data-quality/run")

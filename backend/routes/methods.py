@@ -47,12 +47,11 @@ _PROVENANCE = {
 # limits of the evidence, and a reviewer should not have to infer them.
 _OUT_OF_SCOPE = {
     "note": (
-        "These fraud types are not unimplemented — they are undetectable from public data. "
+        "These fraud types cannot be established from this aggregate Medicaid dataset. "
         "The public Medicaid file is pre-aggregated to billing NPI x HCPCS x month, so "
         "within-claim detail (line items, modifiers, service dates, ordering/referring NPI) "
-        "does not exist in any dataset MFI can lawfully obtain. The only line-level source "
-        "(T-MSIS/TAF via ResDAC) requires IRB approval, a HIPAA waiver and an institutional "
-        "signatory. MFI detects provider-level patterns and claims nothing beyond that."
+        "is absent from the inputs used here. MFI detects provider-level hypotheses; "
+        "confirming an individual violation requires appropriate underlying evidence."
     ),
     "cannot_detect": [
         "Unbundling — billing component codes separately instead of the bundled code.",
@@ -65,10 +64,12 @@ _OUT_OF_SCOPE = {
 }
 
 _COMPOSITE_NOTE = (
-    "Each signal returns a 0–100 sub-score and a weight; the composite risk score is the "
+    "Each signal returns a normalized 0–1 sub-score and a weight; the composite risk score is the "
     "weighted sum, capped at 100. It is a RANKING of relative suspicion (worked top-down), "
     "NOT a calibrated probability — a score of 80 does not mean “80% likely fraud.” "
-    "Signals that lack the data to fire abstain (contribute zero) rather than diluting the score."
+    "Signals that lack the data to fire abstain (contribute zero) rather than diluting the score. "
+    "Aggregate code-mix analyses are hypotheses, not independent corroboration; they add "
+    "no corroboration points. Filing a referral is a workflow event, not proof of fraud."
 )
 
 

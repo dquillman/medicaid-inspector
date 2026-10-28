@@ -44,13 +44,13 @@ export default function SpendingTimeline({ data }: Props) {
             labelStyle={{ color: '#e5e7eb' }}
             formatter={(v: number, name: string) => [
               name === 'total_paid' ? fmt(v) : v.toLocaleString(),
-              name === 'total_paid' ? 'Total Paid' : name === 'total_claims' ? 'Claims' : 'Beneficiaries',
+              name === 'total_paid' ? 'Total Paid' : name === 'total_claims' ? 'Claims' : 'Summed beneficiary count',
             ]}
           />
           <Legend
             formatter={(v) =>
               v === 'total_paid' ? 'Total Paid' :
-              v === 'total_claims' ? 'Claims' : 'Beneficiaries'
+              v === 'total_claims' ? 'Claims' : 'Summed beneficiary count'
             }
           />
           <Area type="monotone" dataKey="total_paid" stroke="#3b82f6" strokeWidth={2} fill="url(#gradPaid)" dot={false} />

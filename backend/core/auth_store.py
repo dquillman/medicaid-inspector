@@ -6,6 +6,7 @@ Persists users to backend/users.json.
 import hashlib
 import hmac
 import json
+import math
 import os
 import secrets
 import time
@@ -27,6 +28,24 @@ _SESSION_IDLE_TTL = int(os.environ.get("MFI_SESSION_IDLE_HOURS", "12")) * 3600
 # Only re-persist last_seen when it advances by this much, to avoid a disk
 # write on every authenticated request.
 _LAST_SEEN_PERSIST_INTERVAL = 60
+_SESSIONS_VALID_AFTER = float(os.environ.get("MFI_SESSIONS_VALID_AFTER", "0"))
+if not math.isfinite(_SESSIONS_VALID_AFTER) or _SESSIONS_VALID_AFTER < 0:
+    raise ValueError("MFI_SESSIONS_VALID_AFTER must be a finite nonnegative epoch")
+
+
+def _session_timestamp_valid(session: dict, now: float) -> bool:
+    """A deployment revocation floor also rejects stale state republished later."""
+    if not isinstance(session, dict):
+        return False
+    created = session.get("created_at")
+    seen = session.get("last_seen", created)
+    if any(isinstance(value, bool) or not isinstance(value, (int, float))
+           or not math.isfinite(value) for value in (created, seen)):
+        return False
+    return (_SESSIONS_VALID_AFTER <= created <= now
+            and created <= seen <= now
+            and now - created < _SESSION_ABSOLUTE_TTL
+            and now - seen < _SESSION_IDLE_TTL)
 
 # ── Roles & Permissions ──────────────────────────────────────────────────────
 
@@ -194,7 +213,7 @@ def init_auth_store() -> None:
         if not admin_password:
             admin_password = secrets.token_urlsafe(16)
             print(
-                f"[auth_store] *** Cold bootstrap — one-time admin password: {admin_password}. "
+                "[auth_store] Cold bootstrap: random admin credential created; value withheld. "
                 f"Set ADMIN_PASSWORD env var in Cloud Run to make this permanent. ***"
             )
         create_user("admin", admin_password, "admin", "Administrator")
@@ -219,7 +238,7 @@ def init_auth_store() -> None:
         admin_password = secrets.token_urlsafe(16)
         create_user("admin", admin_password, "admin", "Administrator")
         print(
-            f"[auth_store] *** Created missing 'admin' with one-time password: {admin_password}. "
+            "[auth_store] Created missing admin with random credential; value withheld. "
             f"Set ADMIN_PASSWORD env var and restart for a stable password. ***"
         )
     print(f"[auth_store] Loaded {len(_users)} users (existing admin hashes preserved)")
@@ -385,7 +404,8 @@ def save_sessions_to_disk() -> None:
     sessions were loaded from GCS at ITS startup and never saw the new token.
     Mirrors _save_users(); non-blocking, never raises."""
     try:
-        data = {token: sess for token, sess in _sessions.items()}
+        now = time.time()
+        data = {token: sess for token, sess in _sessions.items() if _session_timestamp_valid(sess, now)}
         atomic_write_json(_SESSIONS_FILE, data, indent=2)
         try:
             from core.gcs_sync import upload_file
@@ -409,7 +429,7 @@ def load_sessions_from_disk() -> None:
                 now = time.time()
                 _sessions = {
                     token: sess for token, sess in raw.items()
-                    if now - sess.get("created_at", 0) < 30 * 24 * 3600
+                    if _session_timestamp_valid(sess, now)
                 }
                 print(f"[auth_store] Loaded {len(_sessions)} sessions from disk")
     except Exception as e:
@@ -441,8 +461,7 @@ def get_session_user(token: str) -> Optional[dict]:
         return None
     now = time.time()
     last_seen = session.get("last_seen", session.get("created_at", now))
-    if (now - session.get("created_at", now) > _SESSION_ABSOLUTE_TTL
-            or now - last_seen > _SESSION_IDLE_TTL):
+    if not _session_timestamp_valid(session, now):
         del _sessions[token]
         save_sessions_to_disk()
         return None

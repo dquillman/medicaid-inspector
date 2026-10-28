@@ -116,7 +116,7 @@ export default function MFCUReferralPage() {
 
   const { data: refsData } = useQuery({
     queryKey: ['referrals', npi],
-    queryFn: () => get<{ referrals: any[]; total: number }>(`/referrals/provider/${npi}`),
+    queryFn: () => get<{ referrals: MFCUReferral[]; total: number }>(`/referrals/provider/${npi}`),
     enabled: !!npi,
   })
 
@@ -644,7 +644,8 @@ export default function MFCUReferralPage() {
                 <p className="text-gray-500 text-xs mb-2">Previous Referrals ({refsData.total})</p>
                 <div className="space-y-1">
                   {refsData.referrals.slice(0, 3).map((r: any, i: number) => (
-                    <div key={i} className="text-xs flex items-center justify-between">
+                    <div key={i} className="text-xs border-b border-gray-700 pb-3">
+                      <div className="flex items-center justify-between">
                       <span className="text-gray-400 font-mono">{r.referral_id ?? r.id}</span>
                       <span className={`px-1.5 py-0.5 rounded text-xs font-bold ${
                         r.stage === 'submitted' ? 'bg-blue-900/50 text-blue-300' :
@@ -654,6 +655,8 @@ export default function MFCUReferralPage() {
                       }`}>
                         {r.stage}
                       </span>
+                      </div>
+                      <ReferralOutcomeEditor referral={r} onSaved={() => { queryClient.invalidateQueries({ queryKey: ['referrals', npi] }) }} />
                     </div>
                   ))}
                 </div>
@@ -664,4 +667,43 @@ export default function MFCUReferralPage() {
       </div>
     </div>
   )
+}
+
+
+function ReferralOutcomeEditor({ referral, onSaved }: { referral: MFCUReferral; onSaved: () => void }) {
+  const [outcome, setOutcome] = useState(referral.outcome ?? 'pending')
+  const [reference, setReference] = useState(referral.evidence_reference ?? '')
+  const [note, setNote] = useState(referral.outcome_notes ?? '')
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+  const needsReference = outcome === 'substantiated' || outcome === 'unsubstantiated'
+  async function save() {
+    setSaving(true)
+    setMessage('')
+    try {
+      await api.updateReferral(referral.id, { outcome, outcome_notes: note, evidence_reference: reference.trim() })
+      setMessage('Outcome saved')
+      onSaved()
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to save outcome')
+    } finally {
+      setSaving(false)
+    }
+  }
+  return <div className="mt-2 space-y-2">
+    <label className="block text-gray-400">Agency outcome
+      <select className="block w-full bg-gray-900 border border-gray-600 rounded p-1" value={outcome} onChange={event => setOutcome(event.target.value)}>
+        {['pending', 'substantiated', 'unsubstantiated', 'settlement', 'criminal_charges', 'civil_action', 'declined'].map(value => <option key={value} value={value}>{value.replace(/_/g, ' ')}</option>)}
+      </select>
+    </label>
+    <p className="text-gray-500">Only documented substantiated or unsubstantiated findings enter validation. Filing, charges, settlements and declined referrals do not establish an outcome label.</p>
+    <label className="block text-gray-400">Agency evidence reference{needsReference ? ' (required)' : ''}
+      <input className="block w-full bg-gray-900 border border-gray-600 rounded p-1" value={reference} onChange={event => setReference(event.target.value)} placeholder="Agency document, case record or URL" />
+    </label>
+    <label className="block text-gray-400">Outcome notes
+      <textarea className="block w-full bg-gray-900 border border-gray-600 rounded p-1" value={note} onChange={event => setNote(event.target.value)} />
+    </label>
+    <button type="button" className="px-2 py-1 rounded border border-gray-600 disabled:opacity-40" disabled={saving || (needsReference && !reference.trim())} onClick={save}>{saving ? 'Saving…' : 'Save outcome'}</button>
+    {message && <p role="status" className="text-gray-400">{message}</p>}
+  </div>
 }

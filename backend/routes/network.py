@@ -1,13 +1,11 @@
 import asyncio
 import pathlib
-import re
 from fastapi import APIRouter, HTTPException, Depends
 from data.duckdb_client import query_async, get_parquet_path
 from routes.auth import require_user
+from core.identity_contract import is_valid_npi, valid_npi_sql
 
 router = APIRouter(prefix="/api/network", tags=["network"], dependencies=[Depends(require_user)])
-
-_NPI_RE = re.compile(r"^\d{10}$")
 
 # Workstation-precomputed ego-network index, sorted by center_npi so a per-NPI
 # lookup is a row-group-pruned `WHERE center_npi = '...'` (milliseconds) instead
@@ -46,10 +44,13 @@ async def get_network(npi: str):
     full scans of the remote file.
     """
     # Validate NPI format before interpolating into SQL (prevent SQL injection)
-    if not _NPI_RE.match(npi):
-        raise HTTPException(400, "Invalid NPI — must be exactly 10 digits")
+    if not is_valid_npi(npi):
+        raise HTTPException(400, "Invalid NPI format or checksum")
+    using_index = _index_available()
+    valid_b = valid_npi_sql("b")
+    valid_s = valid_npi_sql("s")
 
-    if _index_available():
+    if using_index:
         # Fast path: read the pre-aggregated, NPI-sorted index. DuckDB prunes to
         # the row group(s) for this center_npi, so this returns in milliseconds.
         idx = str(_NETWORK_INDEX).replace("\\", "/")
@@ -57,6 +58,7 @@ async def get_network(npi: str):
         SELECT neighbor_npi, edge_type, edge_weight, claim_count
         FROM read_parquet('{idx}')
         WHERE center_npi = '{npi}'
+          AND {valid_npi_sql('neighbor_npi')}
         """
     else:
         # Fallback: live single-scan materialization (slow but correct) for envs
@@ -85,8 +87,9 @@ async def get_network(npi: str):
                 SUM(paid)  AS edge_weight,
                 COUNT(*)   AS claim_count
             FROM base
-            WHERE (b = '{npi}' AND s IS NOT NULL AND s != '{npi}')
-               OR (s = '{npi}' AND b IS NOT NULL AND b != '{npi}')
+            WHERE {valid_b} AND {valid_s}
+              AND ((b = '{npi}' AND s != '{npi}')
+               OR (s = '{npi}' AND b != '{npi}'))
             GROUP BY 1, 2
         ),
         edges AS (
@@ -122,8 +125,11 @@ async def get_network(npi: str):
             f"background — try again in a moment.",
         )
 
-    center_row = next((r for r in rows if r["edge_type"] == "__center__"), None)
-    edge_rows = [r for r in rows if r["edge_type"] != "__center__"]
+    center_row = next((r for r in rows if r["edge_type"] == "__center__"
+                       and str(r.get("neighbor_npi")) == npi), None)
+    edge_rows = [{**r, "neighbor_npi": str(r["neighbor_npi"])} for r in rows
+                 if r.get("edge_type") in ("billing_to_servicing", "servicing_from_billing")
+                 and is_valid_npi(r.get("neighbor_npi")) and str(r["neighbor_npi"]) != npi]
 
     self_paid = (center_row["edge_weight"] if center_row else 0) or 0
     self_claims = (center_row["claim_count"] if center_row else 0) or 0
@@ -151,4 +157,7 @@ async def get_network(npi: str):
         for e in edge_rows
     ]
 
-    return {"center_npi": npi, "nodes": nodes, "edges": edges}
+    return {"center_npi": npi, "nodes": nodes, "edges": edges,
+            "identity_validation": "Both edge endpoints require ASCII NPI syntax and checksum; unavailable identities never become links",
+            "coverage_caveat": ("Precomputed index has no verified lineage manifest; endpoints were revalidated, but prior top-N truncation may omit eligible links. " if using_index else "")
+                               + "Checksum eligibility does not establish registry identity, ownership, or improper payment. Billing self-totals retain rows with unavailable servicing identity."}

@@ -89,8 +89,11 @@ def test_packet_multi_signal_structure():
     # consolidated citation trail is populated and de-duplicated
     assert pkt["citations"]
     assert len(pkt["citations"]) == len(set(pkt["citations"]))
-    # recommendation escalates at risk >= 50
-    assert "IMMEDIATE REFERRAL" in pkt["recommendation"]["level"]
+    # Statistical scores never establish referral readiness.
+    assert "IMMEDIATE REFERRAL" not in pkt["recommendation"]["level"]
+    assert pkt["recommendation"]["referral_ready"] is False
+    assert pkt["check_states"]["exclusions"] == "error"
+    assert pkt["exclusions"]["any_excluded"] is None
 
 
 def test_packet_renders_html_multi_signal():
@@ -109,9 +112,10 @@ def test_packet_renders_html_multi_signal():
                     "9. Plain-English Narrative", "10. Referral Recommendation",
                     "11. Source"]:
         assert heading in html, f"missing section: {heading}"
-    # methodology, proof, and a citation surface in the signal section
+    # Methodology, screening observations, and citations remain distinct.
     assert "Methodology:" in html
-    assert "Finding (proof):" in html
+    assert "Screening observation:" in html
+    assert "Finding (proof):" not in html
     assert "Regulatory basis:" in html
     # visual timeline chart rendered (2+ months)
     assert "<svg" in html
@@ -127,7 +131,7 @@ def test_packet_zero_signals_edge_case():
     assert pkt["risk"]["flagged_count"] == 0
     # no citations when nothing fired
     assert pkt["citations"] == []
-    assert "CONTINUE MONITORING" in pkt["recommendation"]["level"]
+    assert "NO ELEVATED STATISTICAL PRIORITY" in pkt["recommendation"]["level"]
     html = render_referral_html(pkt)
     assert html.startswith("<!DOCTYPE html>")
     # renders cleanly with the "no citations" fallback and no crash
@@ -155,3 +159,43 @@ if __name__ == "__main__":
             failed += 1
             print(f"FAIL {fn.__name__}: {e}")
     sys.exit(1 if failed else 0)
+
+
+def test_packet_preserves_unknown_signals_and_enrichment_in_html():
+    pkt = _build("1234567890", risk=99, signals=[
+        {"signal": "dead_npi_billing", "flagged": False, "score": 0,
+         "reason": "No NPPES data available — cannot verify NPI status"}])
+    assert pkt["signals"][0]["check_status"] == "unavailable"
+    rendered = render_referral_html(pkt)
+    assert "exclusions: error" in rendered
+    assert "check status: unavailable" in rendered
+    assert "Finding (proof)" not in rendered
+    assert "IMMEDIATE REFERRAL" not in rendered
+
+
+def test_provider_report_preserves_unavailable_signal_status():
+    from routes.providers import _build_report_html
+    provider = _provider("1234567890", risk=0, signals=[
+        {"signal": "dead_npi_billing", "flagged": False, "score": 0,
+         "reason": "No NPPES data available — cannot verify NPI status"}])
+    rendered = _build_report_html(provider, None, {})
+    assert "Check status: unavailable" in rendered
+    assert ">CLEAR<" not in rendered
+    assert "Evidence class: statistical_anomaly" in rendered
+
+
+def test_portal_guides_do_not_equate_payments_with_proven_loss():
+    from services.doj_filing_guide import build_doj_filing_guide
+    from services.oig_filing_guide import build_filing_guide
+    guide = build_doj_filing_guide(
+        npi="1234567890", name="SYNTHETIC", taxonomies=[], state="OH",
+        first_month="2020-01", last_month="2024-12", total_paid=10000,
+        address="", phone="", entity_type="NPI-2", flagged_signals=[],
+        filings=[], oig_excluded=False, barred_amount=500, barred_label="after Medicare revocation")
+    amount = next(answer for question, answer in guide["steps"] if question.startswith("Amount"))
+    assert "NOT an established loss" in amount
+    oig = build_filing_guide(npi="1234567890", name="SYNTHETIC", taxonomy="", state="OH",
+        last_month="2024-12", flagged_signals=[], entity_type="NPI-2",
+        previously_reported=False, address="")
+    assert any("screening hypothesis" in note for note in oig["notes"])
+    assert any("exact service day is unknown" in note for note in oig["notes"])

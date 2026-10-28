@@ -183,6 +183,10 @@ export async function mutate<T>(method: string, path: string, body?: unknown): P
     init.body = JSON.stringify(body)
   }
   const res = await fetch(BASE + path, init)
+  const persistence = res.headers?.get?.('X-MFI-Persistence')
+  if (persistence === 'pending' || persistence === 'failed') {
+    window.dispatchEvent(new CustomEvent('mfi:persistence', { detail: persistence }))
+  }
   if (res.status === 401 && !path.includes('/auth/')) { clearSessionAndRedirect(); throw new Error('Session expired') }
   if (!res.ok) {
     const errBody = await parseJsonSafe<{ detail?: string }>(res)
@@ -1009,7 +1013,7 @@ export const api = {
   excludedProviders: () => get<ExcludedProvidersResponse>('/exclusions/excluded'),
 
   // Fraud Brain — cross-source meta-analysis
-  dojShortlist: () => get<DojShortlistResponse>('/doj/shortlist'),
+  dojShortlist: (includeOlder = false) => get<DojShortlistResponse>(`/doj/shortlist?include_older=${includeOlder}`),
 
   myContact: () =>
     get<{ user: { contact?: FilerContact } }>('/auth/me').then(r => r.user.contact ?? {}),
@@ -1200,6 +1204,9 @@ export const api = {
     }>('POST', '/admin/update-check'),
 
   dataQuality: () => get<{
+    persistence?: { pending_count: number; error_count: number; storage_model: string }
+    schema?: { status: string; missing_columns?: string[] | null }
+    derived_artifact?: { validation: { usable: boolean; errors: string[]; is_stale: boolean; source_freshness: string } }
     last_run: number | null
     status: string
     total_dataset_rows: number
@@ -1208,6 +1215,11 @@ export const api = {
     invalid_records: number
     quality_score: number
     failures: Record<string, number>
+    review_flags?: Record<string, number>
+    servicing_identity_states?: Record<string, number>
+    code_system_mismatch_records?: number
+    sample_sha256?: string
+    error?: string
     summary: {
       npi_issues: number
       amount_issues: number
@@ -1323,7 +1335,7 @@ export const api = {
   getProviderReferrals: (npi: string) =>
     get<{ npi: string; referrals: MFCUReferral[]; total: number }>(`/referrals/provider/${npi}`),
 
-  updateReferral: (id: number, data: { stage?: string; outcome?: string; outcome_notes?: string; mfcu_contact?: string; case_number?: string; jurisdiction?: string; notes?: string }) =>
+  updateReferral: (id: number, data: { stage?: string; outcome?: string; outcome_notes?: string; evidence_reference?: string; mfcu_contact?: string; case_number?: string; jurisdiction?: string; notes?: string }) =>
     mutate<MFCUReferral>('PATCH', `/referrals/${id}`, data),
 
   referralStats: () => get<ReferralStats>('/referrals/stats/summary'),

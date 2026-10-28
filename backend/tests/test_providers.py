@@ -50,10 +50,16 @@ def test_provider_detail(client, auth_headers):
     assert "risk_score" in data
 
 
-def test_provider_detail_not_found(client, auth_headers):
+def test_provider_detail_not_found(client, auth_headers, monkeypatch):
     # NOT 0000000000 — that all-zeros NPI is a real junk aggregate row in the
     # parquet (review.py guards against it on the Brain board), so the endpoint
     # legitimately returns 200 for it. Use an NPI absent from cache and dataset.
+    async def absent(*args, **kwargs):
+        return []
+    async def no_identity(*args, **kwargs):
+        return None
+    monkeypatch.setattr("routes.providers.query_async", absent)
+    monkeypatch.setattr("routes.providers.get_provider", no_identity)
     resp = client.get("/api/providers/1999999998", headers=auth_headers)
     assert resp.status_code == 404
 

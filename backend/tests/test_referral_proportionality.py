@@ -34,14 +34,15 @@ def test_high_score_with_only_one_signal_does_not_get_priority_referral():
     assert "NOT YET REFERRAL-READY" in content
 
 
-def test_high_score_with_enrichment_and_corroboration_gets_priority_referral():
+def test_high_score_with_identity_and_correlated_flags_still_requires_review():
     provider = {
         "risk_score": 80,
         "provider_name": "Acme Clinic", "specialty": "Internal Medicine",
         "signal_results": [_flag("revenue_per_bene_outlier"), _flag("billing_concentration")],
     }
     content = _build_actions_section(provider)["content"]
-    assert "PRIORITY REFERRAL" in content
+    assert "PRIORITY REFERRAL" not in content
+    assert "NOT YET REFERRAL-READY" in content
     assert "credible allegation of fraud" not in content  # no longer an absolute claim
 
 

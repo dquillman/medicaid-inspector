@@ -150,6 +150,7 @@ def rebuild_slim_scores(providers: list[dict]) -> int:
         # numbers (and can cohort-match peers) on the slim-only prod deployment —
         # without these the boxes read 0 and showed "0.0".
         "claims_per_beneficiary", "revenue_per_beneficiary", "top_hcpcs",
+        "scoring_metadata", "summed_beneficiary_count", "beneficiary_count_semantics",
     )
 
     out: list[dict] = []
@@ -269,9 +270,25 @@ def _inject_specialty_from_slim(providers: list[dict]) -> int:
 def main() -> int:
     from core.store import load_prescanned_from_disk, get_prescanned
 
-    print("Loading full prescan cache (this parses ~1.4 GB of JSON; takes a few minutes)…")
+    print("Loading full prescan cache (or reusing verified staging memory)…")
     t0 = time.time()
-    if not load_prescanned_from_disk():
+    # A guarded staging refresh already loaded and rescored the full cache.
+    # Reloading it while its caller retains those records doubles peak memory.
+    # Normal operator invocation always retains its original disk-load behavior.
+    import os
+    reuse_stage = False
+    if os.environ.get("MFI_STAGING_REFRESH") == "1":
+        try:
+            marker = json.loads((_BACKEND / ".mfi-release-validation.json").read_text())
+            operator = pathlib.Path(marker["operator_backend"]).resolve()
+            reuse_stage = (marker.get("purpose") == "release-validation"
+                           and _BACKEND.resolve() != operator
+                           and _BACKEND.resolve().is_relative_to(operator / ".tmp"))
+        except (OSError, KeyError, ValueError, TypeError):
+            reuse_stage = False
+    if reuse_stage and get_prescanned():
+        print("Reusing already-rescored staging cache; no second full JSON allocation")
+    elif not load_prescanned_from_disk():
         print("ERROR: could not load prescan_cache.json — run a full scan first.")
         return 1
     providers = get_prescanned()
@@ -288,11 +305,18 @@ def main() -> int:
         return 1
 
     from services.claim_patterns import SPEC_VERSION as _CLAIM_PATTERNS_SPEC_VERSION
+    from services.artifact_provenance import build_manifest
+    from core.config import settings
     out: dict = {
         "generated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
         "provider_count": len(providers),
         "limit": _LIMIT,
         "spec_version": _CLAIM_PATTERNS_SPEC_VERSION,
+        "provenance": build_manifest(_BACKEND / "prescan_cache.json", settings.PARQUET_URL, _CLAIM_PATTERNS_SPEC_VERSION,
+            {"start": min((p["first_month"] for p in providers if p.get("first_month")), default=None),
+             "end": max((p["last_month"] for p in providers if p.get("last_month")), default=None),
+             "basis": "observed provider cache coverage; not upstream retrieval date"},
+            enrichment_path=_BACKEND / "prescan_slim.json"),
     }
 
     print("Computing claim patterns…")

@@ -125,8 +125,8 @@ function MedicareCrossReference({ data: medicareData }: { data: MedicareComparis
                       <p className="text-sm font-medium">{d.description}</p>
                       <p className="text-xs mt-0.5 opacity-70">
                         {d.type === 'billing_ratio' && 'Disproportionate Medicaid billing relative to Medicare may indicate Medicaid-specific fraud patterns.'}
-                        {d.type === 'beneficiary_ratio' && 'Large disparity in patient populations between programs warrants further review.'}
-                        {d.type === 'per_bene_spending' && 'Elevated per-beneficiary spending in Medicaid vs Medicare suggests possible upcoding or overutilization.'}
+                        {d.type === 'beneficiary_ratio' && 'Counts use different program definitions and periods; establish comparability before interpreting the difference.'}
+                        {d.type === 'per_bene_spending' && 'Program spending ratios use different denominators; they do not establish upcoding or overutilization.'}
                         {d.type === 'no_medicare_data' && 'Provider has significant Medicaid billing but no Medicare footprint.'}
                       </p>
                     </div>
@@ -138,6 +138,7 @@ function MedicareCrossReference({ data: medicareData }: { data: MedicareComparis
           )}
           <div>
             <h3 className="text-xs text-gray-500 uppercase tracking-wider font-medium mb-2">Program Comparison</h3>
+            <p className="text-xs text-gray-500 mb-2">* Medicaid counts are summed across billing codes and months, not unique patients. Medicare definitions and coverage periods may differ; ratios are descriptive and do not establish program violations.</p>
             <table className="w-full text-sm">
               <thead><tr className="text-xs text-gray-500 border-b border-gray-800">
                 <th className="text-left pb-2 pr-4 font-medium">Metric</th>
@@ -149,8 +150,8 @@ function MedicareCrossReference({ data: medicareData }: { data: MedicareComparis
                 {([
                   { label: 'Total Paid', medicaid: medicareData.medicaid.total_paid, medicare: medicareData.medicare.total_paid, money: true },
                   { label: 'Claims / Services', medicaid: medicareData.medicaid.total_claims ?? 0, medicare: medicareData.medicare.total_services ?? 0, money: false },
-                  { label: 'Beneficiaries', medicaid: medicareData.medicaid.total_beneficiaries, medicare: medicareData.medicare.total_beneficiaries, money: false },
-                  { label: 'Avg per Beneficiary', medicaid: medicareData.medicaid.avg_per_bene, medicare: medicareData.medicare.avg_per_bene, money: true },
+                  { label: 'Reported beneficiary counts*', medicaid: medicareData.medicaid.total_beneficiaries, medicare: medicareData.medicare.total_beneficiaries, money: false },
+                  { label: 'Paid / reported count*', medicaid: medicareData.medicaid.avg_per_bene, medicare: medicareData.medicare.avg_per_bene, money: true },
                 ] as const).map(row => {
                   const ratio = row.medicare > 0 ? row.medicaid / row.medicare : null
                   const rc = ratio != null && ratio > 3 ? 'text-red-400' : ratio != null && ratio > 1.5 ? 'text-orange-400' : 'text-gray-400'
@@ -580,7 +581,7 @@ export default function ProviderDetail() {
             <Link
               to={`/providers/${npi}/investigate`}
               className="px-4 py-2 bg-blue-700 hover:bg-blue-600 border border-blue-500 hover:border-blue-400 text-white text-sm font-semibold rounded transition-colors flex items-center gap-2 shadow-md shadow-blue-900/30"
-              title="READ THE EVIDENCE — full narrative: every fired signal with its proof (claims/bene, peer mean, z-score), the statutes behind it, and recommended next actions. Start here to decide if a lead is real."
+              title="READ THE EVIDENCE — full narrative: every fired signal with supporting statistics (claims/summed beneficiary count, peer mean, z-score), the statutes behind it, and recommended next actions. Start here to decide if a lead is real."
             >
               <MagnifyingGlassIcon /> Investigate
             </Link>
@@ -720,13 +721,13 @@ export default function ProviderDetail() {
             </thead>
             <tbody>
               <PeerRow
-                label="Revenue / Beneficiary"
+                label="Revenue / summed beneficiary count"
                 value={peers.this_provider.revenue_per_beneficiary}
                 stats={peers.rpb_stats}
                 pct={peers.percentiles.revenue_per_beneficiary}
               />
               <PeerRow
-                label="Claims / Beneficiary"
+                label="Claims / summed beneficiary count"
                 value={peers.this_provider.claims_per_beneficiary}
                 stats={peers.cpb_stats}
                 pct={peers.percentiles.claims_per_beneficiary}

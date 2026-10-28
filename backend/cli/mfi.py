@@ -222,6 +222,12 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
     """
     repo_root = _BACKEND_DIR.parent
     secret_name = os.environ.get("MFI_ADMIN_PASSWORD_SECRET", "admin-password")
+    source_root = pathlib.Path(getattr(args, "source_context", None) or repo_root).resolve()
+    if source_root != repo_root:
+        # Explicit source-only packaging keeps operator state out of the build.
+        manifest = json.loads((source_root / "build-context-manifest.json").read_text())
+        if manifest.get("raw_fixture_present") or not (source_root / "Dockerfile").is_file():
+            return _err("production build context must be source-only, without fixtures")
 
     # Single source of truth for the app version is frontend/package.json. Inject
     # it so /health and the FastAPI docs report the same version as the UI.
@@ -248,11 +254,11 @@ def cmd_deploy_backend(args: argparse.Namespace) -> int:
 
     cmd = [
         _platform_exe("gcloud"), "run", "deploy", _DEFAULT_GCLOUD_SERVICE,
-        "--source", str(repo_root),
+        "--source", str(source_root),
         "--project", _DEFAULT_GCLOUD_PROJECT,
         "--region", _DEFAULT_GCLOUD_REGION,
         "--allow-unauthenticated",
-        "--update-env-vars", f"PYTHONUNBUFFERED=1,APP_VERSION={app_version}",
+        "--update-env-vars", f"PYTHONUNBUFFERED=1,APP_VERSION={app_version},PARQUET_URL=https://storage.googleapis.com/medicaid-inspector-public-aggregates/medicaid-provider-spending.parquet",
         "--update-secrets", f"ADMIN_PASSWORD={secret_name}:latest",
         # Pin to a SINGLE instance. Sessions live in per-instance memory (see
         # auth_store), so >1 instance means a login on instance A is unknown to
@@ -756,6 +762,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p_deploy_be = deploy_sub.add_parser("backend", help="Deploy backend to Cloud Run")
     p_deploy_be.add_argument("--skip-tests", action="store_true",
                              help="Deploy without running the backend test suite first")
+    p_deploy_be.add_argument("--source-context", help="Explicit prepared source-only build directory")
     p_deploy_be.set_defaults(func=cmd_deploy_backend)
 
     p_deploy_fe = deploy_sub.add_parser("frontend", help="Build and deploy frontend to Firebase Hosting")

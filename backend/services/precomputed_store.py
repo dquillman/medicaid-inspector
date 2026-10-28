@@ -31,11 +31,15 @@ def get_precomputed(section: str) -> Any | None:
     """
     try:
         if not _PATH.exists():
+            _state.update(data=None, mtime=0.0)
             return None
         mtime = _PATH.stat().st_mtime
         if _state["data"] is None or mtime != _state["mtime"]:
             with open(_PATH, encoding="utf-8") as f:
-                _state["data"] = json.load(f)
+                loaded = json.load(f)
+            if not isinstance(loaded, dict):
+                raise ValueError("Derived artifact must be a JSON object")
+            _state["data"] = loaded
             _state["mtime"] = mtime
             log.info(
                 "[precomputed] Loaded %s (generated_at=%s, spec_version=%s)",
@@ -44,8 +48,17 @@ def get_precomputed(section: str) -> Any | None:
             )
             _warn_if_stale(_state["data"] or {})
         data = _state["data"] or {}
+        if section != "generated_at":
+            from services.artifact_provenance import assess_artifact
+            from services.claim_patterns import SPEC_VERSION
+            from core.config import settings
+            assessment = assess_artifact(data, SPEC_VERSION, source_url=settings.PARQUET_URL)
+            if not assessment["usable"]:
+                log.warning("Refusing incompatible derived artifact: %s", assessment["errors"])
+                return None
         return data.get(section)
     except Exception as e:
+        _state.update(data=None, mtime=0.0)
         log.warning("[precomputed] Failed to load %s: %s", _PATH.name, e)
         return None
 
@@ -78,6 +91,8 @@ def get_staleness_info() -> dict:
     """Explicit {is_stale, file_version, current_version} for callers that
     want to surface this rather than only grep the logs."""
     from services.claim_patterns import SPEC_VERSION as current_version
+    from services.artifact_provenance import assess_artifact
+    from core.config import settings
     get_precomputed("generated_at")  # ensure loaded
     data = _state["data"] or {}
     file_version = data.get("spec_version")
@@ -85,4 +100,5 @@ def get_staleness_info() -> dict:
         "is_stale": file_version != current_version,
         "file_version": file_version,
         "current_version": current_version,
+        "validation": assess_artifact(data, current_version, source_url=settings.PARQUET_URL),
     }

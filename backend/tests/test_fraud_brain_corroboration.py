@@ -37,8 +37,27 @@ def test_unbundling_pos_modifiers_score_zero_and_are_labeled_as_heuristics(
             f"{key_substr} must not be labeled 'Independent analysis': {hit}"
         )
 
-    # A genuinely different data source (pharmacy diversion profile) must be
-    # unaffected — it should still score as real corroboration.
+    # Pharmacy profile reuses aggregate drug-code inputs; a different analysis
+    # is not automatically an independent source of evidence.
     pharmacy_hit = next(e for d, e in by_detail.items() if d.startswith("Pharmacy high-risk"))
-    assert pharmacy_hit["points"] > 0.0
-    assert pharmacy_hit["source"] == "Independent analysis"
+    assert pharmacy_hit["points"] == 0.0
+    assert pharmacy_hit["evidence_class"] == "aggregate_hypothesis"
+    assert pharmacy_hit["independent"] is False
+
+
+def test_historical_rows_are_annotated_not_hidden(client, auth_headers, monkeypatch):
+    import core.store as store
+    existing = store.get_prescanned()
+    historical = {**existing[0], "npi": "1234567890", "last_month": "2018-01",
+                  "risk_score": 80, "flag_count": 3}
+    monkeypatch.setattr(store, "get_prescanned", lambda: [historical])
+    monkeypatch.setattr(fb, "_corroboration_index", lambda: {})
+    fb.invalidate_cache()
+    result = fb.compute_top_frauds(10)
+    assert result["top"][0]["npi"] == "1234567890"
+    assert result["top"][0]["recency"] == "older"
+    assert result["excluded"]["expired"] == 0
+
+
+def test_all_current_analysis_sources_are_not_independent():
+    assert set(fb._ANALYSIS_SOURCES) == fb._CORRELATED_NOT_INDEPENDENT

@@ -11,6 +11,7 @@ import pathlib
 import hashlib
 import threading
 import uuid
+from core.safe_io import atomic_write_json
 from typing import Optional
 
 # Only allow a short, alphanumeric file extension so the stored filename
@@ -68,12 +69,22 @@ def load_evidence_from_disk() -> None:
 
 def _save_to_disk() -> None:
     try:
-        _META_FILE.write_text(
-            json.dumps({"evidence": _evidence}, default=str),
-            encoding="utf-8",
-        )
+        payload = {"evidence": _evidence}
+        if _ALLOW_LOCAL_ONLY:
+            atomic_write_json(_META_FILE, payload)
+        else:
+            from core.gcs_sync import upload_bytes
+            if not upload_bytes("evidence_metadata.json", json.dumps(payload).encode("utf-8")):
+                raise EvidenceStorageError("Evidence metadata was not acknowledged by durable storage")
+            try:
+                atomic_write_json(_META_FILE, payload)
+            except OSError:
+                # The cloud commit is authoritative; a failed read-cache write
+                # must not turn an acknowledged durable commit into rejection.
+                import logging
+                logging.getLogger(__name__).warning("Durable evidence metadata committed; local cache unavailable")
     except Exception as e:
-        print(f"[evidence_store] Could not save evidence metadata: {e}")
+        raise EvidenceStorageError("Evidence custody metadata could not be persisted") from e
 
 
 # ── core operations ───────────────────────────────────────────────────────────
@@ -173,7 +184,11 @@ def add_evidence(
             if case_id not in _evidence:
                 _evidence[case_id] = []
             _evidence[case_id].append(record)
-            _save_to_disk()
+            try:
+                _save_to_disk()
+            except Exception:
+                _evidence[case_id] = [r for r in _evidence[case_id] if r["evidence_id"] != evidence_id]
+                raise
     except Exception:
         # If metadata persistence fails, roll back the file write so we
         # don't leave an orphaned blob on disk with no custody record.
@@ -260,7 +275,11 @@ def add_custody_event(case_id: str, evidence_id: str, action: str, by: str) -> O
             "by": by,
             "timestamp": time.time(),
         })
-        _save_to_disk()
+        try:
+            _save_to_disk()
+        except Exception:
+            rec["chain_of_custody"].pop()
+            raise
     return rec
 
 

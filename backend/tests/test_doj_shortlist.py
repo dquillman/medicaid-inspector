@@ -86,8 +86,20 @@ def test_shortlist_order_and_filters(sources):
     assert out["cutoff_month"] == "2021-10"
     assert all(r["npi"] != "1000000004" for r in out["leads"]), "recovery lead is not billing while barred"
     assert out["leads"][1]["doj_priority_area"] == "Hospice"
-    assert out["leads"][1]["amount_label"] == "Paid while barred"
+    assert out["leads"][1]["amount_label"] == "Payments during questioned period"
 
 
 def test_shortlist_endpoint_requires_auth(client):
     assert client.get("/api/doj/shortlist").status_code in (401, 403)
+
+
+def test_older_leads_are_recoverable_via_explicit_filter(sources):
+    default = ds.build_shortlist(TODAY)
+    expanded = ds.build_shortlist(TODAY, include_older=True)
+    assert default["age_filter"]["reversible"] is True
+    assert all(r["npi"] != "1000000001" for r in default["leads"])
+    old = next(r for r in expanded["leads"] if r["npi"] == "1000000001")
+    assert old["timeliness_review_required"] is True
+    assert old["timeliness_status"] == "older_evidence"
+    assert "does not establish Medicaid" in old["program_scope_note"]
+    assert expanded["dropped"]["too_old"] == 0

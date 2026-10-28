@@ -345,6 +345,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["X-MFI-Persistence"],
 )
 
 # Rate limiting middleware — must be added after CORS middleware
@@ -449,6 +450,10 @@ async def metrics_middleware(request: Request, call_next):
 
 
 # ── Scan control endpoints ────────────────────────────────────────────────────
+
+from core.persistence_middleware import PersistenceAcknowledgementMiddleware
+app.add_middleware(PersistenceAcknowledgementMiddleware)
+
 
 class ScanBatchRequest(BaseModel):
     batch_size: int = settings.SCAN_BATCH_SIZE

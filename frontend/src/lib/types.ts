@@ -71,7 +71,7 @@ export interface ProviderDetail extends ScoredProvider {
   // Data recency — annotation only, shared with the Fraud Brain board.
   last_active_month?: string | null
   data_age_months?: number | null
-  recency?: 'fresh' | 'aging' | 'stale' | 'expired' | null
+  recency?: 'fresh' | 'aging' | 'stale' | 'older' | 'expired' | null
 }
 
 export interface TimelineRow {
@@ -192,7 +192,7 @@ export interface ReviewItem {
   // Data recency — annotation only, shared with the Fraud Brain board.
   last_active_month?: string | null
   data_age_months?: number | null
-  recency?: 'fresh' | 'aging' | 'stale' | 'expired' | null
+  recency?: 'fresh' | 'aging' | 'stale' | 'older' | 'expired' | null
   // Auto-preparation (case_prep): set when steps 2–6 ran — evidence noted,
   // packet attached — so the queue can badge "Ready for review".
   prepared_at?: number | null
@@ -1425,6 +1425,7 @@ export interface MFCUReferral {
   submitted_by: string
   outcome: string | null
   outcome_date: number | null
+  evidence_reference?: string
   outcome_notes: string
   notes: string
   created_at: number
@@ -1743,7 +1744,7 @@ export interface FraudBrainProvider {
   first_active_month?: string | null
   last_active_month?: string | null
   data_age_months?: number | null
-  recency?: 'fresh' | 'aging' | 'stale' | 'expired' | null
+  recency?: 'fresh' | 'aging' | 'stale' | 'older' | 'expired' | null
   // Read-only case-ledger badge (set by a human in the Review Queue). One-way:
   // the Brain reads it for display, never writes it, and it never affects
   // brain_score. null/undefined => the NPI is not in the review queue.

@@ -129,7 +129,7 @@ export default function MLModel() {
         <div>
           <h1 className="text-2xl font-bold text-white">Supervised ML Model</h1>
           <p className="text-sm text-gray-400 mt-1">
-            Gradient Boosting classifier trained on confirmed fraud labels from the Review Queue
+            Gradient Boosting ranking model trained on documented, verified outcome labels
           </p>
         </div>
         <button
@@ -190,7 +190,7 @@ export default function MLModel() {
           <div className="text-lg font-bold text-white">
             {status?.total_labeled ?? 0}
             <span className="text-xs text-gray-500 ml-1">
-              ({status?.positive_count ?? 0}F / {status?.negative_count ?? 0}C)
+              ({status?.positive_count ?? 0} positive / {status?.negative_count ?? 0} negative)
             </span>
           </div>
         </div>
@@ -234,16 +234,16 @@ export default function MLModel() {
           <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Confusion Matrix (Cross-Validated)</h3>
           <div className="inline-grid grid-cols-3 gap-1 text-sm">
             <div />
-            <div className="text-center text-gray-500 text-xs px-4 pb-1">Pred: Clear</div>
-            <div className="text-center text-gray-500 text-xs px-4 pb-1">Pred: Fraud</div>
-            <div className="text-right text-gray-500 text-xs pr-2">Actual: Clear</div>
+            <div className="text-center text-gray-500 text-xs px-4 pb-1">Pred: Negative Label</div>
+            <div className="text-center text-gray-500 text-xs px-4 pb-1">Pred: Positive Label</div>
+            <div className="text-right text-gray-500 text-xs pr-2">Recorded: Negative Label</div>
             <div className="bg-green-900/40 border border-green-800 rounded px-4 py-2 text-center text-green-300 font-mono">
               {status.confusion_matrix[0]?.[0] ?? 0}
             </div>
             <div className="bg-red-900/20 border border-red-900/50 rounded px-4 py-2 text-center text-red-300 font-mono">
               {status.confusion_matrix[0]?.[1] ?? 0}
             </div>
-            <div className="text-right text-gray-500 text-xs pr-2">Actual: Fraud</div>
+            <div className="text-right text-gray-500 text-xs pr-2">Recorded: Positive Label</div>
             <div className="bg-red-900/20 border border-red-900/50 rounded px-4 py-2 text-center text-red-300 font-mono">
               {status.confusion_matrix[1]?.[0] ?? 0}
             </div>
@@ -293,16 +293,16 @@ export default function MLModel() {
                   <span className="text-white">{features?.features?.length ?? 0}</span>
                 </div>
                 <div>
-                  <span className="text-gray-500">Fraud samples:</span>{' '}
+                  <span className="text-gray-500">Verified positive samples:</span>{' '}
                   <span className="text-red-400">{status?.positive_count ?? 0}</span>
                   <span className="text-gray-600 mx-1">|</span>
-                  <span className="text-gray-500">Clear samples:</span>{' '}
+                  <span className="text-gray-500">Verified negative samples:</span>{' '}
                   <span className="text-green-400">{status?.negative_count ?? 0}</span>
                 </div>
               </div>
               <p className="text-xs text-gray-600 mt-2">
-                The model learns from providers marked as "confirmed fraud" / "referred" (positive class)
-                and "dismissed" (negative class) in the Review Queue. Re-train as new labels are added.
+                The model learns only from documented verified positive and negative outcomes
+                recorded through outcome verification. Filing, queue confirmation, or dismissal alone never supplies a training label.
               </p>
             </div>
           )}
@@ -345,7 +345,7 @@ export default function MLModel() {
             <div className="card overflow-hidden">
               <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
-                  Top Fraud Predictions
+                  Top Model Rankings
                 </h3>
                 <span className="text-xs text-gray-600">
                   {predictions?.total ?? 0} providers scored
@@ -363,7 +363,7 @@ export default function MLModel() {
                       <th className="px-4 py-2 text-right">Risk Score</th>
                       <th className="px-4 py-2 text-right" title="A relative model score from labeled cases so far — NOT a calibrated, independently-validated probability of fraud.">Model Score*</th>
                       <th className="px-4 py-2">Label</th>
-                      <th className="px-4 py-2 text-right">Probability Bar</th>
+                      <th className="px-4 py-2 text-right">Score Bar</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -394,9 +394,9 @@ export default function MLModel() {
                         </td>
                         <td className="px-4 py-2 text-xs">
                           {p.label === 1 ? (
-                            <span className="px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 text-xs uppercase">Fraud</span>
+                            <span className="px-1.5 py-0.5 rounded bg-red-900/50 text-red-300 text-xs uppercase">Positive</span>
                           ) : p.label === 0 ? (
-                            <span className="px-1.5 py-0.5 rounded bg-green-900/50 text-green-300 text-xs uppercase">Clear</span>
+                            <span className="px-1.5 py-0.5 rounded bg-green-900/50 text-green-300 text-xs uppercase">Negative</span>
                           ) : (
                             <span className="text-gray-600">-</span>
                           )}
@@ -422,8 +422,7 @@ export default function MLModel() {
                 </table>
                 <p className="px-4 py-2 text-xs text-gray-600">
                   * Model Score is a relative ranking from labeled cases so far, not a calibrated or
-                  independently validated probability of fraud. "Label" reflects an analyst's own
-                  assessment or an agency's referral outcome — filing a tip or referral by itself is
+                  independently validated probability of fraud. "Label" predicts the verified outcome class — filing a tip or referral by itself is
                   never a label (see /methods).
                 </p>
               </div>
@@ -442,9 +441,8 @@ export default function MLModel() {
           </div>
           <h3 className="text-lg font-semibold text-gray-400 mb-2">Supervised Model Not Yet Trained</h3>
           <p className="text-sm text-gray-600 max-w-md mx-auto mb-4">
-            To train the supervised fraud detection model, you need at least 10 labeled providers
-            in the Review Queue: mark providers as <strong className="text-red-400">"confirmed fraud"</strong> or{' '}
-            <strong className="text-green-400">"dismissed"</strong> to build the training set.
+            Training requires at least 10 providers with documented verified outcome labels
+            with both positive and negative classes represented. Record supporting outcome evidence before training; changing queue status alone does not qualify.
           </p>
           <div className="flex items-center justify-center gap-3">
             <Link to="/review" className="btn-ghost text-sm">

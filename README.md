@@ -1,6 +1,6 @@
 # Medicaid Inspector
 
-Production fraud-detection platform for Medicaid provider data. Scans 100k+ providers and flags billing irregularities, shell-entity networks, and phantom-billing patterns using statistical anomaly detection and rule-based signals.
+Investigation workbench for public Medicaid provider spending data. Ranks statistical leads and administrative-status discrepancies for investigator review; anomalies and referrals are not proof of fraud.
 
 **Live:** [https://medicaid-inspector.web.app](https://medicaid-inspector.web.app)
 
@@ -8,7 +8,7 @@ Production fraud-detection platform for Medicaid provider data. Scans 100k+ prov
 
 ## What it does
 
-Ingests Medicaid claims data, scores every provider on six independent fraud signals, and surfaces a ranked review queue for investigators.
+Analyzes provider-level Medicaid aggregates using rule-based signals and statistical models, and surfaces a ranked review queue. Signals share underlying data and are not independent evidence. The public methods endpoint lists active, parked, and retired checks.
 
 | Signal | What it catches |
 | :---- | :---- |

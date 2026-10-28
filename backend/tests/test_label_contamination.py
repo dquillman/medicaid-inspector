@@ -1,8 +1,8 @@
 """
 Regression tests (audit 2026-10-24, item 3): filing a report, confirming a
 case, archiving, or reopening must not create a "verified fraud" training
-label by itself. Only the analyst's own "confirmed" assessment (weak), or an
-agency's independently substantiated/rejected referral outcome (strong), may.
+label by itself. Analyst assessments remain separate from documented independent outcomes.
+Only documented independent findings may enter training.
 """
 import services.feedback_tracker as ft
 from core import review_store, referral_workflow
@@ -10,8 +10,8 @@ from core import review_store, referral_workflow
 
 def _spy(monkeypatch):
     calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(ft, "record_confirmation", lambda npi: calls.append(("confirm", npi)))
-    monkeypatch.setattr(ft, "record_dismissal", lambda npi: calls.append(("dismiss", npi)))
+    monkeypatch.setattr(ft, "record_confirmation", lambda npi, **kwargs: calls.append(("confirm", npi)))
+    monkeypatch.setattr(ft, "record_dismissal", lambda npi, **kwargs: calls.append(("dismiss", npi)))
     return calls
 
 
@@ -59,7 +59,7 @@ def test_substantiated_referral_outcome_records_a_strong_positive_label(monkeypa
     calls = _spy(monkeypatch)
     npi = "5550000005"
     ref = referral_workflow.create_referral(npi, submitted_by="dave")
-    referral_workflow.update_referral(ref["id"], outcome="substantiated", updated_by="mfcu")
+    referral_workflow.update_referral(ref["id"], outcome="substantiated", updated_by="mfcu", evidence_reference="agency decision A")
     assert calls == [("confirm", npi)]
 
 
@@ -67,7 +67,7 @@ def test_unsubstantiated_referral_outcome_records_a_negative_label(monkeypatch):
     calls = _spy(monkeypatch)
     npi = "5550000006"
     ref = referral_workflow.create_referral(npi, submitted_by="dave")
-    referral_workflow.update_referral(ref["id"], outcome="unsubstantiated", updated_by="mfcu")
+    referral_workflow.update_referral(ref["id"], outcome="unsubstantiated", updated_by="mfcu", evidence_reference="agency decision B")
     assert calls == [("dismiss", npi)]
 
 

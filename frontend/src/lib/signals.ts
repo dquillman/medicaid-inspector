@@ -31,8 +31,8 @@ export interface FraudOdd {
 /** Human-readable names for the 18 detection signals (mirrors backend _SIGNAL_META). */
 export const SIGNAL_LABELS: Record<string, string> = {
   billing_concentration: 'Billing Concentration',
-  revenue_per_bene_outlier: 'Revenue / Beneficiary Outlier',
-  claims_per_bene_anomaly: 'Claims / Beneficiary Anomaly',
+  revenue_per_bene_outlier: 'Revenue / Summed Beneficiary Count Outlier',
+  claims_per_bene_anomaly: 'Claims / Summed Beneficiary Count Anomaly',
   billing_ramp_rate: 'Billing Ramp Rate',
   bust_out_pattern: 'Bust-Out Pattern',
   ghost_billing: 'Ghost Billing',

@@ -13,7 +13,8 @@ def test_check_schema_reports_missing_columns(monkeypatch):
     async def _fake_query_async(sql, *a, **k):
         # Simulate a dataset missing TOTAL_CLAIMS and with one extra column.
         return [
-            {"column_name": "BILLING_PROVIDER_NPI_NUM"},
+            {"column_name": "BILLING_PROVIDER_NPI_NUM", "column_type": "VARCHAR"},
+            {"column_name": "SERVICING_PROVIDER_NPI_NUM", "column_type": "VARCHAR"},
             {"column_name": "HCPCS_CODE"},
             {"column_name": "CLAIM_FROM_MONTH"},
             {"column_name": "TOTAL_PAID"},
@@ -32,7 +33,7 @@ def test_check_schema_reports_missing_columns(monkeypatch):
 
 def test_check_schema_ok_when_all_expected_columns_present(monkeypatch):
     async def _fake_query_async(sql, *a, **k):
-        return [{"column_name": c} for c in sorted(dv.EXPECTED_COLUMNS)]
+        return [{"column_name": c, "column_type": "BIGINT" if c.startswith("TOTAL_") else "VARCHAR"} for c in sorted(dv.EXPECTED_COLUMNS)]
     monkeypatch.setattr("data.duckdb_client.query_async", _fake_query_async)
     monkeypatch.setattr("data.duckdb_client.get_parquet_path", lambda: "fake.parquet")
 
