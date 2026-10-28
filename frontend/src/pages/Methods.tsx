@@ -45,7 +45,7 @@ export default function Methods() {
             <p className="text-xs text-ink-tertiary border-l-2 border-filament-dim pl-3">{data.provenance.medicare_proxy_note}</p>
             {data.provenance.public_data_note && (
               <p className="text-xs text-ink-secondary border-l-2 border-threat-clear/50 pl-3">
-                <span className="text-threat-clear font-semibold">All data is public. </span>
+                <span className="text-threat-clear font-semibold">Public source data; private case records. </span>
                 {data.provenance.public_data_note}
               </p>
             )}

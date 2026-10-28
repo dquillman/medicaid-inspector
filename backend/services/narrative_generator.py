@@ -150,15 +150,14 @@ _SIGNAL_META: dict[str, dict] = {
     "oig_excluded": {
         "label": "OIG Exclusion List Match",
         "explanation": (
-            "This provider appears on the OIG List of Excluded Individuals/Entities "
-            "(LEIE). Excluded providers are prohibited from participating in any "
-            "Federal health care program. Billing by an excluded provider constitutes "
-            "a per-item violation subject to civil monetary penalties."
+            "A potential identity match appears in the OIG List of Excluded Individuals/Entities "
+            "(LEIE). Verify identity, exclusion scope, effective dates and applicable services "
+            "before interpreting historical billing. A match alone does not establish an improper payment."
         ),
         "citations": [
             "42 U.S.C. § 1320a-7 (Exclusion of certain individuals and entities)",
             "42 CFR § 1001.1901 (Scope and effect of exclusion)",
-            "42 U.S.C. § 1320a-7a (Civil monetary penalties — $100,000 per item)",
+            "42 U.S.C. § 1320a-7a (Civil monetary penalties)",
         ],
     },
     "specialty_mismatch": {
@@ -271,9 +270,9 @@ _SIGNAL_META: dict[str, dict] = {
         "label": "Total Spend Outlier",
         "explanation": (
             "Total Medicaid payments to this provider are statistically anomalous "
-            "relative to the broader provider population. Extreme total spend is "
-            "the single strongest predictor of fraud identified in OIG's statistical "
-            "methodology and warrants priority review."
+            "relative to the broader provider population. High volume can reflect legitimate "
+            "practice size or provider grouping. This is a screening lead, not proof of fraud "
+            "or a validated fraud probability."
         ),
         "citations": [
             "42 CFR § 455.14 (State plan requirement for fraud detection)",

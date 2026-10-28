@@ -16,15 +16,15 @@ router = APIRouter(prefix="/api/methods", tags=["methods"])  # intentionally NO 
 
 # Honest provenance (corrected 2026-06-13): core spend is REAL Medicaid.
 _PROVENANCE = {
-    "core_dataset": "HHS “Medicaid Provider Spending by HCPCS” (T-MSIS-derived, released Feb 2026)",
+    "core_dataset": "HHS “Medicaid Provider Spending by HCPCS” (T-MSIS-derived provider aggregates)",
     "is_real_medicaid": True,
-    "coverage": "National, provider-level (NPI), Medicaid FFS + managed care + CHIP, 2018–2024.",
+    "coverage": "Provider-HCPCS-month aggregates, 2018–2024; coverage and completeness depend on the source release.",
     "free_and_dua_free": True,
     "known_limits": [
-        "Outpatient / professional claims only — no inpatient, prescription drugs, or long-term care.",
+        "Seven fields: billing and servicing identities, procedure code, month, beneficiary-count cells, claims and payments.",
         "No diagnoses or HCPCS modifiers; claim/procedure rollups, not line-level records.",
-        "Cells under 12 claims are suppressed; managed-care completeness varies by state.",
-        "Rows missing a billing or servicing NPI are excluded (they carry inflated capitation).",
+        "Suppression rules require source documentation; a beneficiary count of 12 is not evidence of ghost billing.",
+        "Missing servicing identity does not erase billing totals. Missing or invalid identities cannot support network links.",
     ],
     "medicare_proxy_note": (
         "None. Every active signal runs on the real Medicaid data above. The one signal that "
@@ -33,11 +33,13 @@ _PROVENANCE = {
         "claims omit) was RETIRED on 2026-07-26: it fired on 2 of 106,660 scanned providers, "
         "and no MFI finding should rest on another payer's population."
     ),
-    "all_data_public": True,
+    "all_data_public": False,
+    "source_datasets_public": True,
     "public_data_note": (
-        "Every dataset behind this tool is public, free, and requires no data-use agreement. "
-        "MFI holds no PHI and no beneficiary-level records — all analysis is provider-level "
-        "aggregate. Any finding here can be re-derived by anyone from the same public files."
+        "Core source aggregates and registry references are public. The aggregate file contains "
+        "no beneficiary identities. Accounts, case notes, uploaded evidence and outcomes are "
+        "private operational records. Reproducing a historical result requires the same source "
+        "snapshots, scoring version and enrichment inputs."
     ),
     "enrichment_sources": ["NPPES (provider identity/taxonomy)", "OIG LEIE exclusions", "SAM.gov exclusions", "CMS Open Payments"],
 }
@@ -70,6 +72,7 @@ _COMPOSITE_NOTE = (
     "Signals that lack the data to fire abstain (contribute zero) rather than diluting the score. "
     "Aggregate code-mix analyses are hypotheses, not independent corroboration; they add "
     "no corroboration points. Filing a referral is a workflow event, not proof of fraud."
+    " Regulatory citations provide background; they do not validate this tool's thresholds or predictive accuracy."
 )
 
 
