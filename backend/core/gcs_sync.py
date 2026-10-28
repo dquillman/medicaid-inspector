@@ -335,7 +335,7 @@ def _flush_pending(filename: str) -> None:
     _do_upload(filename)
 
 
-def upload_file(filename: str) -> bool:
+def upload_file(filename: str, *, immediate: bool = False) -> bool:
     """Upload a file to GCS, debounced with a TRAILING edge.
 
     The old version dropped writes: inside the debounce window it returned
@@ -349,7 +349,11 @@ def upload_file(filename: str) -> bool:
         now = time.time()
         last = _last_upload.get(filename, 0)
         elapsed = now - last
-        if elapsed < _DEBOUNCE_SEC:
+        if immediate:
+            pending = _pending_timers.pop(filename, None)
+            if pending is not None:
+                pending.cancel()
+        if not immediate and elapsed < _DEBOUNCE_SEC:
             if filename not in _pending_timers:
                 delay = max(0.05, _DEBOUNCE_SEC - elapsed)
                 t = threading.Timer(delay, _flush_pending, args=(filename,))

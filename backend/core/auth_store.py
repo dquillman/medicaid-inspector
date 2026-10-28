@@ -409,7 +409,9 @@ def save_sessions_to_disk() -> None:
         atomic_write_json(_SESSIONS_FILE, data, indent=2)
         try:
             from core.gcs_sync import upload_file
-            upload_file("sessions.json")
+            # Revocation/login must finish during request CPU, not a deferred
+            # timer that Cloud Run can suspend after returning the response.
+            upload_file("sessions.json", immediate=True)
         except Exception:
             pass  # GCS unavailable locally — the local file is still written
     except Exception as e:

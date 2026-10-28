@@ -13,9 +13,6 @@ import ReviewQueue from './pages/ReviewQueue'
 import { ProviderFlagsProvider } from './hooks/useProviderFlags'
 import Breadcrumbs from './components/Breadcrumbs'
 import Login from './pages/Login'
-// Landing is the pre-auth marketing shell, rendered outside the Routes Suspense
-// boundary — keep it eager so it doesn't suspend on synchronous render.
-import Landing from './pages/Landing'
 // Secondary / chart-heavy / graph-heavy pages are code-split so recharts,
 // cytoscape, and the analytics bundles load only when their route is visited.
 const NetworkGraph = lazy(() => import('./pages/NetworkGraph'))
@@ -88,7 +85,7 @@ function SettingsDropdown({ userEmail }: { userEmail: string }) {
     e.preventDefault()
     setError('')
     setSuccess('')
-    if (newPw.length < 6) { setError('Password must be at least 6 characters'); return }
+    if (newPw.length < 8) { setError('Password must be at least 8 characters'); return }
     if (newPw !== confirmPw) { setError('Passwords do not match'); return }
     setLoading(true)
     try {
@@ -247,7 +244,7 @@ export default function App() {
     return () => window.removeEventListener('mfi:persistence', receive)
   }, [])
   const [user, setUser] = useState<AuthUser | null>(null)
-  const [view, setView] = useState<'landing' | 'login' | 'public' | 'app'>('landing')
+  const [view, setView] = useState<'login' | 'public' | 'app'>('login')
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
   const { collapsed, toggle: toggleCollapsed } = useSidebarCollapsed()
   const sidebarMargin = collapsed ? 'lg:ml-16' : 'lg:ml-56'
@@ -357,19 +354,23 @@ export default function App() {
     }
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await mutate<{ ok: boolean }>('POST', '/auth/logout', {})
+    } catch {
+      setPersistenceNotice('failed')
+      return
+    }
     setUser(null)
     localStorage.removeItem('mfi_session')
     notifyAuthChanged() // clear useAuth()'s user/role in the same tab
-    setView('landing')
+    setView('login')
   }
 
   // Single BrowserRouter with conditional views based on auth state
   return (
     <BrowserRouter>
-      {view === 'landing' ? (
-        <Landing onLogin={() => setView('login')} />
-      ) : view === 'public' ? (
+      {view === 'public' ? (
         <div className="min-h-screen" lang="en">
           <header className="h-12 bg-gray-900 border-b border-gray-800 flex items-center justify-between px-4">
             <span className="text-sm font-bold text-gray-200 tracking-wide">Medicaid Inspector</span>
@@ -388,7 +389,7 @@ export default function App() {
           onLogin={handleLogin}
           onRegister={handleRegister}
           onGoogleCredential={handleGoogleCredential}
-          onBack={() => setView('landing')}
+          onBack={() => setView('public')}
         />
       ) : (
       <ProviderFlagsProvider>

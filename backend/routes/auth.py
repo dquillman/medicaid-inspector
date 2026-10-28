@@ -140,13 +140,6 @@ async def login(req: LoginRequest, request: Request):
     if not user:
         raise HTTPException(401, "Invalid username or password")
     token = create_session(req.username)
-    # Persist session to GCS so it survives container restarts
-    try:
-        from core.gcs_sync import upload_file
-        import asyncio
-        asyncio.get_event_loop().run_in_executor(None, upload_file, "sessions.json")
-    except Exception as e:
-        logger.warning("GCS session persistence failed: %s", e)
     return {
         "token": token,
         "user": user,
@@ -195,13 +188,6 @@ async def google_login(req: GoogleLoginRequest, request: Request):
     user = create_or_get_google_user(email=email, display_name=display_name)
 
     token = create_session(email)
-    try:
-        from core.gcs_sync import upload_file
-        import asyncio
-        asyncio.get_event_loop().run_in_executor(None, upload_file, "sessions.json")
-    except Exception as e:
-        logger.warning("GCS session persistence failed: %s", e)
-
     return {"token": token, "user": user}
 
 

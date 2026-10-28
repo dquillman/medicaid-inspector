@@ -9,6 +9,7 @@ interface Props {
 }
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
+const OPEN_REGISTRATION = import.meta.env.VITE_OPEN_REGISTRATION === 'true'
 const GIS_SRC = 'https://accounts.google.com/gsi/client'
 
 declare global {
@@ -108,8 +109,8 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
       setError('Username and password are required')
       return
     }
-    if (password.length < 6) {
-      setError('Password must be at least 6 characters')
+    if (isSignUp && password.length < 8) {
+      setError('Password must be at least 8 characters')
       return
     }
 
@@ -245,21 +246,21 @@ export default function Login({ onLogin, onRegister, onGoogleCredential, onBack 
             </>
           ) : (
             <p className="text-[11px] text-gray-600 text-center pt-1">
-              Google sign-in disabled (VITE_GOOGLE_CLIENT_ID not set).
+              Use your existing investigator account.
             </p>
           )}
         </form>
 
         <div className="text-center mt-4 space-y-2">
-          <button
+          {OPEN_REGISTRATION && <button
             onClick={() => { setIsSignUp(!isSignUp); setError('') }}
             className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
           >
             {isSignUp ? 'Already have an account? Sign in' : "Don't have an account? Sign up"}
-          </button>
+          </button>}
           <div>
             <button onClick={onBack} className="text-xs text-gray-600 hover:text-gray-400 transition-colors">
-              &larr; Back to home
+              View methods
             </button>
           </div>
         </div>
