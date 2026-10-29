@@ -148,6 +148,24 @@ def main() -> int:
     print(f"enrolled states for {len(states):,} billing NPIs -> {STATES_OUT.name}")
 
     totals = dict(con.execute("SELECT npi, sum(paid) FROM bill GROUP BY 1").fetchall())
+
+    # Audit 2026-10-28: the agents that re-checked the 109 strongest leads found
+    # two ways this test lies, both fixable from the same file.
+    #  * REINSTATED: a termination that a state later reversed (an ACTIVE
+    #    enrollment starts after it) is a suspension that ended, not a provider
+    #    kept on the payroll. 11 of 109 leads were exactly that.
+    #  * BLIND STATES: some states (NM, OR) carry NO usable NPI in this file. A
+    #    provider enrolled there looks "not enrolled anywhere", so the any-state
+    #    test cannot be trusted for providers who practice in those states.
+    reinstated = {r[0] for r in con.execute(
+        "SELECT DISTINCT b.npi FROM bad b WHERE EXISTS "
+        "(SELECT 1 FROM act a WHERE a.npi = b.npi AND a.s > b.s)").fetchall()}
+    blind_states = sorted(r[0] for r in con.execute(f"""
+        SELECT STATE_CD FROM read_parquet('{src}')
+        GROUP BY 1 HAVING count(*) FILTER (WHERE regexp_matches(NPI, '^[12][0-9]{{9}}$'))
+                          < 0.01 * count(*)
+    """).fetchall() if r[0])
+    print(f"states with (almost) no usable NPIs: {blind_states}")
     con.close()
 
     leads = {}
@@ -166,6 +184,7 @@ def main() -> int:
             "last_month_while_terminated": last.strftime("%Y-%m"),
             "total_paid": round(float(totals.get(npi) or 0), 2),
             "states": list(states.get(npi) or []),
+            "reinstated_after": npi in reinstated,
             "caveat": ("Check that the state did not re-enroll this provider under another "
                        "Medicaid ID before filing."),
         }
@@ -173,6 +192,7 @@ def main() -> int:
     OUT.write_text(json.dumps({
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "source": SOURCE_URL,
+        "blind_states": blind_states,
         "leads": leads,
     }, separators=(",", ":")), encoding="utf-8")
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 import datetime as _dt
 import re
 
+from core import lead_quality
+
 LIMITATION_YEARS = 5
 
 # deactivated_window (NPI deactivated, then reactivated) needs a long gap.
@@ -27,6 +29,15 @@ _PERSE_KIND_ORDER = {
     "paid_while_terminated": 2,
     "deactivated_billing": 3,
     "deactivated_window": 4,
+}
+# What the dollar figure actually counts. Different kinds count different
+# months, and a reader comparing them needs to know (audit 2026-10-28).
+_AMOUNT_LABEL = {
+    "active_exclusion": "Payments in whole months after the exclusion date",
+    "medicare_revoked_billing": "Payments from 2 months after the Medicare revocation (state grace period)",
+    "paid_while_terminated": "Payments in whole months with no active enrollment in any state",
+    "deactivated_billing": "Payments in whole months after the NPI was deactivated",
+    "deactivated_window": "Payments in whole months inside the deactivation gap",
 }
 _PERSE_REASON = {
     "active_exclusion": "Billed Medicaid while on the OIG exclusion list",
@@ -83,7 +94,8 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
     doj_filed = filed_npis("doj")
     seen: set[str] = set()
     rows: list[dict] = []
-    dropped = {"too_old": 0, "already_doj": 0, "closed": 0, "same_company": 0, "short_lapse": 0}
+    dropped = {"too_old": 0, "already_doj": 0, "closed": 0, "same_company": 0, "short_lapse": 0,
+               "unreliable_status": 0}
 
     def _provider(npi: str) -> dict:
         return get_provider_by_npi(npi) or {}
@@ -140,8 +152,14 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
 
     # Tier 2: per-se findings.
     perse = []
+    blind_states = perse_store.blind_states()
     for r in perse_store.list_leads(limit=100_000)["leads"]:
         if r.get("kind") not in _PERSE_KIND_ORDER:
+            continue
+        # Audit 2026-10-28: reversed terminations and state mismatches were the
+        # biggest false leads in the top list. Dropped here, kept on /excluded.
+        if lead_quality.quality_flags(r, blind_states):
+            dropped["unreliable_status"] += 1
             continue
         if r["kind"] == "deactivated_window":
             gap = r.get("gap_days") if r.get("gap_days") is not None else _gap_days(r)
@@ -157,7 +175,7 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
         barred = (r.get("paid_after_exclusion") or r.get("paid_after_revocation")
                   or r.get("paid_while_terminated")
                   or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0)
-        _add(2, r["npi"], r, _PERSE_REASON[r["kind"]], barred, "Payments during questioned period",
+        _add(2, r["npi"], r, _PERSE_REASON[r["kind"]], barred, _AMOUNT_LABEL[r["kind"]],
              r.get("last_month"), statuses, {"kind": r["kind"],
                  "evidence_class": "administrative_status_lead",
                  "independent_corroboration_required": True,

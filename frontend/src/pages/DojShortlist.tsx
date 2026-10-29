@@ -48,7 +48,8 @@ export default function DojShortlist() {
             {data.dropped.already_doj.toLocaleString()} already filed with DOJ (any NPI of the company) &middot;{' '}
             {data.dropped.closed.toLocaleString()} dismissed or archived
             {data.dropped.same_company ? <> &middot; {data.dropped.same_company.toLocaleString()} extra NPIs merged into their company&rsquo;s row</> : null}
-            {data.dropped.short_lapse ? <> &middot; {data.dropped.short_lapse.toLocaleString()} short NPI lapses (deactivated under 6 months, then reactivated: usually paperwork)</> : null}.
+            {data.dropped.short_lapse ? <> &middot; {data.dropped.short_lapse.toLocaleString()} short NPI lapses (deactivated under 6 months, then reactivated: usually paperwork)</> : null}
+            {data.dropped.unreliable_status ? <> &middot; {data.dropped.unreliable_status.toLocaleString()} state terminations that were reversed, or tied to a different state than the provider practises in</> : null}.
           </p>
         )}
       </div>

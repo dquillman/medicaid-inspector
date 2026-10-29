@@ -186,6 +186,17 @@ def main() -> int:
         npi_states = json.loads((_BACKEND / "npi_states.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         npi_states = {}
+    # States whose enrollment rows carry no usable NPI (the any-state test is
+    # blind there) and each lead NPI's NPPES practice state. See
+    # fetch_practice_states.py and core/lead_quality.py (audit 2026-10-28).
+    try:
+        blind_states = json.loads((_BACKEND / "enrollment_leads.json").read_text(encoding="utf-8")).get("blind_states") or []
+    except (OSError, ValueError):
+        blind_states = []
+    try:
+        practice = json.loads((_BACKEND / "perse_practice_states.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        practice = {}
     print(f"State-terminated-but-paid leads: {len(enroll):,}  ·  NPIs with an enrolled state: {len(npi_states):,}")
     print(f"Medicare revocations: {len(revocations):,}  (built {rev_store.generated_at()})")
     print(f"OIG LEIE records: {len(exclusions):,}  (store reports "
@@ -350,6 +361,7 @@ def main() -> int:
                 "terminated_since": el.get("terminated_since"),
                 "paid_while_terminated": el.get("paid_while_terminated"),
                 "months_while_terminated": el.get("months_while_terminated"),
+                "reinstated_after": bool(el.get("reinstated_after")),
                 "caveat": el.get("caveat") or "",
                 "citation": ("42 CFR § 455.416 (termination of provider participation); "
                              "42 U.S.C. § 1320a-7b(a) (false claims)"),
@@ -404,6 +416,13 @@ def main() -> int:
                 "citation": "42 U.S.C. § 1320a-7b(a)(1) (false statements — billing while the NPI was deactivated)",
             })
 
+    # Practice state from NPPES, kept separate from `state` (which for a
+    # paid_while_terminated lead is the TERMINATING state).
+    for r in leads:
+        ps = (practice.get(r["npi"]) or {}).get("state")
+        if ps:
+            r["practice_state"] = ps
+
     # The spend parquet has no state; fill it from Medicaid enrollment.
     for r in leads:
         if not r.get("state") and npi_states.get(r["npi"]):
@@ -433,6 +452,7 @@ def main() -> int:
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "universe_npis": None,   # filled below
         "scanned_npis": len(scanned) if scanned is not None else None,
+        "enrollment_blind_states": blind_states,
         "summary": {k: {"count": v["count"], "total_paid": round(v["paid"], 2),
                         "outside_scan_cache": v["new"],
                         "outside_scan_cache_paid": round(v["new_paid"], 2)}

@@ -82,11 +82,11 @@ def test_shortlist_order_and_filters(sources):
     # DOJ under another NPI drops too.
     assert all(r["npi"] not in ("1000000007", "1000000009") for r in out["leads"])
     assert out["dropped"] == {"too_old": 1, "already_doj": 2, "closed": 1, "same_company": 1,
-                              "short_lapse": 1}
+                              "short_lapse": 1, "unreliable_status": 0}
     assert out["cutoff_month"] == "2021-10"
     assert all(r["npi"] != "1000000004" for r in out["leads"]), "recovery lead is not billing while barred"
     assert out["leads"][1]["doj_priority_area"] == "Hospice"
-    assert out["leads"][1]["amount_label"] == "Payments during questioned period"
+    assert out["leads"][1]["amount_label"].startswith("Payments from 2 months after the Medicare revocation")
 
 
 def test_shortlist_endpoint_requires_auth(client):

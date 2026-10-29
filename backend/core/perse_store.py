@@ -100,6 +100,13 @@ def _with_live_scan_state(rows: list[dict], scanned: set[str]) -> list[dict]:
     return [{**r, "in_scan_cache": r.get("npi") in scanned} for r in rows]
 
 
+def blind_states() -> list[str]:
+    """States whose enrollment rows carry no usable NPIs (see lead_quality)."""
+    if not _loaded:
+        _load()
+    return list(_payload.get("enrollment_blind_states") or [])
+
+
 def get_lead(npi: str) -> dict | None:
     """The per-se lead for this NPI, or None. Used to badge a provider page."""
     if not _loaded:

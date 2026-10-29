@@ -1810,7 +1810,7 @@ export interface DojShortlistResponse {
   leads: DojShortlistLead[]
   total: number
   by_tier: Record<'1' | '2' | '3', number>
-  dropped: { too_old: number; already_doj: number; closed: number; same_company?: number; short_lapse?: number }
+  dropped: { too_old: number; already_doj: number; closed: number; same_company?: number; short_lapse?: number; unreliable_status?: number }
   cutoff_month: string
   limitation_years: number
 }
