@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { api } from '../lib/api'
 import { fmt } from '../lib/format'
-import { DOJ_TIERS } from '../lib/dojTiers'
+import { rowBadge } from '../lib/dojTiers'
 import Breadcrumbs from '../components/Breadcrumbs'
 import DojTipPanel, { DOJ_PORTAL, dojTipQueryKey } from '../components/DojTipPanel'
 import type { DojShortlistLead } from '../lib/types'
@@ -76,7 +76,7 @@ export default function DojFiling() {
   }, [next, queryClient])
 
   const total = snapshot?.length ?? 0
-  const tierInfo = useMemo(() => (lead ? DOJ_TIERS[lead.tier - 1] : null), [lead])
+  const tierInfo = useMemo(() => (lead ? rowBadge(lead) : null), [lead])
   const go = (i: number) => {
     setPos(Math.max(0, Math.min(i, total)))
     window.scrollTo({ top: 0 })

@@ -69,6 +69,12 @@ async def download_oig_list() -> bool:
                     "excl_type": (row.get("EXCLTYPE") or row.get("EXCL_TYPE") or "").strip(),
                     "excl_date": (row.get("EXCLDATE") or row.get("EXCL_DATE") or "").strip(),
                     "state":     (row.get("STATE") or "").strip(),
+                    "general":   (row.get("GENERAL") or "").strip(),
+                    # v3.63.0: a waiver lets a state keep paying an excluded
+                    # provider. A RESCINDED waiver shows WAIVERDATE 0 but keeps
+                    # WVRSTATE, so both are stored (see services/perse_rules).
+                    "waiver_date":  (row.get("WAIVERDATE") or "").strip(),
+                    "waiver_state": (row.get("WVRSTATE") or "").strip(),
                 }
 
         _exclusions = records

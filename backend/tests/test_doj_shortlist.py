@@ -83,7 +83,7 @@ def test_shortlist_order_and_filters(sources):
     assert all(r["npi"] not in ("1000000007", "1000000009") for r in out["leads"])
     assert out["dropped"] == {"too_old": 1, "already_doj": 2, "closed": 1, "same_company": 1,
                               "short_lapse": 1, "unreliable_status": 0}
-    assert out["cutoff_month"] == "2021-10"
+    assert out["cutoff_month"] == "2020-10"     # 6-year window (v3.63.0)
     assert all(r["npi"] != "1000000004" for r in out["leads"]), "recovery lead is not billing while barred"
     assert out["leads"][1]["doj_priority_area"] == "Hospice"
     assert out["leads"][1]["amount_label"].startswith("Payments from 2 months after the Medicare revocation")
@@ -103,3 +103,35 @@ def test_older_leads_are_recoverable_via_explicit_filter(sources):
     assert old["timeliness_status"] == "older_evidence"
     assert "does not establish Medicaid" in old["program_scope_note"]
     assert expanded["dropped"]["too_old"] == 0
+
+
+def test_older_exclusion_cases_stay_with_a_lawyer_caveat(sources, monkeypatch):
+    """v3.63.0: We Care Transportation (excluded 2010, paid $4.44M 2018-2020) was
+    silently dropped as 'too old'. Older exclusion cases now stay, flagged, and
+    sort after the cases inside the 6-year window."""
+    import core.perse_store as perse
+    base = perse.list_leads()["leads"]
+    extra = [
+        {"npi": "1000000030", "kind": "active_exclusion", "provider_name": "WE CARE TRANSPORTATION",
+         "specialty": "Transportation", "last_month": "2020-07", "paid_after_exclusion": 4_441_513},
+        {"npi": "1000000031", "kind": "excluded_servicing", "provider_name": "ROOZBEH BADII",
+         "specialty": "Internal Medicine", "last_month": "2021-12",
+         "paid_as_servicing_after_exclusion": 44_839, "caveat": "Check the biller."},
+        {"npi": "1000000032", "kind": "waived_exclusion", "provider_name": "WAIVED DOC",
+         "specialty": "Oncology", "last_month": "2022-07", "paid_after_exclusion": 900_000},
+    ]
+    monkeypatch.setattr(perse, "list_leads", lambda limit=0, **k: {"leads": base + extra})
+    out = ds.build_shortlist(TODAY)
+    by = {r["npi"]: r for r in out["leads"]}
+    old = by["1000000030"]
+    assert old["timeliness_status"] == "older_evidence"
+    assert "False Claims Act" in old["caveat"]
+    assert old["amount"] == 4_441_513
+    serv = by["1000000031"]
+    assert serv["reason"].startswith("An excluded person provided or ordered services")
+    assert serv["amount"] == 44_839 and serv["timeliness_status"] == "within_priority_window"
+    assert "1000000032" not in by, "a waived exclusion is not a DOJ lead"
+    order = [r["npi"] for r in out["leads"] if r["tier"] == 2]
+    assert order.index("1000000031") < order.index("1000000030")   # in-window first
+    # The old Medicare revocation (2020-06) is still dropped: only exclusions are kept.
+    assert "1000000001" not in by

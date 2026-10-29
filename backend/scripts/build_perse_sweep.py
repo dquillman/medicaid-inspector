@@ -155,6 +155,7 @@ def _revocation_windows(recs: list[dict]) -> list[tuple[int, int | None]]:
 
 def main() -> int:
     import duckdb
+    from services import perse_rules
     from data.duckdb_client import get_parquet_path
     from core.oig_store import load_oig_from_disk, get_oig_stats
     import core.oig_store as oig_store
@@ -258,8 +259,41 @@ def main() -> int:
         INNER JOIN t ON p.BILLING_PROVIDER_NPI_NUM = t.npi
         GROUP BY 1, 2
     """).fetchall()
+    # ── v3.63.0: a second scan by SERVICING provider. An excluded person who
+    # works inside someone else's practice never appears as a billing NPI, so
+    # the scan above cannot see them (42 CFR 1001.1901(b) bars those payments
+    # too). Drug/medication lines are summed separately for the same-name
+    # caveat in services/perse_rules.servicing_finding.
+    excl_ids = sorted(n for n in exclusions if _NPI_RE.match(str(n)))
+    xtgt = _BACKEND / "_perse_excl.csv.tmp"
+    with open(xtgt, "w", encoding="utf-8") as f:
+        f.write("npi\n")
+        f.writelines(f"{n}\n" for n in excl_ids)
+    xpath = str(xtgt).replace("\\", "/")
+    con.execute(f"CREATE TEMP TABLE x AS SELECT npi FROM read_csv_auto('{xpath}', header=true, all_varchar=true)")
+    print("scanning parquet for excluded SERVICING providers…")
+    t0 = time.time()
+    serv_rows = con.execute(f"""
+        SELECT
+            p.SERVICING_PROVIDER_NPI_NUM AS snpi,
+            p.BILLING_PROVIDER_NPI_NUM   AS bnpi,
+            p.CLAIM_FROM_MONTH           AS month,
+            SUM(p.TOTAL_PAID)            AS paid,
+            SUM(CASE WHEN p.HCPCS_CODE LIKE 'J%'
+                       OR p.HCPCS_CODE IN ('S5000', 'S5001', 'T1502', 'T1503')
+                     THEN p.TOTAL_PAID ELSE 0 END) AS drug_paid
+        FROM read_parquet('{parquet}') p
+        INNER JOIN x ON p.SERVICING_PROVIDER_NPI_NUM = x.npi
+        WHERE p.SERVICING_PROVIDER_NPI_NUM <> p.BILLING_PROVIDER_NPI_NUM
+        GROUP BY 1, 2, 3
+    """).fetchall()
+    print(f"  {len(serv_rows):,} servicing npi-biller-month rows in {time.time() - t0:.0f}s")
     con.close()
     tgt.unlink(missing_ok=True)
+    xtgt.unlink(missing_ok=True)
+    serv_by_npi: dict[str, list] = {}
+    for snpi, bnpi, month, paid, drug in serv_rows:
+        serv_by_npi.setdefault(snpi, []).append((bnpi, _ym(month), float(paid or 0), float(drug or 0)))
     print(f"  {len(rows):,} npi-month rows in {time.time() - t0:.0f}s")
 
     # ── Fold months into per-NPI totals + the after-cutoff slice.
@@ -303,24 +337,23 @@ def main() -> int:
         # leads billed only in the deactivation month itself).
         rec = exclusions.get(npi)
         if rec:
-            ed = _ym(rec.get("excl_date"))
-            after = sum(p for m, p in a["months"] if ed is not None and m > ed)
-            active = ed is not None and after > 0
+            # v3.63.0: waiver-aware (services/perse_rules.py).
+            cls = perse_rules.classify_billing_exclusion(rec, a["months"])
+            active = cls["kind"] == "active_exclusion"
             leads.append({
                 **base,
-                "kind": "active_exclusion" if active else "recovery_lead",
+                **cls,
                 "provider_name": rec.get("busname") or rec.get("name") or "",
                 "state": rec.get("state") or "",
                 "specialty": rec.get("specialty") or "",
                 "exclusion_date": rec.get("excl_date"),
                 "exclusion_type": rec.get("excl_type"),
-                "paid_after_exclusion": round(after, 2),
                 "citation": (
                     "42 CFR § 1001.1901 (payment prohibition — excluded persons); "
                     "42 U.S.C. § 1320a-7b(a) (false claims)"
                 ) if active else (
                     "42 CFR § 1001.1901 (recovery of payments made to a since-excluded provider)"
-                ),
+                ) if cls["kind"] == "recovery_lead" else "",
             })
             continue
 
@@ -416,6 +449,47 @@ def main() -> int:
                 "citation": "42 U.S.C. § 1320a-7b(a)(1) (false statements — billing while the NPI was deactivated)",
             })
 
+    # ── v3.63.0: merge the servicing findings. An NPI that already has an
+    # exclusion lead gets the servicing money added to it; one whose own
+    # billing all predates the exclusion (recovery_lead) becomes an
+    # excluded_servicing lead; one that never billed gets a new row.
+    by_npi = {r["npi"]: r for r in leads}
+    for snpi, srows in serv_by_npi.items():
+        rec = exclusions.get(snpi)
+        if not rec:
+            continue
+        fnd = perse_rules.servicing_finding(rec, srows)
+        if not fnd:
+            continue
+        cur = by_npi.get(snpi)
+        if cur is not None:
+            extra = {k: v for k, v in fnd.items() if k not in ("kind", "citation", "caveat")}
+            cur.update(extra)
+            if cur["kind"] == "recovery_lead" and fnd["kind"] == "excluded_servicing":
+                cur["kind"] = "excluded_servicing"
+                cur["citation"] = fnd["citation"]
+            if fnd["caveat"] and fnd["caveat"] not in (cur.get("caveat") or ""):
+                cur["caveat"] = ((cur.get("caveat") or "") + " " + fnd["caveat"]).strip()
+            continue
+        months = sorted({m for _, m, _, _ in srows if m})
+        row = {
+            "npi": snpi,
+            "total_paid": round(sum(p for _, _, p, _ in srows), 2),
+            "total_claims": None,
+            "total_beneficiaries": None,
+            "first_month": _fmt(months[0]) if months else None,
+            "last_month": fnd["last_servicing_month"],
+            "in_scan_cache": (snpi in scanned) if scanned is not None else None,
+            "provider_name": rec.get("busname") or rec.get("name") or "",
+            "state": rec.get("state") or "",
+            "specialty": rec.get("specialty") or "",
+            "exclusion_date": rec.get("excl_date"),
+            "exclusion_type": rec.get("excl_type"),
+            **fnd,
+        }
+        leads.append(row)
+        by_npi[snpi] = row
+
     # Practice state from NPPES, kept separate from `state` (which for a
     # paid_while_terminated lead is the TERMINATING state).
     for r in leads:
@@ -429,11 +503,13 @@ def main() -> int:
             r["state"] = npi_states[r["npi"]][0]
 
     # Rank: active per-se fraud first, then by the dollars billed while barred.
-    _ORDER = {"active_exclusion": 0, "medicare_revoked_billing": 1, "paid_while_terminated": 2,
-              "deactivated_billing": 3, "deactivated_window": 4, "recovery_lead": 5}
+    _ORDER = {"active_exclusion": 0, "excluded_servicing": 1, "medicare_revoked_billing": 2,
+              "paid_while_terminated": 3, "deactivated_billing": 4, "deactivated_window": 5,
+              "waived_exclusion": 6, "recovery_lead": 7}
     leads.sort(key=lambda r: (
         _ORDER.get(r["kind"], 9),
-        -(r.get("paid_after_exclusion") or r.get("paid_after_revocation")
+        -(r.get("paid_after_exclusion") or r.get("paid_as_servicing_after_exclusion")
+          or r.get("paid_after_revocation")
           or r.get("paid_while_terminated")
           or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0),
         -r["total_paid"],

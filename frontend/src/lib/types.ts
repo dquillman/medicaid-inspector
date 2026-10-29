@@ -1849,6 +1849,8 @@ export interface FraudBrainResponse {
 // served from the per-se sweep across the full 617k billing universe.
 export type PerSeKind =
   | 'active_exclusion'      // billed DURING an exclusion — per-se fraud
+  | 'excluded_servicing'    // an excluded person did the work; someone else billed it
+  | 'waived_exclusion'      // excluded, but OIG waived it for a state — not a DOJ lead
   | 'medicare_revoked_billing' // billed Medicaid after Medicare revoked the provider
   | 'paid_while_terminated'    // paid after the state terminated its enrollment for cause
   | 'deactivated_billing'   // billed under an NPI CMS killed
@@ -1881,6 +1883,10 @@ export interface ExcludedProvider {
   reenrollment_bar_until?: string | null
   /** Dollars paid while the provider was barred — the figure a referral needs. */
   paid_after_exclusion?: number
+  /** Paid to OTHER billers for services this excluded provider furnished or ordered. */
+  paid_as_servicing_after_exclusion?: number
+  billers?: { npi: string; paid: number }[]
+  waiver_state?: string | null
   paid_after_revocation?: number
   paid_while_terminated?: number
   terminated_since?: string

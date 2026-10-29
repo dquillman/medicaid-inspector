@@ -1,5 +1,47 @@
 # MFI Bug Log
 
+## 2026-10-29 — exclusion checks: servicing, waivers, older cases, labels (FIXED, v3.63.0)
+
+Found by re-running the exclusion checks from scratch against the raw public
+files (HHS spending parquet sha256 a998e5ae…, OIG LEIE UPDATED.csv of
+2026-10-29, NPPES API) and checking each hit by hand.
+
+### 16. Excluded people working for someone else were invisible — FIXED
+**Was:** The sweep only checked the BILLING NPI. The HHS file also records the
+SERVICING NPI, and federal rules bar payment for services an excluded person
+does or orders even as an employee or contractor (42 CFR 1001.1901(b)).
+Example: Roozbeh Badii (NPI 1205023512, excluded 2018-09) on DoctorNow claims,
+$44,839 in 2020-10..2021-12.
+**Fix:** `build_perse_sweep.py` runs a second scan by servicing NPI. New kind
+`excluded_servicing` (money split by biller), rules in `services/perse_rules.py`.
+Two warnings travel with it, because public data cannot settle them:
+a same-name warning (stronger when an excluded aide's NPI sits on drug claims —
+Ebony R. Gibson vs Ebony Lynn Gibson LPN at BrightView), and a new-owner warning
+for excluded facilities (Healthsmart Pacific's old NPI used by LA County DMH
+while College Medical Center billed the same codes).
+
+### 17. OIG waivers were ignored — FIXED
+**Was:** LEIE's WAIVERDATE / WVRSTATE were never loaded, so a provider OIG
+let a state keep paying looked like "billing while excluded". A rescinded waiver
+shows WAIVERDATE 0 but keeps WVRSTATE (Mohamed Aswad, NM, waived 2016–2022).
+**Fix:** `oig_store` keeps both columns; any waiver state makes the lead
+`waived_exclusion` — shown on the Excluded page, never on the DOJ list.
+**Note:** production's LEIE cache predates this; waivers show up after the next
+LEIE refresh and sweep rebuild.
+
+### 18. The DOJ list dropped big older exclusion cases — FIXED
+**Was:** a 5-year age cut hid We Care Transportation (excluded 2010, paid
+$4.44M in 2018–2020).
+**Fix:** the window is 6 years (OIG civil penalties). Older exclusion cases stay
+on the list, sorted after newer ones, with "Older than 6 years: only the False
+Claims Act's up-to-10-year rule may still apply. Flag it; a lawyer decides."
+
+### 19. Every tier-2 row said "Status discrepancies" — FIXED
+**Was:** a provider paid while on the exclusion list looked the same as a
+paperwork mismatch.
+**Fix:** each row shows its own badge: "Paid while excluded" (red) or "Status
+discrepancy" (amber). Tier card renamed "Paid while barred".
+
 ## 2026-07-26 — coverage: per-se leads below the scan cutoff (FIXED, v3.52.0)
 
 ### 11. The $1M scan cutoff hid provable fraud — FIXED

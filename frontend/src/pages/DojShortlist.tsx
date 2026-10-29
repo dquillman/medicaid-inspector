@@ -6,7 +6,7 @@ import { fmt } from '../lib/format'
 import Breadcrumbs from '../components/Breadcrumbs'
 import ProviderFlags from '../components/ProviderFlags'
 import type { DojShortlistLead } from '../lib/types'
-import { DOJ_TIERS as TIERS } from '../lib/dojTiers'
+import { DOJ_TIERS as TIERS, rowBadge } from '../lib/dojTiers'
 
 export default function DojShortlist() {
   const [includeOlder, setIncludeOlder] = useState(false)
@@ -116,7 +116,7 @@ export default function DojShortlist() {
             </thead>
             <tbody>
               {rows.map(l => {
-                const t = TIERS[l.tier - 1]
+                const t = rowBadge(l)
                 return (
                   <tr key={l.npi} className="border-b border-gray-900 hover:bg-gray-900/40 align-top">
                     <td className="py-2 pr-3 font-mono text-xs text-gray-500">{l.rank}</td>

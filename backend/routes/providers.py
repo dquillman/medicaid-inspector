@@ -2949,7 +2949,8 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         "not proof of fraud. No individual recipient is identified"
         + (f"; the pattern spans all {total_benes:,.0f} recipients." if total_benes else ".")
     )
-    if oig_excluded and not (_perse and _perse_lead.get("kind") == "active_exclusion"):
+    if oig_excluded and not (_perse and _perse_lead.get("kind") in (
+            "active_exclusion", "excluded_servicing", "waived_exclusion")):
         _close = ("The subject NPI also appears on the HHS-OIG LEIE exclusion list; billing "
                   "Medicaid while excluded violates 42 CFR 1001.1901. ") + _close
     if _perse:

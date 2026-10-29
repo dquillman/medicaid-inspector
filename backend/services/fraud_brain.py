@@ -372,7 +372,7 @@ def _perse_waiting_summary() -> dict:
 
     # A short NPI lapse the provider fixed (weak=True) is not "provable".
     provable = [r for r in open_rows
-                if r.get("kind") in ("active_exclusion", "medicare_revoked_billing",
+                if r.get("kind") in ("active_exclusion", "excluded_servicing", "medicare_revoked_billing",
                                      "paid_while_terminated",
                                      "deactivated_billing", "deactivated_window")
                 and not r.get("weak")]
@@ -383,7 +383,8 @@ def _perse_waiting_summary() -> dict:
         # The reason the sweep exists: these are invisible to the risk model.
         "below_cutoff": len([r for r in provable if r.get("in_scan_cache") is False]),
         "paid_while_barred": round(sum(
-            (r.get("paid_after_exclusion") or r.get("paid_after_revocation")
+            (r.get("paid_after_exclusion") or r.get("paid_as_servicing_after_exclusion")
+             or r.get("paid_after_revocation")
              or r.get("paid_while_terminated")
              or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0)
             for r in provable), 2),

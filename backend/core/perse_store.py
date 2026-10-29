@@ -31,11 +31,14 @@ _loaded = False
 # Ranked worst-first. active_exclusion is billing DURING an exclusion (per-se
 # fraud); recovery_lead is billing that predates it (a clawback, not active
 # fraud) and must never be presented as the former.
-KINDS = ("active_exclusion", "medicare_revoked_billing", "paid_while_terminated",
-         "deactivated_billing", "deactivated_window", "recovery_lead")
+KINDS = ("active_exclusion", "excluded_servicing", "medicare_revoked_billing",
+         "paid_while_terminated", "deactivated_billing", "deactivated_window",
+         "waived_exclusion", "recovery_lead")
 
 KIND_LABELS = {
     "active_exclusion": "Billing while excluded",
+    "excluded_servicing": "Excluded person did the work for another biller",
+    "waived_exclusion": "Excluded, but OIG waived it for a state",
     "medicare_revoked_billing": "Billing after Medicare revocation",
     "paid_while_terminated": "Paid after state terminated enrollment",
     "deactivated_billing": "Billing under a dead NPI",
@@ -190,6 +193,30 @@ def describe_finding(lead: dict | None) -> dict | None:
         head = (f"The provider is on the HHS-OIG exclusion list (LEIE, excluded {when}) and "
                 f"Medicaid still paid it ${amt:,.0f} for services after the exclusion.")
         label = "paid after the OIG exclusion"
+        serv = float(lead.get("paid_as_servicing_after_exclusion") or 0)
+        if serv:
+            head += (f" Another ${serv:,.0f} was paid to other billers for services this provider "
+                     "furnished or ordered after the exclusion (42 CFR 1001.1901(b)).")
+    elif kind == "excluded_servicing":
+        amt = float(lead.get("paid_as_servicing_after_exclusion") or 0)
+        when = lead.get("exclusion_date") or "?"
+        billers = ", ".join(b["npi"] for b in (lead.get("billers") or [])[:3]) or "another provider"
+        head = (f"The provider is on the HHS-OIG exclusion list (LEIE, excluded {when}), and "
+                f"Medicaid paid ${amt:,.0f} for services in later months that list this provider "
+                f"as the servicing provider, billed by {billers}. No federal health program may "
+                "pay for items or services an excluded person furnishes or orders, even as an "
+                "employee or contractor (42 CFR 1001.1901(b)).")
+        label = "paid for services by the excluded provider after the exclusion"
+    elif kind == "waived_exclusion":
+        return {
+            "headline": (f"The provider is on the HHS-OIG exclusion list (LEIE, excluded "
+                         f"{lead.get('exclusion_date') or '?'}), but OIG waived the exclusion for "
+                         f"{lead.get('waiver_state') or 'a state'}. Payments that state made inside "
+                         "the waiver were allowed; this is not billing while excluded unless the "
+                         "dates fall outside it."),
+            "amount": 0.0, "amount_label": "", "total_paid": total,
+            "citation": lead.get("citation") or "", "caveat": lead.get("caveat") or "",
+        }
     elif kind == "medicare_revoked_billing":
         amt = float(lead.get("paid_after_revocation") or 0)
         reason = (lead.get("revocation_reason") or "").strip()

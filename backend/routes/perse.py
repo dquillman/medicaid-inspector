@@ -32,7 +32,7 @@ async def summary():
 
 @router.get("")
 async def list_leads(
-    kind: str | None = Query(None, description="active_exclusion | medicare_revoked_billing | paid_while_terminated | deactivated_billing | deactivated_window | recovery_lead"),
+    kind: str | None = Query(None, description="active_exclusion | excluded_servicing | waived_exclusion | medicare_revoked_billing | paid_while_terminated | deactivated_billing | deactivated_window | recovery_lead"),
     outside_scan_cache: bool | None = Query(
         None, description="true = only leads MFI's prescan cannot see at all"),
     limit: int = Query(200, ge=1, le=2000),

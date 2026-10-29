@@ -7,11 +7,13 @@ import { threatColor } from '../lib/threat'
 import Breadcrumbs from '../components/Breadcrumbs'
 import ProviderFlags from '../components/ProviderFlags'
 
-const KIND_ORDER = ['active_exclusion', 'medicare_revoked_billing', 'paid_while_terminated', 'deactivated_billing', 'deactivated_window', 'recovery_lead'] as const
+const KIND_ORDER = ['active_exclusion', 'excluded_servicing', 'medicare_revoked_billing', 'paid_while_terminated', 'deactivated_billing', 'deactivated_window', 'waived_exclusion', 'recovery_lead'] as const
 
 /** Per-se kinds are not equally damning — colour them by how provable they are. */
 const KIND_STYLE: Record<string, string> = {
   active_exclusion:    'bg-red-950/60 border-red-800 text-red-300',
+  excluded_servicing:  'bg-red-950/60 border-red-800 text-red-300',
+  waived_exclusion:    'bg-slate-800/60 border-slate-700 text-slate-300',
   medicare_revoked_billing: 'bg-rose-950/60 border-rose-800 text-rose-300',
   paid_while_terminated: 'bg-fuchsia-950/60 border-fuchsia-800 text-fuchsia-300',
   deactivated_billing: 'bg-orange-950/60 border-orange-800 text-orange-300',
@@ -57,7 +59,8 @@ export default function Excluded() {
     const all = data?.providers ?? []
     const recovery = all.filter(p => p.kind === 'recovery_lead').length
     const weak = all.filter(p => p.weak).length
-    return { recovery, weak, provable: all.length - recovery - weak }
+    const waived = all.filter(p => p.kind === 'waived_exclusion').length
+    return { recovery, weak, waived, provable: all.length - recovery - weak - waived }
   }, [data])
 
   const kindsPresent = useMemo(() => {
@@ -91,6 +94,7 @@ export default function Excluded() {
             <p className="text-[10px] text-gray-600 mt-0.5">
               + {counts.recovery.toLocaleString()} recovery leads (billed before the bar)
               {counts.weak > 0 && <> &middot; {counts.weak.toLocaleString()} weak (short NPI lapses)</>}
+              {counts.waived > 0 && <> &middot; {counts.waived.toLocaleString()} waived by OIG for a state</>}
             </p>
           </div>
           <div className="card py-3">
@@ -184,7 +188,7 @@ export default function Excluded() {
             </thead>
             <tbody>
               {rows.map(p => {
-                const barred = p.paid_after_exclusion ?? p.paid_after_revocation ?? p.paid_while_terminated ?? p.paid_after_deactivation ?? p.paid_during_deactivation
+                const barred = p.paid_after_exclusion ?? p.paid_as_servicing_after_exclusion ?? p.paid_after_revocation ?? p.paid_while_terminated ?? p.paid_after_deactivation ?? p.paid_during_deactivation
                 const since = p.exclusion_date || p.revocation_date || p.terminated_since || p.deactivation_date || p.excl_date
                 return (
                   <tr

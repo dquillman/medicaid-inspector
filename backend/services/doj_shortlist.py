@@ -4,7 +4,7 @@ DOJ research shortlist, ordered by existing workflow tiers.
 Worked cases and administrative-status discrepancies remain screening leads.
 Neither filing nor Medicare revocation establishes Medicaid fraud. Money fields
 are payment totals, not established overpayment or recovery. The default
-five-year age preference is reversible with include_older=True; unknown periods
+six-year age preference is reversible with include_older=True; unknown periods
 remain visible. Timeliness and referral suitability require individual review.
 """
 from __future__ import annotations
@@ -14,7 +14,15 @@ import re
 
 from core import lead_quality
 
-LIMITATION_YEARS = 5
+# v3.63.0: 6 years, the OIG civil money penalty window (42 USC 1320a-7a(c)(1)).
+# It was 5, which silently dropped We Care Transportation (excluded 2010, paid
+# $4.44M in 2018-2020). Older per-se EXCLUSION cases are no longer dropped at
+# all: the False Claims Act can reach back up to 10 years (31 USC 3731(b)), so
+# they stay on the list, flagged for a lawyer.
+LIMITATION_YEARS = 6
+KEEP_OLDER_KINDS = ("active_exclusion", "excluded_servicing")
+OLDER_CAVEAT = ("Older than 6 years: only the False Claims Act's up-to-10-year rule may still "
+                "apply. Flag it; a lawyer decides.")
 
 # deactivated_window (NPI deactivated, then reactivated) needs a long gap.
 # Most gaps are paperwork lapses (median 40 days, measured 2026-10-21; Seven
@@ -25,15 +33,17 @@ LIMITATION_YEARS = 5
 MIN_WINDOW_GAP_DAYS = 180
 _PERSE_KIND_ORDER = {
     "active_exclusion": 0,
-    "medicare_revoked_billing": 1,
-    "paid_while_terminated": 2,
-    "deactivated_billing": 3,
-    "deactivated_window": 4,
+    "excluded_servicing": 1,
+    "medicare_revoked_billing": 2,
+    "paid_while_terminated": 3,
+    "deactivated_billing": 4,
+    "deactivated_window": 5,
 }
 # What the dollar figure actually counts. Different kinds count different
 # months, and a reader comparing them needs to know (audit 2026-10-28).
 _AMOUNT_LABEL = {
     "active_exclusion": "Payments in whole months after the exclusion date",
+    "excluded_servicing": "Payments to other billers for this provider's services, whole months after the exclusion",
     "medicare_revoked_billing": "Payments from 2 months after the Medicare revocation (state grace period)",
     "paid_while_terminated": "Payments in whole months with no active enrollment in any state",
     "deactivated_billing": "Payments in whole months after the NPI was deactivated",
@@ -41,6 +51,7 @@ _AMOUNT_LABEL = {
 }
 _PERSE_REASON = {
     "active_exclusion": "Billed Medicaid while on the OIG exclusion list",
+    "excluded_servicing": "An excluded person provided or ordered services billed by another provider",
     "medicare_revoked_billing": "Billed Medicaid after Medicare revoked the provider",
     "paid_while_terminated": "Paid by Medicaid after the state terminated its enrollment for cause",
     "deactivated_billing": "Billed Medicaid under a deactivated NPI",
@@ -102,7 +113,7 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
 
     def _add(tier: int, npi: str, base: dict, reason: str, amount: float,
              amount_label: str, last_month: str | None, statuses: dict,
-             extra: dict | None = None) -> None:
+             extra: dict | None = None, keep_older: bool = False) -> None:
         if npi in seen:
             return
         status = statuses.get(npi)
@@ -113,9 +124,13 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
             dropped["closed"] += 1
             return
         lm = _ym_int(last_month)
-        if not include_older and lm is not None and lm < cutoff:
+        older = lm is not None and lm < cutoff
+        if not include_older and older and not keep_older:
             dropped["too_old"] += 1
             return
+        caveat = base.get("caveat") or ""
+        if older and keep_older:
+            caveat = (caveat + " " + OLDER_CAVEAT).strip()
         p = _provider(npi)
         specialty = base.get("specialty") or p.get("specialty") or ""
         seen.add(npi)
@@ -135,7 +150,7 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
             "doj_priority_area": doj_priority(specialty)["area"] or None,
             "queue_status": status,
             "risk_score": round(float(base.get("risk_score") or p.get("risk_score") or 0), 1),
-            "caveat": base.get("caveat") or "",
+            "caveat": caveat,
             **(extra or {}),
         })
 
@@ -172,7 +187,8 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
         perse.append(r)
     statuses = get_queue_statuses([r["npi"] for r in perse])
     for r in perse:
-        barred = (r.get("paid_after_exclusion") or r.get("paid_after_revocation")
+        barred = (r.get("paid_after_exclusion") or r.get("paid_as_servicing_after_exclusion")
+                  or r.get("paid_after_revocation")
                   or r.get("paid_while_terminated")
                   or r.get("paid_after_deactivation") or r.get("paid_during_deactivation") or 0)
         _add(2, r["npi"], r, _PERSE_REASON[r["kind"]], barred, _AMOUNT_LABEL[r["kind"]],
@@ -181,7 +197,8 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
                  "independent_corroboration_required": True,
                  "program_scope_note": ("Medicare status does not establish Medicaid ineligibility; verify applicable Medicaid enrollment and effective dates."
                                         if r["kind"] == "medicare_revoked_billing" else
-                                        "Verify identity, effective dates, billing period, and applicable program eligibility before asserting a violation.")})
+                                        "Verify identity, effective dates, billing period, and applicable program eligibility before asserting a violation.")},
+             keep_older=r["kind"] in KEEP_OLDER_KINDS)
 
     # Tier 3: statistical Brain leads in DOJ priority areas.
     brain = get_top_frauds(25, False, True).get("top", [])
@@ -193,7 +210,8 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
              e.get("last_active_month"), statuses, {"brain_rank": e.get("brain_rank")})
 
     def _key(r: dict):
-        return (r["tier"], r["doj_priority_area"] is None,
+        # Inside the 6-year window first; older exclusion cases follow (v3.63.0).
+        return (r["tier"], r["timeliness_status"] == "older_evidence", r["doj_priority_area"] is None,
                 _PERSE_KIND_ORDER.get(r.get("kind", ""), 0),
                 r.get("brain_rank") or 0, -r["amount"])
 
