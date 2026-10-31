@@ -2874,17 +2874,26 @@ async def provider_oig_tip(npi: str, destination: str = "oig", save_note: bool =
         oig_excluded = bool(_is_excl(npi)[0])
     except Exception:
         oig_excluded = False
+    # The spend file gives beneficiaries per month; the provider total adds the
+    # months together, so a person seen in 12 months counts 12 times (audit 2026-10-24).
     intensity_line = (
-        f"  BILLING INTENSITY: ${rev_per_bene:,.0f} paid per beneficiary "
-        f"({total_benes:,.0f} distinct beneficiaries over the period)\n"
+        f"  BILLING INTENSITY: ${rev_per_bene:,.0f} paid per beneficiary-month "
+        f"({total_benes:,.0f} beneficiary-months summed over the period; not unique people)\n"
         if total_benes else ""
     )
+    try:
+        from core.oig_store import get_oig_stats as _oig_stats
+        _oig_loaded = bool(_oig_stats().get("loaded"))
+    except Exception:
+        _oig_loaded = False
     exclusion_block = (
         "  ** FEDERAL EXCLUSION: the subject NPI appears on the HHS-OIG LEIE exclusion\n"
         "     list. Billing Medicaid while excluded is itself a violation (42 CFR 1001.1901)\n"
         "     and the strongest indicator in this complaint. **\n\n"
         if oig_excluded else
         "  Federal exclusion check: NPI is not currently on the OIG LEIE (checked at generation).\n\n"
+        if _oig_loaded else
+        "  Federal exclusion check: the OIG list was not loaded at generation, so this was NOT checked.\n\n"
     )
 
     _perse_block = ""

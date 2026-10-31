@@ -54,3 +54,24 @@ def test_shortlist_drops_flagged_leads(monkeypatch):
     assert "1000000001" in npis
     assert not ({"1000000002", "1000000003"} & npis)
     assert out["dropped"]["unreliable_status"] == 2
+
+
+def test_exclusion_label_without_federal_record_is_flagged():
+    lead = _lead(enrollment_status="TERM - MEDICARE/MEDICAID EXCLUSION")
+    assert quality_flags(lead, federal_record=False) == ["unsupported_exclusion_label"]
+
+
+def test_exclusion_label_with_federal_record_is_kept():
+    lead = _lead(enrollment_status="TERM - MEDICARE/MEDICAID EXCLUSION")
+    assert quality_flags(lead, federal_record=True) == []
+
+
+def test_exclusion_label_unchecked_is_not_flagged():
+    # None = the OIG list was not loaded; a missing list must never drop a lead.
+    lead = _lead(enrollment_status="TERM - MEDICARE/MEDICAID EXCLUSION")
+    assert quality_flags(lead, federal_record=None) == []
+
+
+def test_other_termination_reasons_are_not_flagged_by_the_label_rule():
+    lead = _lead(enrollment_status="TERM - ONSITE REVIEW/ PROVIDER IS NO LONGER OPERATIONAL")
+    assert quality_flags(lead, federal_record=False) == []

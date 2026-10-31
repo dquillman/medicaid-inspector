@@ -59,6 +59,14 @@ _PERSE_REASON = {
 }
 
 
+def _has_federal_record(npi: str) -> bool | None:
+    """OIG exclusion or Medicare revocation on file for this NPI. None if neither list is loaded."""
+    from core import oig_store, revocation_store
+    if not oig_store.get_oig_stats().get("loaded"):
+        return None
+    return bool(oig_store.is_excluded(npi)[0] or revocation_store.is_revoked(npi))
+
+
 def _gap_days(lead: dict) -> int | None:
     try:
         a = _dt.datetime.strptime(lead["deactivation_date"], "%m/%d/%Y")
@@ -173,7 +181,7 @@ def build_shortlist(today: _dt.date | None = None, *, include_older: bool = Fals
             continue
         # Audit 2026-10-28: reversed terminations and state mismatches were the
         # biggest false leads in the top list. Dropped here, kept on /excluded.
-        if lead_quality.quality_flags(r, blind_states):
+        if lead_quality.quality_flags(r, blind_states, _has_federal_record(r["npi"])):
             dropped["unreliable_status"] += 1
             continue
         if r["kind"] == "deactivated_window":

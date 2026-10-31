@@ -51,6 +51,10 @@ _STATE_NAMES = {
 _TAXONOMY_MAP: list[tuple[tuple[str, ...], str, str]] = [
     (("hospice",), "Hospice", "Hospice"),
     (("home health", "home care"), "Home Health", "Home Health Care"),
+    # Before the DME rule: CMS labels labs "PART B SUPPLIER - INDEPENDENT CLINICAL
+    # LABORATORY", and the generic "supplier" word sent them to DME (2026-10-30).
+    (("laborator", "patholog", "clinical lab"),
+     "Doctor/ Ambulance Companies/ Clinics, etc.", "Laboratory"),
     (("durable medical", "dme", "orthotic", "prosthet", "supplier"),
      "Durable Medical Equipment", "DME Company"),
     (("pharmac", "drug"), "Prescription Drug/ Pharmacy", "Pharmacy"),
@@ -63,8 +67,6 @@ _TAXONOMY_MAP: list[tuple[tuple[str, ...], str, str]] = [
      "Doctor/ Ambulance Companies/ Clinics, etc.", "Mental Health Provider"),
     (("ambulance", "transport"),
      "Doctor/ Ambulance Companies/ Clinics, etc.", "Ambulance/Medical Transport Service"),
-    (("laborator", "patholog", "clinical lab"),
-     "Doctor/ Ambulance Companies/ Clinics, etc.", "Laboratory"),
     (("rehabilitat", "physical therap", "occupational therap", "speech"),
      "Doctor/ Ambulance Companies/ Clinics, etc.", "Rehabilitation Facility"),
     (("adult day",), "Doctor/ Ambulance Companies/ Clinics, etc.", "Adult Day Care"),
